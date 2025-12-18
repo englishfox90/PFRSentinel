@@ -19,6 +19,15 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo [2/2] Creating installer...
 
+REM Sync version from version.py to version.iss
+echo Synchronizing version...
+python update_version.py
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Version synchronization failed!
+    pause
+    exit /b 1
+)
+
 REM Check if Inno Setup is installed
 set "INNO_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if not exist "%INNO_PATH%" (
@@ -60,7 +69,7 @@ echo   Build completed successfully!
 echo ========================================
 echo.
 echo Installer location:
-echo   installer\dist\ASIOverlayWatchDog-2.0.4-setup.exe
+echo   installer\dist\ASIOverlayWatchDog-2.1.0-setup.exe
 echo.
 echo You can now:
 echo   1. Test the installer

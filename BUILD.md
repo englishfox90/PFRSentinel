@@ -136,20 +136,22 @@ Verify:
 
 ### Update Version for New Release
 
-1. Edit `version.py`:
+1. Edit `version.py` (single source of truth):
    ```python
    __version__ = "2.1.0"  # Update this line
    ```
 
-2. Edit `installer\ASIOverlayWatchDog.iss`:
-   ```pascal
-   #define MyAppVersion "2.1.0"  ; Update this line
-   ```
-
-3. Rebuild everything:
+2. Run build script (automatically syncs version to installer):
    ```batch
    build_installer.bat
    ```
+
+   The build script will:
+   - Run `update_version.py` to generate `version.iss` from `version.py`
+   - Build the executable with PyInstaller
+   - Compile the installer with Inno Setup (includes auto-generated `version.iss`)
+
+**Note**: `version.iss` is auto-generated and excluded from git (.gitignore)
 
 ## File Locations After Installation
 

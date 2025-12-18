@@ -61,6 +61,11 @@ DEFAULT_CONFIG = {
     "zwo_bayer_pattern": "BGGR",  # "RGGB", "BGGR", "GRBG", "GBRG"
     "zwo_selected_camera": 0,  # Last selected camera index
     
+    # Scheduled capture settings
+    "scheduled_capture_enabled": False,
+    "scheduled_start_time": "17:00",  # 5:00 PM
+    "scheduled_end_time": "09:00",    # 9:00 AM (next day for overnight captures)
+    
     # White Balance configuration
     "white_balance": {
         "mode": "asi_auto",  # "asi_auto" | "manual" | "gray_world"

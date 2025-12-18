@@ -201,7 +201,10 @@ class CameraController:
                 auto_wb=False,  # Legacy parameter, WB now controlled by wb_mode
                 wb_mode=wb_config.get('mode', 'asi_auto'),
                 wb_config=wb_config,
-                bayer_pattern=bayer_pattern
+                bayer_pattern=bayer_pattern,
+                scheduled_capture_enabled=self.app.config.get('scheduled_capture_enabled', False),
+                scheduled_start_time=self.app.config.get('scheduled_start_time', '17:00'),
+                scheduled_end_time=self.app.config.get('scheduled_end_time', '09:00')
             )
             
             # Set target brightness

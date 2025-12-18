@@ -1,9 +1,10 @@
 ; Inno Setup Script for ASIOverlayWatchDog
 ; Creates a Windows installer that supports upgrades
 ; Requires: Inno Setup 6.0 or later (https://jrsoftware.org/isinfo.php)
+; Version is automatically synced from ../version.py by build scripts
 
 #define MyAppName "ASIOverlayWatchDog"
-#define MyAppVersion "2.0.4"
+#include "..\version.iss"
 #define MyAppPublisher "Paul Fox-Reeks"
 #define MyAppExeName "ASIOverlayWatchDog.exe"
 #define MyAppAssocName MyAppName + " File"
@@ -46,7 +47,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; Source files from PyInstaller build
-Source: "dist\ASIOverlayWatchDog\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\ASIOverlayWatchDog\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

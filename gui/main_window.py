@@ -405,6 +405,25 @@ Supports:
         """Delegate to camera_controller"""
         self.camera_controller.on_auto_exposure_toggle()
     
+    def on_scheduled_capture_toggle(self):
+        """Enable/disable scheduled capture time inputs"""
+        enabled = self.scheduled_capture_var.get()
+        state = 'normal' if enabled else 'disabled'
+        self.schedule_start_entry.config(state=state)
+        self.schedule_end_entry.config(state=state)
+        
+        # If camera is running, update its settings
+        if hasattr(self.camera_controller, 'zwo_camera') and self.camera_controller.zwo_camera:
+            self.camera_controller.zwo_camera.scheduled_capture_enabled = enabled
+            self.camera_controller.zwo_camera.scheduled_start_time = self.schedule_start_var.get()
+            self.camera_controller.zwo_camera.scheduled_end_time = self.schedule_end_var.get()
+            
+            status = "enabled" if enabled else "disabled"
+            if enabled:
+                app_logger.info(f"Scheduled capture {status}: {self.schedule_start_var.get()} - {self.schedule_end_var.get()}")
+            else:
+                app_logger.info(f"Scheduled capture {status}")
+    
     def on_wb_mode_change(self):
         """Handle white balance mode change - show/hide appropriate controls"""
         mode = self.wb_mode_var.get()
@@ -664,6 +683,11 @@ Supports:
         interval = self.config.get('zwo_interval', self.config.get('zwo_capture_interval', 5.0))
         self.interval_var.set(interval)
         
+        # Load scheduled capture settings
+        self.scheduled_capture_var.set(self.config.get('scheduled_capture_enabled', False))
+        self.schedule_start_var.set(self.config.get('scheduled_start_time', '17:00'))
+        self.schedule_end_var.set(self.config.get('scheduled_end_time', '09:00'))
+        
         self.auto_exposure_var.set(self.config.get('zwo_auto_exposure', False))
         
         # Handle max exposure - convert from ms to seconds for new UI
@@ -678,6 +702,7 @@ Supports:
         self.camera_controller.on_auto_exposure_toggle()
         self.on_auto_brightness_toggle()
         self.on_wb_mode_change()  # Set initial WB mode UI state
+        self.on_scheduled_capture_toggle()  # Set initial scheduled capture UI state
         
         # Update mode button styling
         self.capture_tab.update_mode_button_styling()
@@ -793,6 +818,11 @@ Supports:
         self.config.set('zwo_interval', self.interval_var.get())
         self.config.set('zwo_auto_exposure', self.auto_exposure_var.get())
         
+        # Save scheduled capture settings
+        self.config.set('scheduled_capture_enabled', self.scheduled_capture_var.get())
+        self.config.set('scheduled_start_time', self.schedule_start_var.get())
+        self.config.set('scheduled_end_time', self.schedule_end_var.get())
+        
         # Max exposure is now in seconds in UI
         max_exp_value = self.max_exposure_var.get()
         self.config.set('zwo_max_exposure_ms', max_exp_value * 1000.0)
@@ -838,6 +868,14 @@ Supports:
     def apply_settings(self):
         """Apply all settings"""
         self.save_config()
+        
+        # Update running camera's schedule settings if active
+        if hasattr(self.camera_controller, 'zwo_camera') and self.camera_controller.zwo_camera:
+            self.camera_controller.zwo_camera.scheduled_capture_enabled = self.scheduled_capture_var.get()
+            self.camera_controller.zwo_camera.scheduled_start_time = self.schedule_start_var.get()
+            self.camera_controller.zwo_camera.scheduled_end_time = self.schedule_end_var.get()
+            app_logger.info(f"Updated camera scheduled capture settings: enabled={self.scheduled_capture_var.get()}, window={self.schedule_start_var.get()}-{self.schedule_end_var.get()}")
+        
         # Apply output mode changes (start/stop servers as needed)
         self.apply_output_mode()
         messagebox.showinfo("Success", "Settings applied and saved")
