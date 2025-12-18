@@ -38,6 +38,9 @@ config.json
 *.log.*
 logs/
 
+# Auto-generated version files
+version.iss
+
 # Build Artifacts
 dist/
 build/

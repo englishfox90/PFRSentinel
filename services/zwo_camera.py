@@ -16,7 +16,9 @@ class ZWOCamera:
     def __init__(self, sdk_path=None, camera_index=0, exposure_sec=1.0, gain=100,
                  white_balance_r=75, white_balance_b=99, offset=20, flip=0,
                  auto_exposure=False, max_exposure_sec=30.0, auto_wb=False,
-                 wb_mode='asi_auto', wb_config=None, bayer_pattern='BGGR'):
+                 wb_mode='asi_auto', wb_config=None, bayer_pattern='BGGR',
+                 scheduled_capture_enabled=False, scheduled_start_time="17:00",
+                 scheduled_end_time="09:00"):
         self.sdk_path = sdk_path
         self.camera_index = camera_index
         self.camera = None
@@ -43,6 +45,11 @@ class ZWOCamera:
         self.offset = offset
         self.bayer_pattern = bayer_pattern  # RGGB, BGGR, GRBG, GBRG
         
+        # Scheduled capture settings
+        self.scheduled_capture_enabled = scheduled_capture_enabled
+        self.scheduled_start_time = scheduled_start_time  # Format: "HH:MM"
+        self.scheduled_end_time = scheduled_end_time      # Format: "HH:MM"
+        
         # Exposure tracking for UI
         self.exposure_start_time = None
         self.exposure_remaining = 0.0
@@ -52,6 +59,39 @@ class ZWOCamera:
         if self.on_log_callback:
             self.on_log_callback(message)
         print(message)
+    
+    def is_within_scheduled_window(self):
+        """
+        Check if current time is within the scheduled capture window.
+        Handles overnight captures (e.g., 17:00 - 09:00).
+        Returns True if scheduled capture is disabled or if within window.
+        """
+        if not self.scheduled_capture_enabled:
+            return True  # Always capture if scheduling is disabled
+        
+        try:
+            from datetime import datetime
+            now = datetime.now()
+            current_time = now.time()
+            
+            # Parse start and end times
+            start_hour, start_min = map(int, self.scheduled_start_time.split(':'))
+            end_hour, end_min = map(int, self.scheduled_end_time.split(':'))
+            
+            start_time = now.replace(hour=start_hour, minute=start_min, second=0, microsecond=0).time()
+            end_time = now.replace(hour=end_hour, minute=end_min, second=0, microsecond=0).time()
+            
+            # Check if this is an overnight window (e.g., 17:00 - 09:00)
+            if start_time > end_time:
+                # Overnight: capture if after start OR before end
+                return current_time >= start_time or current_time <= end_time
+            else:
+                # Same day: capture if between start and end
+                return start_time <= current_time <= end_time
+                
+        except Exception as e:
+            self.log(f"Error checking scheduled window: {e}")
+            return True  # Default to allowing capture on error
     
     def initialize_sdk(self):
         """Initialize the ZWO ASI SDK"""
@@ -377,13 +417,33 @@ class ZWOCamera:
             raise
     
     def capture_loop(self):
-        """Background capture loop with automatic recovery"""
+        """Background capture loop with automatic recovery and scheduled capture support"""
         self.log("Capture loop started")
         consecutive_errors = 0
         max_reconnect_attempts = 5
+        last_schedule_log = None  # Track last schedule status to avoid log spam
         
         while self.is_capturing:
             try:
+                # Check if we're within the scheduled capture window
+                within_window = self.is_within_scheduled_window()
+                
+                if not within_window:
+                    # Outside scheduled window - skip capture but keep loop running
+                    current_status = "outside_window"
+                    if last_schedule_log != current_status:
+                        self.log(f"Outside scheduled capture window ({self.scheduled_start_time} - {self.scheduled_end_time}). Waiting...")
+                        last_schedule_log = current_status
+                    
+                    # Sleep and continue loop without capturing
+                    time.sleep(self.capture_interval)
+                    continue
+                else:
+                    # Within window - log transition if needed
+                    if last_schedule_log == "outside_window":
+                        self.log(f"Entered scheduled capture window ({self.scheduled_start_time} - {self.scheduled_end_time}). Resuming captures.")
+                        last_schedule_log = "inside_window"
+                
                 # Check if camera is still connected
                 if not self.camera:
                     raise Exception("Camera disconnected")

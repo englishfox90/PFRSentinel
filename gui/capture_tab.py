@@ -372,6 +372,48 @@ class CaptureTab:
         tk.Label(interval_row, text="seconds", font=('Segoe UI', 7),
                 bg=COLORS['bg_primary'], fg=COLORS['text_muted']).pack(side='left')
         
+        # Scheduled Capture section
+        schedule_section = tk.Frame(left_col, bg=COLORS['bg_primary'])
+        schedule_section.pack(fill='x', pady=(0, 12))
+        
+        # Checkbox
+        self.app.scheduled_capture_var = tk.BooleanVar(value=False)
+        schedule_check = ttk.Checkbutton(schedule_section, text="⏰ Scheduled Capture",
+                                        variable=self.app.scheduled_capture_var,
+                                        command=self.app.on_scheduled_capture_toggle,
+                                        bootstyle="info-round-toggle")
+        schedule_check.pack(anchor='w', pady=(0, 8))
+        
+        # Time range row
+        time_frame = tk.Frame(schedule_section, bg=COLORS['bg_primary'])
+        time_frame.pack(fill='x')
+        
+        tk.Label(time_frame, text="Active:", font=('Segoe UI', 9),
+                bg=COLORS['bg_primary'], fg=COLORS['text_secondary'],
+                width=10, anchor='w').pack(side='left', padx=(0, 12))
+        
+        self.app.schedule_start_var = tk.StringVar(value="17:00")
+        start_entry = ttk.Entry(time_frame, textvariable=self.app.schedule_start_var,
+                               font=('Segoe UI', 9), style='Dark.TEntry',
+                               width=6)
+        start_entry.pack(side='left', padx=(0, 6))
+        
+        tk.Label(time_frame, text="to", font=('Segoe UI', 9),
+                bg=COLORS['bg_primary'], fg=COLORS['text_muted']).pack(side='left', padx=(0, 6))
+        
+        self.app.schedule_end_var = tk.StringVar(value="09:00")
+        end_entry = ttk.Entry(time_frame, textvariable=self.app.schedule_end_var,
+                             font=('Segoe UI', 9), style='Dark.TEntry',
+                             width=6)
+        end_entry.pack(side='left', padx=(0, 8))
+        
+        tk.Label(time_frame, text="(HH:MM, 24hr)", font=('Segoe UI', 7),
+                bg=COLORS['bg_primary'], fg=COLORS['text_muted']).pack(side='left')
+        
+        # Store entry widgets for enable/disable
+        self.app.schedule_start_entry = start_entry
+        self.app.schedule_end_entry = end_entry
+        
         # Offset
         offset_row = tk.Frame(left_col, bg=COLORS['bg_primary'])
         offset_row.pack(fill='x', pady=(0, 12))
