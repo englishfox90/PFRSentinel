@@ -23,8 +23,8 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-; Output directory for installer
-OutputDir=installer\dist
+; Output directory for installer (absolute path to avoid nesting)
+OutputDir=..\installer\dist
 OutputBaseFilename={#MyAppName}-{#MyAppVersion}-setup
 ; Compression
 Compression=lzma
@@ -72,10 +72,11 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpFinished then
   begin
-    // Show info message about log location
-    MsgBox('Log files are stored in:' + #13#10 + 
-           ExpandConstant('{localappdata}\ASIOverlayWatchDog\Logs') + #13#10#13#10 +
-           'Logs are automatically rotated daily and kept for 7 days.',
+    // Show info message about data locations
+    MsgBox('User data is stored in:' + #13#10 + 
+           ExpandConstant('{localappdata}\ASIOverlayWatchDog\') + #13#10#13#10 +
+           '- config.json (preserved during upgrades)' + #13#10 +
+           '- Logs\ (rotated daily, kept for 7 days)',
            mbInformation, MB_OK);
   end;
 end;
@@ -129,7 +130,9 @@ begin
   begin
     if (IsUpgrade) then
     begin
-      UnInstallOldVersion;
+      // Don't uninstall - just overwrite files to preserve user data
+      // Config.json is now stored in %LOCALAPPDATA%\ASIOverlayWatchDog\
+      // so it won't be affected by upgrades anyway
     end;
   end;
 end;

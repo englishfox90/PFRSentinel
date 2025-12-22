@@ -371,7 +371,8 @@ def add_text_overlay(img, draw, overlay, metadata):
         anchor = overlay.get('anchor', 'Bottom-Left')
         x_offset = overlay.get('offset_x', 10)  # Match config key
         y_offset = overlay.get('offset_y', 10)  # Match config key
-        draw_background = overlay.get('background', True)
+        background_enabled = overlay.get('background_enabled', False)
+        background_color = overlay.get('background_color', 'black')
         
         # Load font (use default if custom font loading fails)
         try:
@@ -392,8 +393,8 @@ def add_text_overlay(img, draw, overlay, metadata):
         # Calculate position
         x, y = calculate_position(img.size, (text_width, text_height), anchor, x_offset, y_offset)
         
-        # Draw solid background box if enabled
-        if draw_background:
+        # Draw background box if enabled and not transparent
+        if background_enabled and background_color.lower() != 'transparent':
             padding = 5
             # Get bbox at actual drawing position for accurate background box
             text_bbox = draw.textbbox((x, y), text, font=font)
@@ -403,7 +404,9 @@ def add_text_overlay(img, draw, overlay, metadata):
                 text_bbox[2] + padding,  # right
                 text_bbox[3] + padding   # bottom (includes descenders)
             ]
-            draw.rectangle(box_coords, fill=(0, 0, 0))
+            # Parse background color (supports color names and hex)
+            bg_color = parse_color(background_color)
+            draw.rectangle(box_coords, fill=bg_color)
         
         # Draw text
         draw.text((x, y), text, fill=color, font=font)

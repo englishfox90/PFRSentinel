@@ -10,6 +10,7 @@ from services.logger import app_logger
 from services.web_output import WebOutputServer
 from services.rtsp_output import RTSPStreamServer
 from services.discord_alerts import DiscordAlerts
+from .theme import SPACING
 
 
 class OutputManager:
@@ -48,6 +49,12 @@ class OutputManager:
         
         # Hide copy button by default
         self.app.output_mode_copy_btn.pack_forget()
+        
+        # Show/hide file settings based on mode
+        if mode == 'file':
+            self.app.file_frame.pack(fill='x', pady=(0, SPACING['section_gap']))
+        else:
+            self.app.file_frame.pack_forget()
         
         # Start server for selected mode
         if mode == 'webserver':
