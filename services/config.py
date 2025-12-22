@@ -17,8 +17,8 @@ DEFAULT_CONFIG = {
     "watch_recursive": True,
     
     # Output settings
-    "output_directory": get_exe_dir(),  # Save in the same directory as the EXE
-    "filename_pattern": "Latest_image",
+    "output_directory": os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog', 'Images'),
+    "filename_pattern": "latestImage",
     "output_format": "jpg",
     "jpg_quality": 85,
     "resize_percent": 85,
@@ -122,7 +122,23 @@ DEFAULT_CONFIG = {
 }
 
 class Config:
-    def __init__(self, config_path="config.json"):
+    def __init__(self, config_path=None):
+        # Store config in user data directory for persistence across upgrades
+        if config_path is None:
+            user_data_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog')
+            os.makedirs(user_data_dir, exist_ok=True)
+            config_path = os.path.join(user_data_dir, 'config.json')
+            
+            # Migrate old config.json from app directory if it exists
+            old_config_path = 'config.json'
+            if not os.path.exists(config_path) and os.path.exists(old_config_path):
+                try:
+                    import shutil
+                    shutil.copy2(old_config_path, config_path)
+                    print(f"Migrated config from {old_config_path} to {config_path}")
+                except Exception as e:
+                    print(f"Warning: Could not migrate old config: {e}")
+        
         self.config_path = config_path
         self.data = self.load()
     
