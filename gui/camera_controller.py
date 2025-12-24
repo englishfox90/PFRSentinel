@@ -73,6 +73,7 @@ class CameraController:
                 app_logger.info(f"Enumerating {num_cameras} camera(s)...")
                 camera_list = []
                 for i in range(num_cameras):
+                    cam = None
                     try:
                         app_logger.debug(f"Opening camera {i} to retrieve properties...")
                         cam = asi.Camera(i)
@@ -82,10 +83,22 @@ class CameraController:
                         app_logger.info(f"✓ Camera {i}: {camera_name}")
                         app_logger.debug(f"  Resolution: {info['MaxWidth']}x{info['MaxHeight']}, Pixel Size: {info['PixelSize']}µm")
                     except Exception as cam_error:
-                        app_logger.warning(f"⚠ Error accessing camera {i}: {cam_error}")
-                        import traceback
-                        app_logger.debug(f"Stack trace: {traceback.format_exc()}")
-                        continue
+                        # Check if camera is already in use by another application
+                        if "in use" in str(cam_error).lower() or "already opened" in str(cam_error).lower():
+                            app_logger.info(f"ℹ Camera {i} is already in use by another application (skipping)")
+                        else:
+                            app_logger.warning(f"⚠ Error accessing camera {i}: {cam_error}")
+                            import traceback
+                            app_logger.debug(f"Stack trace: {traceback.format_exc()}")
+                    finally:
+                        # CRITICAL: Always close camera immediately after reading properties
+                        # This prevents interfering with cameras already connected to other apps
+                        if cam is not None:
+                            try:
+                                cam.close()
+                                app_logger.debug(f"Camera {i} closed safely")
+                            except Exception as close_error:
+                                app_logger.debug(f"Note: Camera {i} close returned: {close_error}")
                 
                 if camera_list:
                     app_logger.info(f"✓ Camera detection complete: {len(camera_list)} camera(s) found")
