@@ -404,6 +404,20 @@ class ZWOCamera:
                     self.log("Stopping active capture before disconnect...")
                     self.stop_capture()
                 
+                # Abort any in-progress exposure (snapshot mode)
+                # SDK documentation: Must call ASIStopExposure() before closing camera
+                # if an exposure is in progress, otherwise the camera may hang
+                try:
+                    if self.exposure_start_time is not None:
+                        self.log("Aborting in-progress exposure...")
+                        self.camera.stop_exposure()
+                        self.exposure_start_time = None
+                        self.exposure_remaining = 0.0
+                        self.log("Exposure aborted")
+                except Exception as e:
+                    # Camera may not be in exposure state - this is expected
+                    self.log(f"Exposure stop skipped (no exposure active): {e}")
+                
                 # Note: We use snapshot mode (start_exposure/get_data_after_exposure)
                 # NOT video mode (start_video_capture/get_video_data), so no need to stop video capture
                 # Calling stop_video_capture when not in video mode can cause undefined behavior
@@ -423,6 +437,8 @@ class ZWOCamera:
             finally:
                 # Always clear camera reference even if close failed
                 self.camera = None
+                self.exposure_start_time = None
+                self.exposure_remaining = 0.0
                 self.log("Camera reference cleared")
     
     def capture_single_frame(self):
@@ -619,6 +635,15 @@ class ZWOCamera:
                                     # Temporarily stop capturing flag
                                     was_capturing = self.is_capturing
                                     self.is_capturing = False
+                                    
+                                    # Abort any in-progress exposure before disconnect
+                                    try:
+                                        if self.exposure_start_time is not None:
+                                            self.camera.stop_exposure()
+                                            self.exposure_start_time = None
+                                            self.exposure_remaining = 0.0
+                                    except Exception as exp_err:
+                                        pass  # No exposure active
                                     
                                     # Disconnect camera gracefully
                                     # Note: We use snapshot mode, not video mode - no need to stop_video_capture
