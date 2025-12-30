@@ -7,13 +7,14 @@ from logging_config import setup_logging
 setup_logging()
 
 from gui.main_window import main
+from app_config import APP_DISPLAY_NAME, APP_SUBTITLE
 import argparse
 import sys
 
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description='ASI Overlay WatchDog - Astrophotography image processor',
+        description=f'{APP_DISPLAY_NAME} - {APP_SUBTITLE}',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   python main.py                    # Normal GUI mode

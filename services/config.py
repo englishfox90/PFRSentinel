@@ -4,6 +4,7 @@ Configuration management for AllSky Overlay App
 import json
 import os
 from utils_paths import resource_path, get_exe_dir
+from app_config import APP_DATA_FOLDER, DEFAULT_OUTPUT_SUBFOLDER
 
 DEFAULT_CONFIG = {
     # Window settings
@@ -17,7 +18,7 @@ DEFAULT_CONFIG = {
     "watch_recursive": True,
     
     # Output settings
-    "output_directory": os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog', 'Images'),
+    "output_directory": os.path.join(os.getenv('LOCALAPPDATA'), APP_DATA_FOLDER, DEFAULT_OUTPUT_SUBFOLDER),
     "filename_pattern": "latestImage",
     "output_format": "jpg",
     "jpg_quality": 85,
@@ -134,7 +135,7 @@ class Config:
     def __init__(self, config_path=None):
         # Store config in user data directory for persistence across upgrades
         if config_path is None:
-            user_data_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog')
+            user_data_dir = os.path.join(os.getenv('LOCALAPPDATA'), APP_DATA_FOLDER)
             os.makedirs(user_data_dir, exist_ok=True)
             config_path = os.path.join(user_data_dir, 'config.json')
             

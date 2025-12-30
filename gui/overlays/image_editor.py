@@ -265,9 +265,8 @@ class ImageOverlayEditor:
                 # Get app data directory
                 try:
                     import appdirs
-                    app_name = "ASIOverlayWatchDog"
-                    app_author = "ASI"
-                    data_dir = appdirs.user_data_dir(app_name, app_author)
+                    from app_config import APP_NAME, APP_AUTHOR
+                    data_dir = appdirs.user_data_dir(APP_NAME, APP_AUTHOR)
                 except ImportError:
                     # Fallback if appdirs not available - use local directory
                     print("Warning: appdirs module not found, using local storage")
