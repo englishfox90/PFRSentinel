@@ -139,7 +139,12 @@ class Config:
             os.makedirs(user_data_dir, exist_ok=True)
             config_path = os.path.join(user_data_dir, 'config.json')
             
-            # Migrate old config.json from app directory if it exists
+            # One-time migration from old ASIOverlayWatchDog location
+            old_appdata_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog')
+            if os.path.exists(old_appdata_dir) and not os.path.exists(config_path):
+                self._migrate_from_old_location(old_appdata_dir, user_data_dir, config_path)
+            
+            # Migrate old config.json from app directory if it exists (legacy)
             old_config_path = 'config.json'
             if not os.path.exists(config_path) and os.path.exists(old_config_path):
                 try:
@@ -151,6 +156,52 @@ class Config:
         
         self.config_path = config_path
         self.data = self.load()
+    
+    def _migrate_from_old_location(self, old_dir, new_dir, new_config_path):
+        """Migrate config and data from old ASIOverlayWatchDog location to new PFR\\Sentinel location"""
+        import shutil
+        
+        print(f"Migrating data from {old_dir} to {new_dir}...")
+        
+        try:
+            # Migrate config.json
+            old_config = os.path.join(old_dir, 'config.json')
+            if os.path.exists(old_config):
+                shutil.copy2(old_config, new_config_path)
+                print(f"  ✓ Migrated config.json")
+            
+            # Migrate overlay_images folder if it exists
+            old_overlay_images = os.path.join(old_dir, 'overlay_images')
+            new_overlay_images = os.path.join(new_dir, 'overlay_images')
+            if os.path.exists(old_overlay_images) and not os.path.exists(new_overlay_images):
+                shutil.copytree(old_overlay_images, new_overlay_images)
+                print(f"  ✓ Migrated overlay_images/")
+            
+            # Migrate weather_icons folder if it exists
+            old_weather_icons = os.path.join(old_dir, 'weather_icons')
+            new_weather_icons = os.path.join(new_dir, 'weather_icons')
+            if os.path.exists(old_weather_icons) and not os.path.exists(new_weather_icons):
+                shutil.copytree(old_weather_icons, new_weather_icons)
+                print(f"  ✓ Migrated weather_icons/")
+            
+            # Don't migrate Images/ folder (can be large) or Logs/ (not critical)
+            # User can manually copy if needed
+            
+            # Remove old directory after successful migration
+            try:
+                shutil.rmtree(old_dir)
+                print(f"  ✓ Removed old directory: {old_dir}")
+            except Exception as e:
+                print(f"  ⚠ Could not remove old directory (may be in use): {e}")
+            
+            print(f"Migration complete! New location: {new_dir}")
+            
+        except Exception as e:
+            print(f"Warning: Migration failed: {e}")
+            print("You may need to manually copy config.json from:")
+            print(f"  {old_dir}")
+            print(f"to:")
+            print(f"  {new_dir}")
     
     def load(self):
         """Load configuration from JSON file or return defaults"""
