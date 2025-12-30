@@ -4,27 +4,28 @@ Change these values when renaming the application
 """
 
 # Application Identity
-APP_NAME = "ASIOverlayWatchDog"
-APP_DISPLAY_NAME = "ASI Overlay WatchDog"
+APP_NAME = "PFRSentinel"  # Internal name (no spaces, used for paths)
+APP_DISPLAY_NAME = "PFR Sentinel"  # Display name (shown to users)
+APP_SUBTITLE = "Live Camera Monitoring & Overlay System for Observatories"
 APP_DESCRIPTION = "Astrophotography image overlay and monitoring application"
 APP_AUTHOR = "Paul Fox-Reeks"
-APP_URL = "https://github.com/englishfox90/ASIOverlayWatchdog"
+APP_URL = "https://github.com/englishfox90/PFR-Sentinel"
 
 # Directory names (used for AppData paths)
-APP_DATA_FOLDER = APP_NAME  # %LOCALAPPDATA%\{APP_DATA_FOLDER}
+APP_DATA_FOLDER = "PFRSentinel"  # %LOCALAPPDATA%\PFRSentinel
 
 # File names
 MAIN_CONFIG_FILE = "config.json"
-LOG_FILE = "watchdog.log"
+LOG_FILE = "sentinel.log"
 
 # Default paths
 DEFAULT_OUTPUT_SUBFOLDER = "Images"
 
-# SDK/Driver info
+# SDK/Driver info (keep ASI reference - it's the actual SDK name)
 ZWO_SDK_DLL = "ASICamera2.dll"
 
-# Build identifiers
-INNO_SETUP_APP_ID = "{{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"  # Generate new GUID if renaming
+# Build identifiers - New GUID for renamed app
+INNO_SETUP_APP_ID = "{{7F8E9A0B-1C2D-3E4F-5A6B-7C8D9E0F1A2B}"
 
 
 def get_window_title(version: str = None) -> str:

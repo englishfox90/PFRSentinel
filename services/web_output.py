@@ -130,7 +130,7 @@ class ImageHTTPHandler(BaseHTTPRequestHandler):
             uptime = int(time.time() - self.server_start_time)
         
         status = {
-            "server": "ASI Overlay WatchDog HTTP Server",
+            "server": "PFR Sentinel HTTP Server",
             "status": "running",
             "uptime_seconds": uptime,
             "images_served": self.image_count,

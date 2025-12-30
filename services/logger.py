@@ -8,6 +8,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from app_config import APP_NAME, APP_DATA_FOLDER, LOG_FILE
 
 
 class AppLogger:
@@ -25,10 +26,10 @@ class AppLogger:
     
     def _get_log_directory(self):
         """Get the log directory path (APPDATA or fallback)"""
-        # Try %APPDATA%\ASIOverlayWatchDog\logs first
+        # Try %APPDATA%\{APP_DATA_FOLDER}\logs first
         appdata = os.getenv('APPDATA')
         if appdata:
-            log_dir = Path(appdata) / 'ASIOverlayWatchDog' / 'logs'
+            log_dir = Path(appdata) / APP_DATA_FOLDER / 'logs'
         else:
             # Fallback: ./logs relative to executable or script
             if getattr(sys, 'frozen', False):
@@ -54,7 +55,7 @@ class AppLogger:
             third_party_logger.propagate = False  # Don't let messages bubble up
         
         # Create dedicated logger for our app (not root logger)
-        self.file_logger = logging.getLogger('ASIOverlayWatchDog')
+        self.file_logger = logging.getLogger(APP_NAME)
         self.file_logger.setLevel(logging.DEBUG)
         
         # Prevent propagation to root logger to avoid duplicate messages
@@ -66,7 +67,7 @@ class AppLogger:
             handler.close()
         
         # Always create our own file handler
-        log_file = self.log_dir / 'watchdog.log'
+        log_file = self.log_dir / LOG_FILE
         handler = logging.handlers.TimedRotatingFileHandler(
             log_file,
             when='midnight',

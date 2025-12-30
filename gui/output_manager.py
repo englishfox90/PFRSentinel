@@ -110,7 +110,7 @@ class OutputManager:
                 "Steps to enable RTSP:\n"
                 "1. Download ffmpeg from https://ffmpeg.org/download.html\n"
                 "2. Extract and add ffmpeg.exe to your system PATH\n"
-                "3. Restart ASIOverlayWatchDog\n\n"
+                "3. Restart PFR Sentinel\n\n"
                 "Check the Logs tab for more details."
             )
     
@@ -249,7 +249,7 @@ class OutputManager:
         # Send test message
         success = self.discord_alerts.send_discord_message(
             "🧪 Test Alert",
-            "This is a test message from ASIOverlayWatchDog. If you see this, your webhook is configured correctly!",
+            "This is a test message from PFR Sentinel. If you see this, your webhook is configured correctly!",
             level="info"
         )
         
@@ -294,7 +294,7 @@ class OutputManager:
         
         # Send test alert
         success = self.discord_alerts.send_discord_message(
-            "🧪 Test Alert from ASIOverlayWatchDog",
+            "🧪 Test Alert from PFR Sentinel",
             f"""**Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 This is a test alert with your current configuration.""",

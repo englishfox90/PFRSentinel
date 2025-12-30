@@ -6,6 +6,7 @@ import json
 import requests
 from datetime import datetime
 from .logger import app_logger
+from app_config import APP_DISPLAY_NAME
 
 
 class DiscordAlerts:
@@ -56,7 +57,7 @@ class DiscordAlerts:
         
         try:
             # Prepare username and avatar
-            username = discord_config.get('username_override', '') or "ASIOverlayWatchDog"
+            username = discord_config.get('username_override', '') or APP_DISPLAY_NAME
             avatar_url = discord_config.get('avatar_url', '')
             
             # Build embed
@@ -172,7 +173,7 @@ class DiscordAlerts:
 Ready to process images."""
         
         return self.send_discord_message(
-            "🚀 ASIOverlayWatchDog Started",
+            f"🚀 {APP_DISPLAY_NAME} Started",
             description,
             level="success"
         )
@@ -189,7 +190,7 @@ Ready to process images."""
 Application has been closed."""
         
         return self.send_discord_message(
-            "🛑 ASIOverlayWatchDog Stopped",
+            f"🛑 {APP_DISPLAY_NAME} Stopped",
             description,
             level="info"
         )
@@ -227,7 +228,7 @@ Application has been closed."""
         # Get stats
         description = f"""**Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-Latest sky capture from ASIOverlayWatchDog."""
+Latest sky capture from {APP_DISPLAY_NAME}."""
         
         # Determine image path
         image_to_send = None

@@ -33,10 +33,10 @@ from .theme import COLORS, FONTS, SPACING
 from . import theme
 from .settings_manager import SettingsManager
 from version import __version__
+from app_config import APP_DISPLAY_NAME, APP_AUTHOR
 
 # Application metadata
 APP_VERSION = __version__
-APP_AUTHOR = "Paul Fox-Reeks"
 
 
 class ModernOverlayApp:
@@ -44,7 +44,7 @@ class ModernOverlayApp:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("AllSky Overlay Watchdog - ZWO Camera Edition")
+        self.root.title(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
         
         # Set application icon
         try:

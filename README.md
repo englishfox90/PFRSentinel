@@ -1,6 +1,6 @@
-# ASIOverlayWatchDog - AllSky Camera Image Processor
+# PFR Sentinel
 
-**Professional astrophotography tool for automated image processing with ZWO ASI camera support**
+**Live Camera Monitoring & Overlay System for Observatories**
 
 A modern, production-ready application that either watches directories for new images or captures directly from ZWO ASI cameras, adding customizable metadata overlays and serving output through multiple channels (file, web server, or RTSP streaming).
 
@@ -21,7 +21,7 @@ A modern, production-ready application that either watches directories for new i
 
 ## Overview
 
-**ASIOverlayWatchDog** is designed for 24/7 unattended astrophotography operations. It provides two distinct capture modes:
+**PFR Sentinel** is designed for 24/7 unattended astrophotography operations. It provides two distinct capture modes:
 
 1. **Directory Watch Mode**: Monitors a folder for new images (from any camera/software), reads sidecar metadata files, and adds overlays
 2. **ZWO Camera Mode**: Captures directly from ZWO ASI cameras with auto-exposure, debayering, and real-time processing
@@ -31,7 +31,7 @@ The application features multiple output modes:
 - **Webserver Mode**: Serve latest image via HTTP (http://127.0.0.1:8080/latest)
 - **RTSP Streaming Mode**: Live H.264 stream for video applications (rtsp://127.0.0.1:8554/stream)
 
-Built with a modern dark-themed GUI using ttkbootstrap, ASIOverlayWatchDog includes live monitoring (preview, RGB histogram, recent logs), 7-day rotating file logs for troubleshooting, and command-line automation support for scheduled tasks.
+Built with a modern dark-themed GUI using ttkbootstrap, PFR Sentinel includes live monitoring (preview, RGB histogram, recent logs), 7-day rotating file logs for troubleshooting, and command-line automation support for scheduled tasks.
 
 ---
 
@@ -41,6 +41,7 @@ Built with a modern dark-themed GUI using ttkbootstrap, ASIOverlayWatchDog inclu
 - ✅ **Dual Capture Modes**: Directory monitoring or direct ZWO ASI camera capture
 - ✅ **Auto-Exposure**: Intelligent brightness adjustment targeting optimal exposure levels
 - ✅ **Debayering**: Automatic Bayer pattern conversion (BGGR) for ZWO color cameras
+- ✅ **Auto-Stretch**: MAD-based histogram stretch for optimal image visibility
 - ✅ **Customizable Overlays**: Text overlays with metadata tokens (camera name, exposure, gain, temperature, resolution, filename, session, datetime)
 - ✅ **Resize Processing**: Optional image resizing before overlay processing
 - ✅ **Output Formats**: PNG (lossless) or JPEG (adjustable quality)
