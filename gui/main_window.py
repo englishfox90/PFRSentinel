@@ -296,6 +296,13 @@ Supports:
         except Exception as e:
             app_logger.debug(f"Error stopping camera: {e}")
         
+        # PERF-002: Stop background processing thread
+        try:
+            if hasattr(self, 'image_processor') and self.image_processor:
+                self.image_processor._stop_processing_thread()
+        except Exception as e:
+            app_logger.debug(f"Error stopping image processor: {e}")
+        
         # Stop output servers
         try:
             if self.web_server:
