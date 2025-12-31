@@ -321,26 +321,44 @@ class CameraController:
         app_logger.info("Camera capture stopped")
     
     def on_camera_frame(self, img, metadata):
-        """Callback when camera captures a frame"""
+        """Callback when camera captures a frame - called from camera thread
+        
+        PERF-002: This callback runs on the camera's background thread.
+        Heavy work is queued to the image processor's background thread.
+        GUI updates are scheduled via root.after() to run on UI thread.
+        
+        Note: We gather tkinter var values here because they're thread-safe for reads,
+        but pass them to processors as a config dict to be explicit about what's needed.
+        """
         try:
-            # PERF-001: Store reference directly - image processor will work on it
-            # The mini preview will make its own small copy for display
+            # Store reference for other components (will be copied by processors)
             self.app.last_captured_image = img
             
-            # Update live preview (makes thumbnail copy internally)
-            self.app.root.after(0, self.app.status_manager.update_mini_preview, img)
+            # PERF-002: Gather config from tkinter vars (thread-safe for reads)
+            # This avoids processors needing to access GUI vars directly
+            preview_config = {
+                'auto_stretch_config': self.app.config.get('auto_stretch', {}),
+                'auto_brightness': self.app.auto_brightness_var.get(),
+                'brightness_factor': self.app.brightness_var.get(),
+                'auto_exposure': self.app.auto_exposure_var.get() if hasattr(self.app, 'auto_exposure_var') else False,
+                'target_brightness': self.app.target_brightness_var.get() if hasattr(self.app, 'target_brightness_var') else 100,
+            }
             
-            # Process image - processor works on original, then we're done with it
+            # Queue mini preview update to background processor
+            self.app.status_manager.update_mini_preview(img, config=preview_config)
+            
+            # Queue image processing to background thread
+            # process_and_save_image gathers its own config from vars
             self.app.image_processor.process_and_save_image(img, metadata)
             
-            # Increment counter
+            # Increment counter on UI thread
             self.app.image_count += 1
             self.app.root.after(0, lambda: self.app.image_count_var.set(str(self.app.image_count)))
             
             # Post first image to Discord immediately after calibration (only once)
             if not self.app.first_image_posted_to_discord and self.app.discord_enabled_var.get() and self.app.discord_periodic_enabled_var.get():
                 self.app.first_image_posted_to_discord = True
-                self.app.root.after(1000, self.app.output_manager._post_periodic_discord_update)  # 1 second delay to ensure file is saved
+                self.app.root.after(1000, self.app.output_manager._post_periodic_discord_update)
                 app_logger.info("Posting first image to Discord")
             
         except Exception as e:

@@ -1,9 +1,17 @@
 """
 Image processing module
 Handles image processing, overlays, and preview generation
+
+Threading Architecture (PERF-002):
+- Heavy image processing runs on a dedicated background worker thread
+- Only lightweight GUI updates (PhotoImage, label.config) happen on UI thread
+- Processing queue with throttling prevents backlog during slow operations
 """
 import os
 import random
+import threading
+import queue
+import numpy as np
 from datetime import datetime
 from tkinter import TclError
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageTk
@@ -13,16 +21,29 @@ import traceback
 
 
 class ImageProcessor:
-    """Manages image processing and preview generation"""
+    """Manages image processing and preview generation
+    
+    Uses a background processing thread to keep the UI responsive.
+    Heavy operations (auto-stretch, overlays, histograms) run off the UI thread.
+    """
     
     def __init__(self, app):
-        self.app = app        # Preview caching to avoid re-reading from disk
+        self.app = app
+        
+        # Preview caching to avoid re-reading from disk
         self.preview_cache = None
         self.preview_cache_path = None
+        
         # Cache for overlay images with size limit
         self.overlay_image_cache = {}
         self.overlay_cache_max_size = 10  # Limit cache to 10 images
         self.preview_update_pending = False
+        
+        # PERF-002: Background processing thread for heavy operations
+        self._processing_queue = queue.Queue(maxsize=2)  # Small queue to prevent backlog
+        self._processing_thread = None
+        self._stop_processing = threading.Event()
+        self._start_processing_thread()
     
     def _cleanup_overlay_cache(self):
         """Remove oldest entries from overlay cache if it exceeds size limit"""
@@ -32,24 +53,233 @@ class ImageProcessor:
             keys_to_remove = list(self.overlay_image_cache.keys())[:excess]
             for key in keys_to_remove:
                 del self.overlay_image_cache[key]
-            app_logger.debug(f"Cleaned up overlay cache: removed {excess} entries")    
-    def process_and_save_image(self, img, metadata):
-        """Process image with overlays and save"""
+            app_logger.debug(f"Cleaned up overlay cache: removed {excess} entries")
+    
+    # =========================================================================
+    # PERF-002: Background Processing Thread
+    # =========================================================================
+    
+    def _start_processing_thread(self):
+        """Start the background processing thread"""
+        if self._processing_thread is not None and self._processing_thread.is_alive():
+            return
+        
+        self._stop_processing.clear()
+        self._processing_thread = threading.Thread(
+            target=self._processing_worker,
+            name="ImageProcessorWorker",
+            daemon=True
+        )
+        self._processing_thread.start()
+        app_logger.debug("Background image processing thread started")
+    
+    def _stop_processing_thread(self):
+        """Stop the background processing thread gracefully"""
+        self._stop_processing.set()
+        # Put a sentinel to wake up the thread if it's waiting
         try:
-            # Get config
-            overlays = self.app.overlay_manager.get_overlays_config()
-            output_dir = self.app.output_dir_var.get()
-            output_format = self.app.output_format_var.get()
-            jpg_quality = self.app.jpg_quality_var.get()
-            resize_percent = self.app.resize_percent_var.get()
-            auto_brightness = self.app.auto_brightness_var.get()
-            brightness_factor = self.app.brightness_var.get() if auto_brightness else None
-            timestamp_corner = self.app.timestamp_corner_var.get()
-            filename_pattern = self.app.filename_pattern_var.get()
+            self._processing_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        
+        if self._processing_thread and self._processing_thread.is_alive():
+            self._processing_thread.join(timeout=2.0)
+        self._processing_thread = None
+    
+    def _processing_worker(self):
+        """Background worker thread that processes images"""
+        app_logger.debug("Image processing worker started")
+        
+        while not self._stop_processing.is_set():
+            try:
+                # Wait for work with timeout (allows checking stop flag)
+                try:
+                    task = self._processing_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                
+                if task is None:  # Sentinel value to stop
+                    break
+                
+                task_type = task.get('type')
+                
+                if task_type == 'save_image':
+                    self._do_process_and_save(task)
+                elif task_type == 'mini_preview':
+                    self._do_update_mini_preview(task)
+                elif task_type == 'refresh_preview':
+                    self._do_refresh_preview(task)
+                
+                self._processing_queue.task_done()
+                
+            except Exception as e:
+                app_logger.error(f"Processing worker error: {e}")
+                app_logger.error(traceback.format_exc())
+        
+        app_logger.debug("Image processing worker stopped")
+    
+    def _queue_task(self, task):
+        """Queue a processing task, dropping old tasks if queue is full"""
+        try:
+            # Non-blocking put - if queue is full, skip this frame
+            self._processing_queue.put_nowait(task)
+        except queue.Full:
+            # Queue is full - processing is backed up, skip this frame
+            app_logger.debug(f"Processing queue full, skipping {task.get('type')} task")
+    
+    def _do_update_mini_preview(self, task):
+        """Process mini preview and histogram on background thread
+        
+        Heavy operations (auto-stretch, brightness, histogram) run here,
+        then we schedule lightweight GUI updates to the main thread.
+        """
+        try:
+            img = task['img']
+            auto_stretch_config = task['auto_stretch_config']
+            auto_brightness = task['auto_brightness']
+            brightness_factor = task['brightness_factor']
+            auto_exposure = task.get('auto_exposure', False)
+            target_brightness = task.get('target_brightness', 100)
             
-            if not output_dir:
+            # Apply auto-stretch if enabled
+            if auto_stretch_config.get('enabled', False):
+                stretch_config = {
+                    'target_median': auto_stretch_config.get('target_median', 0.25),
+                    'linked_stretch': auto_stretch_config.get('linked_stretch', True),
+                    'preserve_blacks': auto_stretch_config.get('preserve_blacks', True),
+                    'shadow_aggressiveness': auto_stretch_config.get('shadow_aggressiveness', 2.8),
+                    'saturation_boost': auto_stretch_config.get('saturation_boost', 1.5),
+                }
+                preview_img = auto_stretch_image(img, stretch_config)
+            else:
+                preview_img = img
+            
+            # Apply auto brightness if enabled
+            if auto_brightness:
+                gray_img = preview_img.convert('L')
+                img_array = np.asarray(gray_img)
+                mean_brightness = np.mean(img_array)
+                del gray_img
+                target_br = 128
+                auto_factor = target_br / max(mean_brightness, 10)
+                auto_factor = max(0.5, min(auto_factor, 4.0))
+                
+                manual_factor = brightness_factor if brightness_factor else 1.0
+                final_factor = auto_factor * manual_factor
+                
+                enhancer = ImageEnhance.Brightness(preview_img)
+                preview_img = enhancer.enhance(final_factor)
+            
+            # Resize to fit (200x200 thumbnail)
+            preview_img.thumbnail((200, 200), Image.Resampling.LANCZOS)
+            
+            # Calculate histogram from original image (before stretch/brightness)
+            img_array = np.asarray(img)
+            hist_r = np.histogram(img_array[:, :, 0], bins=256, range=(0, 256))[0]
+            hist_g = np.histogram(img_array[:, :, 1], bins=256, range=(0, 256))[0]
+            hist_b = np.histogram(img_array[:, :, 2], bins=256, range=(0, 256))[0]
+            
+            # Normalize histograms
+            max_val = max(hist_r.max(), hist_g.max(), hist_b.max())
+            if max_val > 0:
+                hist_r = (hist_r / max_val * 90).astype(int)
+                hist_g = (hist_g / max_val * 90).astype(int)
+                hist_b = (hist_b / max_val * 90).astype(int)
+            
+            hist_data = {
+                'r': hist_r,
+                'g': hist_g,
+                'b': hist_b,
+                'auto_exposure': auto_exposure,
+                'target_brightness': target_brightness,
+            }
+            
+            # Create PhotoImage on main thread (required by tkinter)
+            def update_gui():
+                try:
+                    photo = ImageTk.PhotoImage(preview_img)
+                    self.app.status_manager._do_mini_preview_gui_update(photo, hist_data)
+                except Exception as e:
+                    app_logger.error(f"Mini preview GUI update failed: {e}")
+                    self.app.status_manager._mini_preview_pending = False
+            
+            self.app.root.after(0, update_gui)
+            
+            # Clean up
+            del img
+            
+        except Exception as e:
+            app_logger.error(f"Mini preview processing failed: {e}")
+            # Reset pending flag on error
+            self.app.root.after(0, lambda: setattr(self.app.status_manager, '_mini_preview_pending', False))
+    
+    def _do_refresh_preview(self, task):
+        """Process preview refresh on background thread - placeholder for future optimization"""
+        # For now, this delegates to the existing refresh_preview method
+        # which runs on the UI thread. Full optimization would move the heavy
+        # processing here similar to _do_update_mini_preview.
+        auto_fit = task.get('auto_fit', True)
+        self.app.root.after(0, lambda: self.refresh_preview(auto_fit=auto_fit))
+
+    def process_and_save_image(self, img, metadata):
+        """Process image with overlays and save - queues work to background thread
+        
+        This method is called from the camera thread. It gathers configuration
+        from GUI variables (fast) then queues the heavy processing work to
+        a background thread to avoid blocking.
+        """
+        try:
+            # PERF-002: Gather config from GUI (fast - just variable reads)
+            # This must happen on the calling thread while we have valid references
+            config = {
+                'overlays': self.app.overlay_manager.get_overlays_config(),
+                'output_dir': self.app.output_dir_var.get(),
+                'output_format': self.app.output_format_var.get(),
+                'jpg_quality': self.app.jpg_quality_var.get(),
+                'resize_percent': self.app.resize_percent_var.get(),
+                'auto_brightness': self.app.auto_brightness_var.get(),
+                'brightness_factor': self.app.brightness_var.get() if self.app.auto_brightness_var.get() else None,
+                'saturation_factor': self.app.saturation_var.get(),
+                'timestamp_corner': self.app.timestamp_corner_var.get(),
+                'filename_pattern': self.app.filename_pattern_var.get(),
+                'auto_stretch': self.app.config.get('auto_stretch', {}),
+                'auto_refresh': self.app.auto_refresh_var.get(),
+            }
+            
+            if not config['output_dir']:
                 app_logger.error("Output directory not configured")
                 return
+            
+            # Queue heavy processing to background thread
+            self._queue_task({
+                'type': 'save_image',
+                'img': img.copy(),  # Copy to avoid race conditions
+                'metadata': metadata.copy(),
+                'config': config,
+            })
+            
+        except Exception as e:
+            app_logger.error(f"Failed to queue image processing: {e}")
+            app_logger.error(traceback.format_exc())
+    
+    def _do_process_and_save(self, task):
+        """Actually process and save image - runs on background thread"""
+        try:
+            img = task['img']
+            metadata = task['metadata']
+            config = task['config']
+            
+            output_dir = config['output_dir']
+            output_format = config['output_format']
+            jpg_quality = config['jpg_quality']
+            resize_percent = config['resize_percent']
+            auto_brightness = config['auto_brightness']
+            brightness_factor = config['brightness_factor']
+            saturation_factor = config['saturation_factor']
+            timestamp_corner = config['timestamp_corner']
+            filename_pattern = config['filename_pattern']
+            overlays = config['overlays']
+            auto_stretch_config = config['auto_stretch']
             
             # Ensure output directory exists
             os.makedirs(output_dir, exist_ok=True)
@@ -61,31 +291,23 @@ class ImageProcessor:
                 img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
             # Apply auto-stretch (MTF) if enabled - BEFORE brightness/saturation/overlays
-            auto_stretch_config = self.app.config.get('auto_stretch', {})
             if auto_stretch_config.get('enabled', False):
                 img = auto_stretch_image(img, auto_stretch_config)
                 app_logger.debug("Applied auto-stretch to camera capture")
             
             # Apply auto brightness if enabled (with proper analysis)
             if auto_brightness:
-                from PIL import ImageEnhance
-                import numpy as np
-                
-                # PERF-001: Analyze brightness using view (no copy)
-                gray_img = img.convert('L')  # Grayscale for analysis
-                img_array = np.asarray(gray_img)  # View, not copy
+                # Analyze brightness using view (no copy)
+                gray_img = img.convert('L')
+                img_array = np.asarray(gray_img)
                 mean_brightness = np.mean(img_array)
-                del gray_img  # Release grayscale image early
+                del gray_img
                 
                 # Calculate adaptive enhancement factor
-                # Target brightness: 128 (mid-gray)
                 target_brightness = 128
-                auto_factor = target_brightness / max(mean_brightness, 10)  # Avoid division by zero
-                
-                # Clamp factor to reasonable range (0.5 - 4.0)
+                auto_factor = target_brightness / max(mean_brightness, 10)
                 auto_factor = max(0.5, min(auto_factor, 4.0))
                 
-                # Apply manual brightness factor as additional adjustment
                 manual_factor = brightness_factor if brightness_factor else 1.0
                 final_factor = auto_factor * manual_factor
                 
@@ -95,9 +317,7 @@ class ImageProcessor:
                 app_logger.debug(f"Auto brightness: mean={mean_brightness:.1f}, auto={auto_factor:.2f}, manual={manual_factor:.2f}, final={final_factor:.2f}")
             
             # Apply saturation adjustment
-            saturation_factor = self.app.saturation_var.get()
             if saturation_factor != 1.0:
-                from PIL import ImageEnhance
                 enhancer = ImageEnhance.Color(img)
                 img = enhancer.enhance(saturation_factor)
                 app_logger.debug(f"Saturation adjusted: factor={saturation_factor:.2f}")
@@ -110,7 +330,6 @@ class ImageProcessor:
                     font = ImageFont.truetype("arial.ttf", 20)
                 except:
                     font = ImageFont.load_default()
-                # Top-right corner
                 draw.text((img.width - 200, 10), timestamp_text, fill='white', font=font)
             
             # Add overlays (pass weather_service for weather tokens)
@@ -121,12 +340,10 @@ class ImageProcessor:
             original_filename = metadata.get('FILENAME', 'capture.png')
             base_filename = os.path.splitext(original_filename)[0]
             
-            # Replace tokens in filename pattern
             output_filename = filename_pattern.replace('{filename}', base_filename)
             output_filename = output_filename.replace('{session}', session)
             output_filename = output_filename.replace('{timestamp}', datetime.now().strftime('%Y%m%d_%H%M%S'))
             
-            # Add extension
             if output_format.lower() == 'png':
                 output_filename += '.png'
             else:
@@ -140,44 +357,49 @@ class ImageProcessor:
             else:
                 img.save(output_path, 'JPEG', quality=jpg_quality)
             
-            self.app.last_processed_image = output_path
-            
-            # Clean up old preview image to prevent memory accumulation
-            if hasattr(self.app, 'preview_image') and self.app.preview_image:
+            # Schedule GUI updates on main thread
+            def update_gui():
                 try:
-                    del self.app.preview_image
-                except:
-                    pass
+                    self.app.last_processed_image = output_path
+                    
+                    # Store preview image (already resized)
+                    if hasattr(self.app, 'preview_image') and self.app.preview_image:
+                        try:
+                            del self.app.preview_image
+                        except:
+                            pass
+                    
+                    # Store a copy for preview (without overlays for clean preview base)
+                    if resize_percent < 100 and self.app.last_captured_image:
+                        new_width = int(self.app.last_captured_image.width * resize_percent / 100)
+                        new_height = int(self.app.last_captured_image.height * resize_percent / 100)
+                        self.app.preview_image = self.app.last_captured_image.resize(
+                            (new_width, new_height), Image.Resampling.LANCZOS)
+                    elif self.app.last_captured_image:
+                        self.app.preview_image = self.app.last_captured_image.copy()
+                    
+                    self.app.preview_metadata = metadata.copy()
+                    
+                    # Auto-refresh preview if enabled
+                    if config['auto_refresh']:
+                        self.refresh_preview(auto_fit=True)
+                except Exception as e:
+                    app_logger.error(f"GUI update error: {e}")
             
-            # Store the ORIGINAL image before brightness/saturation for preview
-            # Preview will apply adjustments on top of this clean base
-            if resize_percent < 100:
-                new_width = int(self.app.last_captured_image.width * resize_percent / 100)
-                new_height = int(self.app.last_captured_image.height * resize_percent / 100)
-                self.app.preview_image = self.app.last_captured_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            else:
-                self.app.preview_image = self.app.last_captured_image.copy()
-            
-            # Store metadata for preview overlay rendering
-            self.app.preview_metadata = metadata.copy()
+            self.app.root.after(0, update_gui)
             
             app_logger.info(f"Saved: {os.path.basename(output_path)}")
             
-            # Push to output servers if active - pass the processed image directly
-            # to avoid re-reading from disk and double-compressing JPGs
+            # Push to output servers (can be slow, but runs on background thread)
             self.app._push_to_output_servers(output_path, img)
             
-            # Clean up the processed image object (we only need the file path now)
+            # Clean up the processed image object
             del img
             
-            # Check if Discord periodic update should be sent
-            self.app.check_discord_periodic_send(output_path)
+            # Check if Discord periodic update should be sent (schedules to main thread internally)
+            self.app.root.after(0, lambda: self.app.check_discord_periodic_send(output_path))
             
-            # Auto-refresh preview if enabled
-            if self.app.auto_refresh_var.get():
-                self.app.root.after(0, lambda: self.refresh_preview(auto_fit=True))
-            
-            # Periodically cleanup overlay cache to prevent memory growth
+            # Periodically cleanup overlay cache
             self._cleanup_overlay_cache()
             
         except Exception as e:
@@ -201,7 +423,6 @@ class ImageProcessor:
         try:
             # Apply auto brightness and saturation adjustments (for display only)
             display_base = self.app.preview_image.copy()
-            from PIL import ImageEnhance
             
             # Apply auto-stretch (MTF) if enabled - BEFORE brightness/saturation (same as save pipeline)
             auto_stretch_config = self.app.config.get('auto_stretch', {})
@@ -210,8 +431,6 @@ class ImageProcessor:
             
             # Apply brightness adjustment
             if self.app.auto_brightness_var.get():
-                import numpy as np
-                
                 # Analyze brightness
                 img_array = np.array(display_base.convert('L'))
                 mean_brightness = np.mean(img_array)

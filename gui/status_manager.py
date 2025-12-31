@@ -1,6 +1,9 @@
 """
 Status and monitoring module
 Handles status updates, logging, and live monitoring
+
+PERF-002: Heavy operations (histogram, auto-stretch) are offloaded to
+the image processor's background thread to keep UI responsive.
 """
 import numpy as np
 from tkinter import filedialog, messagebox
@@ -16,6 +19,8 @@ class StatusManager:
     
     def __init__(self, app):
         self.app = app
+        # Track if a mini preview update is pending to avoid queue buildup
+        self._mini_preview_pending = False
     
     def update_status_header(self):
         """Update status header periodically"""
@@ -84,8 +89,47 @@ class StatusManager:
             update_interval = 200 if is_capturing else 1000  # 200ms when capturing, 1s otherwise
             self.app.root.after(update_interval, self.update_status_header)
     
-    def update_mini_preview(self, img):
-        """Update mini preview in header"""
+    def update_mini_preview(self, img, config=None):
+        """Update mini preview in header - offloads heavy work to background thread
+        
+        PERF-002: This method queues the heavy processing (auto-stretch, brightness,
+        histogram) to the image processor's background thread, then updates GUI
+        elements only on the main thread.
+        
+        Args:
+            img: PIL Image to process
+            config: Optional pre-gathered config dict. If None, will read from GUI vars
+                   (should only be None when called from UI thread)
+        """
+        # Skip if an update is already pending (prevents queue buildup)
+        if self._mini_preview_pending:
+            return
+        
+        self._mini_preview_pending = True
+        
+        # Use provided config or gather from GUI vars
+        if config is None:
+            config = {
+                'auto_stretch_config': self.app.config.get('auto_stretch', {}),
+                'auto_brightness': self.app.auto_brightness_var.get(),
+                'brightness_factor': self.app.brightness_var.get(),
+                'auto_exposure': self.app.auto_exposure_var.get() if hasattr(self.app, 'auto_exposure_var') else False,
+                'target_brightness': self.app.target_brightness_var.get() if hasattr(self.app, 'target_brightness_var') else 100,
+            }
+        
+        # Queue the heavy processing work to background thread
+        self.app.image_processor._queue_task({
+            'type': 'mini_preview',
+            'img': img.copy(),  # Copy to avoid race conditions
+            'auto_stretch_config': config['auto_stretch_config'],
+            'auto_brightness': config['auto_brightness'],
+            'brightness_factor': config['brightness_factor'],
+            'auto_exposure': config['auto_exposure'],
+            'target_brightness': config['target_brightness'],
+        })
+    
+    def _do_mini_preview_gui_update(self, photo, hist_data):
+        """Update GUI with processed mini preview - runs on UI thread"""
         try:
             # Clean up old image references to prevent memory leak
             if hasattr(self.app, 'mini_preview_image') and self.app.mini_preview_image:
@@ -94,61 +138,92 @@ class StatusManager:
                 except:
                     pass
             
-            # Apply auto-stretch first (same as saved/published images)
-            auto_stretch_config = self.app.config.get('auto_stretch', {})
-            if auto_stretch_config.get('enabled', False):
-                stretch_config = {
-                    'target_median': auto_stretch_config.get('target_median', 0.25),
-                    'linked_stretch': auto_stretch_config.get('linked_stretch', True),
-                    'preserve_blacks': auto_stretch_config.get('preserve_blacks', True),
-                    'shadow_aggressiveness': auto_stretch_config.get('shadow_aggressiveness', 2.8),
-                    'saturation_boost': auto_stretch_config.get('saturation_boost', 1.5),
-                }
-                preview_img = auto_stretch_image(img.copy(), stretch_config)
-            else:
-                preview_img = img.copy()
-            
-            # Apply auto brightness if enabled (on top of stretch)
-            if self.app.auto_brightness_var.get():
-                from PIL import ImageEnhance
-                import numpy as np
-                
-                # Analyze brightness
-                gray_img = preview_img.convert('L')
-                img_array = np.asarray(gray_img)
-                mean_brightness = np.mean(img_array)
-                del gray_img
-                target_brightness = 128
-                auto_factor = target_brightness / max(mean_brightness, 10)
-                auto_factor = max(0.5, min(auto_factor, 4.0))
-                
-                # Apply manual multiplier
-                manual_factor = self.app.brightness_var.get()
-                final_factor = auto_factor * manual_factor
-                
-                enhancer = ImageEnhance.Brightness(preview_img)
-                preview_img = enhancer.enhance(final_factor)
-            
-            # Resize to fit
-            thumb = preview_img
-            thumb.thumbnail((200, 200), Image.Resampling.LANCZOS)
-            
-            photo = ImageTk.PhotoImage(thumb)
             self.app.mini_preview_label.config(image=photo, text='')
             self.app.mini_preview_image = photo  # Keep reference
             
-            # Clean up temporary images
-            del thumb
-            del preview_img
+            # Update histogram from pre-calculated data
+            self._draw_histogram(hist_data)
             
-            # Update histogram
-            self.update_histogram(img)
+            self._mini_preview_pending = False
             
         except Exception as e:
-            app_logger.error(f"Mini preview update failed: {e}")
+            app_logger.error(f"Mini preview GUI update failed: {e}")
+            self._mini_preview_pending = False
+    
+    def _draw_histogram(self, hist_data):
+        """Draw pre-calculated histogram data to canvas - runs on UI thread"""
+        try:
+            hist_r, hist_g, hist_b = hist_data['r'], hist_data['g'], hist_data['b']
+            auto_exposure = hist_data.get('auto_exposure', False)
+            target_brightness = hist_data.get('target_brightness', 100)
+            
+            # Clear canvas
+            self.app.histogram_canvas.delete('all')
+            
+            # Calculate bin width
+            width = self.app.histogram_canvas.winfo_width()
+            if width <= 1:
+                width = 600
+            bin_width = width / 256
+            
+            # Build coordinate lists for each channel
+            red_coords = []
+            green_coords = []
+            blue_coords = []
+            
+            for i in range(256):
+                x = i * bin_width
+                red_coords.extend([x, 100 - hist_r[i]])
+                green_coords.extend([x, 100 - hist_g[i]])
+                blue_coords.extend([x, 100 - hist_b[i]])
+            
+            # Draw as smooth lines
+            if len(red_coords) >= 4:
+                self.app.histogram_canvas.create_line(red_coords, fill='#ff6b6b', width=2, smooth=False)
+                self.app.histogram_canvas.create_line(green_coords, fill='#51cf66', width=2, smooth=False)
+                self.app.histogram_canvas.create_line(blue_coords, fill='#339af0', width=2, smooth=False)
+            
+            # Draw target brightness line if auto exposure is enabled
+            if auto_exposure:
+                target_x = (target_brightness / 255.0) * width
+                
+                self.app.histogram_canvas.create_line(
+                    target_x, 0, target_x, 100,
+                    fill='#ffd700', width=2, dash=(4, 2)
+                )
+                
+                self.app.histogram_canvas.create_text(
+                    target_x, 5,
+                    text=f'Target: {int(target_brightness)}',
+                    fill='#ffd700',
+                    font=('Segoe UI', 8, 'bold'),
+                    anchor='n'
+                )
+                
+                # Draw clipping threshold line (245)
+                clip_x = (245 / 255.0) * width
+                self.app.histogram_canvas.create_line(
+                    clip_x, 0, clip_x, 100,
+                    fill='#ff4444', width=1, dash=(2, 2)
+                )
+                
+                self.app.histogram_canvas.create_text(
+                    clip_x, 15,
+                    text='Clip',
+                    fill='#ff4444',
+                    font=('Segoe UI', 7),
+                    anchor='n'
+                )
+                
+        except Exception as e:
+            app_logger.error(f"Histogram draw failed: {e}")
     
     def update_histogram(self, img):
-        """Update RGB histogram"""
+        """Update RGB histogram - legacy method, prefer using mini_preview queue
+        
+        This is kept for backwards compatibility and manual histogram updates.
+        During camera capture, histogram is updated via the background thread.
+        """
         try:
             # PERF-001: Use asarray for view (no copy) - histogram is read-only
             img_array = np.asarray(img)
