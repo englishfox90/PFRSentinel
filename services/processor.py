@@ -683,7 +683,18 @@ def auto_stretch_image(img, config):
         
         # Convert back to uint8 and PIL Image
         stretched_uint8 = (stretched * 255.0).astype(np.uint8)
-        return Image.fromarray(stretched_uint8, mode=img.mode)
+        result_img = Image.fromarray(stretched_uint8, mode=img.mode)
+        
+        # Boost saturation to compensate for stretch color loss
+        # MTF stretch tends to desaturate, so we boost by ~50% to restore vibrancy
+        saturation_boost = config.get('stretch_saturation_boost', 1.5)
+        if saturation_boost != 1.0 and result_img.mode in ('RGB', 'RGBA'):
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Color(result_img)
+            result_img = enhancer.enhance(saturation_boost)
+            app_logger.debug(f"Auto-stretch saturation boost: {saturation_boost:.2f}")
+        
+        return result_img
         
     except Exception as e:
         app_logger.error(f"Auto-stretch error: {e}")

@@ -96,7 +96,11 @@ class StatusManager:
             
             # Apply auto-stretch first (same as saved/published images)
             if self.app.config.get('auto_stretch_enabled', True):
-                preview_img = auto_stretch_image(img.copy())
+                stretch_config = {
+                    'target_median': self.app.config.get('stretch_target', 0.25),
+                    'linked_stretch': self.app.config.get('stretch_linked', True),
+                }
+                preview_img = auto_stretch_image(img.copy(), stretch_config)
             else:
                 preview_img = img.copy()
             
