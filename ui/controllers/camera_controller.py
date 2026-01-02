@@ -168,10 +168,13 @@ class CameraControllerQt(QObject):
             app_logger.info("Camera capture started")
             
         except Exception as e:
+            self.is_capturing = False
+            self.is_connected = False
             self.error.emit(str(e))
             app_logger.error(f"Failed to start capture: {e}")
             import traceback
             app_logger.debug(f"Stack trace: {traceback.format_exc()}")
+            return  # Prevent any further execution
     
     def stop_capture(self):
         """Stop camera capture"""
