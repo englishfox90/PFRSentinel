@@ -654,6 +654,10 @@ class MainWindow(QMainWindow):
             
             if mode == 'camera':
                 self._start_camera_capture()
+                # Check if camera capture actually started successfully
+                if self.camera_controller and not self.camera_controller.is_capturing:
+                    app_logger.error("Camera capture failed to start")
+                    return
             else:
                 self._start_watch_mode()
             
@@ -716,11 +720,16 @@ class MainWindow(QMainWindow):
         
         self.camera_controller.start_capture()
         
-        # Update camera chip to show connected
-        self.app_bar.camera_chip.set_status('connected')
-        self.app_bar.camera_chip.set_label('Connected')
-        
-        app_logger.info("Camera capture started")
+        # Only update status if capture actually started successfully
+        if self.camera_controller.is_capturing:
+            # Update camera chip to show connected
+            self.app_bar.camera_chip.set_status('connected')
+            self.app_bar.camera_chip.set_label('Connected')
+            app_logger.info("Camera capture started")
+        else:
+            # Connection failed - camera_controller already logged the error
+            self.app_bar.camera_chip.set_status('error')
+            self.app_bar.camera_chip.set_label('Connection Failed')
     
     def _start_watch_mode(self):
         """Initialize and start directory watch mode"""

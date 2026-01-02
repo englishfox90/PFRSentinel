@@ -218,8 +218,8 @@ class CameraConnection:
                 self.log("Existing camera connection detected, disconnecting first...")
                 self.disconnect()
             
-            # Add a small delay to allow SDK cleanup after disconnect
-            time.sleep(0.2)
+            # Add delay to allow SDK cleanup (especially important after other apps like ASICap)
+            time.sleep(0.5)  # Increased from 0.2s
             
             self.log(f"Opening camera at index {camera_index}...")
             
@@ -232,8 +232,10 @@ class CameraConnection:
                 except Exception as e:
                     if attempt < max_attempts:
                         self.log(f"⚠ Attempt {attempt}/{max_attempts} failed: {e}")
-                        self.log(f"Waiting 0.5s before retry...")
-                        time.sleep(0.5)
+                        if attempt == 1:
+                            self.log(f"⚠ If you recently used ASICap or other ZWO software, please wait 10-15 seconds before retrying")
+                        self.log(f"Waiting 1.0s before retry...")
+                        time.sleep(1.0)  # Increased from 0.5s
                     else:
                         # Final attempt failed - re-raise the exception
                         raise
