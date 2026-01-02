@@ -89,21 +89,25 @@ class CameraControllerQt(QObject):
         try:
             sdk_path = self.config.get('zwo_sdk_path', '')
             camera_index = self.config.get('zwo_selected_camera', 0)
+            camera_name = self.config.get('zwo_selected_camera_name', 'Unknown')
             
-            # Detect cameras first if not already done (prevents stale camera_index)
+            app_logger.info(f"Starting capture with camera index {camera_index} ({camera_name})")
+            
+            # Verify cameras are available (stored by main_window after detection)
+            # Note: available_cameras is a list of strings like "ZWO ASI676MC (Index: 1)"
             available_cameras = self.config.get('available_cameras', [])
-            if not available_cameras or camera_index >= len(available_cameras):
-                app_logger.info("No cameras detected, running detection...")
-                from services.camera_connection import CameraConnection
-                conn = CameraConnection(sdk_path)
-                available_cameras = conn.detect_cameras()
-                if not available_cameras:
-                    raise Exception("No cameras detected")
-                if camera_index >= len(available_cameras):
-                    app_logger.warning(f"Saved camera index {camera_index} invalid, using 0")
-                    camera_index = 0
-                    self.config.set('zwo_selected_camera', camera_index)
-                self.config.set('available_cameras', available_cameras)
+            
+            if not available_cameras:
+                # No cameras detected yet - this shouldn't happen normally since
+                # cameras are detected on startup, but handle it gracefully
+                app_logger.warning("No available_cameras in config, detection may not have completed")
+                raise Exception("No cameras available. Please click 'Detect Cameras' first.")
+            
+            # Validate camera_index against available cameras
+            if camera_index >= len(available_cameras):
+                app_logger.warning(f"Saved camera index {camera_index} >= camera count {len(available_cameras)}, using 0")
+                camera_index = 0
+                self.config.set('zwo_selected_camera', camera_index)
                 self.config.save()
             
             # Get settings from config

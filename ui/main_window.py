@@ -54,9 +54,6 @@ class MainWindow(QMainWindow):
     config_changed = Signal()
     image_captured = Signal(object)  # PIL Image
     cameras_detected = Signal(list, str)  # cameras list, error string
-    capture_stopped = Signal()
-    config_changed = Signal()
-    image_captured = Signal(object)  # PIL Image
     
     def __init__(self):
         super().__init__()
@@ -347,6 +344,9 @@ class MainWindow(QMainWindow):
         else:
             self.capture_panel.set_cameras(cameras)
             
+            # Store detected cameras in config to prevent re-detection in start_capture
+            self.config.set('available_cameras', cameras)
+            
             # Update camera chip to show ready
             if cameras:
                 self.app_bar.camera_chip.set_status('connected')
@@ -366,7 +366,19 @@ class MainWindow(QMainWindow):
                     # saved_name could be full text or just camera name
                     if saved_name in cam or cam.split(' (Index:')[0] in saved_name:
                         self.capture_panel.camera_combo.setCurrentIndex(i)
-                        app_logger.info(f"Restored camera by name: {cam}")
+                        # Extract actual camera index from the string (e.g., "ZWO ASI676MC (Index: 1)" -> 1)
+                        # The combo box index i may differ from actual camera SDK index
+                        actual_index = i  # Default to combo index
+                        if '(Index: ' in cam:
+                            try:
+                                actual_index = int(cam.split('(Index: ')[1].rstrip(')'))
+                            except (IndexError, ValueError):
+                                pass
+                        # Update config with the actual camera index
+                        self.config.set('zwo_selected_camera', actual_index)
+                        self.config.set('zwo_selected_camera_name', cam)
+                        self.config.save()
+                        app_logger.info(f"Restored camera by name: {cam} (SDK Index: {actual_index})")
                         found = True
                         break
                 
@@ -829,10 +841,12 @@ class MainWindow(QMainWindow):
         
         # Check if any output servers are enabled
         config = self.config
+        output_config = config.get('output', {})
+        discord_config = config.get('discord', {})
         has_outputs = (
-            config.get('web_enabled', False) or
-            config.get('rtsp_enabled', False) or
-            config.get('discord_enabled', False)
+            output_config.get('webserver_enabled', False) or
+            output_config.get('rtsp_enabled', False) or
+            discord_config.get('enabled', False)
         )
         
         if has_outputs:
@@ -957,8 +971,8 @@ class MainWindow(QMainWindow):
                     content_type = 'image/png'
                 
                 self.web_server.update_image(
-                    image_path, 
-                    img_bytes.getvalue(), 
+                    image_path,
+                    img_bytes.getvalue(),
                     metadata=self.preview_metadata,
                     content_type=content_type
                 )
@@ -1130,9 +1144,19 @@ class MainWindow(QMainWindow):
         
         app_logger.info("Application closing")
         event.accept()
+        
+        # Force quit the application to ensure all threads exit
+        QApplication.quit()
     
     def quit_application(self):
         """Properly quit application (called from tray exit)"""
+        # Stop the tray icon thread first
+        if self.system_tray and hasattr(self.system_tray, 'tray_icon') and self.system_tray.tray_icon:
+            try:
+                self.system_tray.tray_icon.stop()
+            except:
+                pass
+        
         # Disable tray mode to allow normal close
         self.system_tray = None
         # Close window (will trigger normal closeEvent)

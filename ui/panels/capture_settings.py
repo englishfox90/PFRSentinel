@@ -477,8 +477,16 @@ class CaptureSettingsPanel(QScrollArea):
         if self._loading_config:
             return
         if self.main_window and hasattr(self.main_window, 'config'):
-            self.main_window.config.set('zwo_selected_camera', index)
             camera_name = self.camera_combo.currentText()
+            # Extract actual camera SDK index from the combo text (e.g., "ZWO ASI676MC (Index: 1)" -> 1)
+            # The combo box index may differ from actual camera SDK index
+            actual_index = index  # Default to combo index
+            if '(Index: ' in camera_name:
+                try:
+                    actual_index = int(camera_name.split('(Index: ')[1].rstrip(')'))
+                except (IndexError, ValueError):
+                    pass
+            self.main_window.config.set('zwo_selected_camera', actual_index)
             self.main_window.config.set('zwo_selected_camera_name', camera_name)
             self.settings_changed.emit()
     
