@@ -252,10 +252,12 @@ class SettingsPanel(QScrollArea):
         self.cleanup_enabled_switch.checkedChanged.connect(self._on_cleanup_changed)
         cleanup_card.add_widget(cleanup_enable_row)
         
-        # Storage limit
-        self.cleanup_size_spin = SpinBox()
-        self.cleanup_size_spin.setRange(1, 1000)
-        self.cleanup_size_spin.setValue(10)
+        # Storage limit (use DoubleSpinBox for decimal values like 0.1 GB)
+        self.cleanup_size_spin = DoubleSpinBox()
+        self.cleanup_size_spin.setRange(0.1, 1000.0)
+        self.cleanup_size_spin.setDecimals(1)
+        self.cleanup_size_spin.setSingleStep(0.1)
+        self.cleanup_size_spin.setValue(10.0)
         self.cleanup_size_spin.setSuffix(" GB")
         self.cleanup_size_spin.valueChanged.connect(self._on_cleanup_changed)
         cleanup_card.add_row("Storage Limit", self.cleanup_size_spin, "Maximum storage before cleanup")

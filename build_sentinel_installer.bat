@@ -3,83 +3,48 @@ REM Complete build script for PFR Sentinel
 REM Builds executable and creates Windows installer
 REM
 REM Usage:
-REM   build_sentinel_installer.bat          # Build new PySide6 UI (default)
-REM   build_sentinel_installer.bat --legacy # Build old Tkinter UI
+REM   build_sentinel_installer.bat
 
 echo ========================================
 echo   PFR Sentinel - Full Build
 echo ========================================
 echo.
 
-REM Check for UI flag
-set UI_FLAG=
-if /i "%1"=="--legacy" (
-    set UI_FLAG=--legacy
-    echo Building: Tkinter (Legacy UI)
-) else (
-    echo Building: PySide6 (Modern Fluent UI)
-)
+echo Building: PySide6 Fluent UI
 echo.
 
 REM Step 1: Build executable
 echo [1/2] Building executable...
-call build_sentinel.bat %UI_FLAG%
+call build_sentinel.bat
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Executable build failed!
     pause
     exit /b 1
 )
 
+REM Step 2: Build installer
 echo.
-echo [2/2] Creating installer...
+echo [2/2] Building installer...
 
-REM Sync version from version.py to version.iss
-echo Synchronizing version...
-python scripts\update_version.py
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Version synchronization failed!
-    pause
-    exit /b 1
+REM Check for Inno Setup
+set ISCC_PATH="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+if not exist %ISCC_PATH% (
+    set ISCC_PATH="C:\Program Files\Inno Setup 6\ISCC.exe"
 )
 
-REM Check if Inno Setup is installed
-set "INNO_X86=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-set "INNO_X64=C:\Program Files\Inno Setup 6\ISCC.exe"
-
-if exist "%INNO_X86%" (
-    set "INNO_PATH=%INNO_X86%"
-    goto :inno_found
-)
-
-if exist "%INNO_X64%" (
-    set "INNO_PATH=%INNO_X64%"
-    goto :inno_found
-)
-
-echo.
-echo ERROR: Inno Setup not found!
-echo.
-echo Please install Inno Setup from:
-echo https://jrsoftware.org/isinfo.php
-echo.
-echo Expected location:
-echo   C:\Program Files (x86)\Inno Setup 6\ISCC.exe
-echo   OR
-echo   C:\Program Files\Inno Setup 6\ISCC.exe
-echo.
-pause
-exit /b 1
-
-:inno_found
-REM Create installer output directory
-if not exist installer\dist mkdir installer\dist
-
-REM Build installer with proper escaping
-echo Building installer with Inno Setup...
-"%INNO_PATH%" installer\PFRSentinel.iss
-
-if %ERRORLEVEL% NEQ 0 (
+if not exist %ISCC_PATH% (
     echo.
+    echo WARNING: Inno Setup not found!
+    echo Please install Inno Setup 6 from: https://jrsoftware.org/isinfo.php
+    echo.
+    echo Executable was built successfully:
+    echo   dist\PFRSentinel\PFRSentinel.exe
+    pause
+    exit /b 0
+)
+
+%ISCC_PATH% installer\PFRSentinel.iss
+if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Installer build failed!
     pause
     exit /b 1
@@ -87,20 +52,11 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo ========================================
-echo   Build completed successfully!
+echo   Full Build Completed!
 echo ========================================
 echo.
 echo Installer location:
-for /f "tokens=*" %%v in ('python -c "import version; print(version.__version__)"') do set VERSION=%%v
-echo   installer\dist\PFR Sentinel-%VERSION%-setup.exe
-echo.
-echo You can now:
-echo   1. Test the installer
-echo   2. Distribute the installer to users
-echo.
-echo User data will be stored in:
-echo   %%LOCALAPPDATA%%\PFRSentinel
-echo   (Config, logs with 7-day automatic rotation)
+echo   releases\PFRSentinel_Setup.exe
 echo.
 
 pause

@@ -31,20 +31,35 @@ TOKENS = [
     ("Exposure", "{EXPOSURE}"),
     ("Gain", "{GAIN}"),
     ("Temperature", "{TEMP}"),
+    ("Temp (Celsius)", "{TEMP_C}"),
+    ("Temp (Fahrenheit)", "{TEMP_F}"),
     ("Resolution", "{RES}"),
     ("Session", "{SESSION}"),
     ("Date & Time", "{DATETIME}"),
     ("Filename", "{FILENAME}"),
     ("━━━ Image Stats ━━━", None),
-    ("Brightness", "{BRIGHTNESS}"),
+    ("Brightness/Mean", "{BRIGHTNESS}"),
     ("Median", "{MEDIAN}"),
     ("Min Pixel", "{MIN}"),
     ("Max Pixel", "{MAX}"),
+    ("Std Deviation", "{STD_DEV}"),
+    ("25th Percentile", "{P25}"),
+    ("75th Percentile", "{P75}"),
+    ("95th Percentile", "{P95}"),
     ("━━━ Weather ━━━", None),
     ("Weather Temp", "{WEATHER_TEMP}"),
+    ("Feels Like", "{WEATHER_FEELS_LIKE}"),
     ("Condition", "{WEATHER_CONDITION}"),
+    ("Description", "{WEATHER_DESC}"),
     ("Humidity", "{WEATHER_HUMIDITY}"),
+    ("Pressure", "{WEATHER_PRESSURE}"),
     ("Wind Speed", "{WEATHER_WIND_SPEED}"),
+    ("Wind Direction", "{WEATHER_WIND_DIR}"),
+    ("Clouds", "{WEATHER_CLOUDS}"),
+    ("Visibility", "{WEATHER_VISIBILITY}"),
+    ("Sunrise", "{WEATHER_SUNRISE}"),
+    ("Sunset", "{WEATHER_SUNSET}"),
+    ("City", "{WEATHER_CITY}"),
 ]
 
 ANCHOR_POSITIONS = [
@@ -103,6 +118,35 @@ class OverlaySettingsPanel(QWidget):
         # === RIGHT COLUMN: Editor ===
         editor_card = self._create_editor_card()
         main_layout.addWidget(editor_card, stretch=3)
+    
+    def _populate_token_combo(self):
+        """Populate token combo box with headers as separators and conditional weather tokens"""
+        self.token_combo.clear()
+        
+        # Check if weather is configured
+        weather_enabled = False
+        if self.main_window:
+            weather_config = self.main_window.config.get('weather', {})
+            api_key = weather_config.get('api_key', '')
+            weather_enabled = weather_config.get('enabled', False) and bool(api_key)
+        
+        current_section = None
+        for label, token in TOKENS:
+            # Check if this is a header row
+            if token is None:
+                # Skip weather header if weather not configured
+                if "Weather" in label and not weather_enabled:
+                    current_section = "weather_skip"
+                    continue
+                # Add header with separator prefix (qfluentwidgets doesn't support disabled items)
+                current_section = "weather" if "Weather" in label else "other"
+                self.token_combo.addItem(f"── {label} ──")
+            else:
+                # Skip weather tokens if weather not configured
+                if current_section == "weather_skip":
+                    continue
+                # Add regular token item
+                self.token_combo.addItem(label)
     
     def _create_list_card(self) -> CardWidget:
         """Create overlay list card with table-style appearance"""
@@ -403,19 +447,43 @@ class OverlaySettingsPanel(QWidget):
     def _substitute_tokens(self, text: str) -> str:
         """Replace tokens with sample values"""
         result = text
+        # Camera tokens
         result = result.replace('{CAMERA}', 'ASI676MC')
-        result = result.replace('{EXPOSURE}', '100ms')
+        result = result.replace('{EXPOSURE}', '0.10s')
         result = result.replace('{GAIN}', '150')
-        result = result.replace('{TEMP}', '25°C')
+        result = result.replace('{TEMP}', '25.0 C')
+        result = result.replace('{TEMPERATURE}', '25.0 C')
+        result = result.replace('{TEMP_C}', '25.0°C')
+        result = result.replace('{TEMP_F}', '77.0°F')
         result = result.replace('{RES}', '1920x1080')
         result = result.replace('{SESSION}', '2026-01-01')
         result = result.replace('{DATETIME}', '2026-01-01 20:30:00')
-        result = result.replace('{FILENAME}', 'capture_001.png')
-        result = result.replace('{BRIGHTNESS}', '128')
+        result = result.replace('{FILENAME}', 'capture_20260101_203000.png')
+        # Image stats
+        result = result.replace('{BRIGHTNESS}', '128.5')
+        result = result.replace('{MEAN}', '128.5')
+        result = result.replace('{MEDIAN}', '120.0')
+        result = result.replace('{MIN}', '0')
+        result = result.replace('{MAX}', '255')
+        result = result.replace('{STD_DEV}', '45.23')
+        result = result.replace('{P25}', '85.0')
+        result = result.replace('{P75}', '165.0')
+        result = result.replace('{P95}', '240.0')
+        # Weather tokens
         result = result.replace('{WEATHER_TEMP}', '15°C')
+        result = result.replace('{WEATHER_FEELS_LIKE}', '12°C')
         result = result.replace('{WEATHER_CONDITION}', 'Clear')
+        result = result.replace('{WEATHER_DESC}', 'Clear sky')
         result = result.replace('{WEATHER_HUMIDITY}', '45%')
+        result = result.replace('{WEATHER_PRESSURE}', '1013 hPa')
         result = result.replace('{WEATHER_WIND_SPEED}', '5 km/h')
+        result = result.replace('{WEATHER_WIND_DIR}', 'NW')
+        result = result.replace('{WEATHER_CLOUDS}', '10%')
+        result = result.replace('{WEATHER_VISIBILITY}', '10 km')
+        result = result.replace('{WEATHER_SUNRISE}', '06:45')
+        result = result.replace('{WEATHER_SUNSET}', '18:30')
+        result = result.replace('{WEATHER_CITY}', 'Rockwood')
+        result = result.replace('{WEATHER_ICON_CODE}', '01d')
         return result
     
     def _create_editor_card(self) -> QScrollArea:
@@ -540,8 +608,7 @@ class OverlaySettingsPanel(QWidget):
         
         self.token_combo = ComboBox()
         self.token_combo.setMinimumWidth(180)
-        token_items = [label for label, token in TOKENS if token is not None]
-        self.token_combo.addItems(token_items)
+        self._populate_token_combo()
         token_row.addWidget(self.token_combo, 1)
         
         insert_btn = PushButton("Insert")
@@ -920,6 +987,9 @@ class OverlaySettingsPanel(QWidget):
     def _insert_token(self):
         """Insert selected token into text editor"""
         selected_label = self.token_combo.currentText()
+        # Skip if it's a header (starts with separator)
+        if selected_label.startswith("──"):
+            return
         for label, token in TOKENS:
             if label == selected_label and token is not None:
                 self.text_edit.insertPlainText(token)
@@ -1028,6 +1098,9 @@ class OverlaySettingsPanel(QWidget):
         self._selected_index = -1
         self._clear_editor()
         self._update_preview()
+        # Refresh token combo in case weather config changed
+        if hasattr(self, 'token_combo'):
+            self._populate_token_combo()
     
     def resizeEvent(self, event):
         """Update preview on resize"""

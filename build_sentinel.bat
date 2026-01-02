@@ -3,26 +3,16 @@ REM Build script for PFR Sentinel executable
 REM Creates a Windows executable using PyInstaller
 REM
 REM Usage:
-REM   build_sentinel.bat          # Build new PySide6 UI (default)
-REM   build_sentinel.bat --legacy # Build old Tkinter UI
+REM   build_sentinel.bat
 
 echo ========================================
 echo   PFR Sentinel - Build Executable
 echo ========================================
 echo.
 
-REM Check for UI flag
-set UI_TYPE=pyside
-set SPEC_FILE=PFRSentinel_PySide.spec
-set UI_NAME=PySide6 (Modern Fluent UI)
+set SPEC_FILE=PFRSentinel.spec
 
-if /i "%1"=="--legacy" (
-    set UI_TYPE=tkinter
-    set SPEC_FILE=PFRSentinel.spec
-    set UI_NAME=Tkinter (Legacy UI)
-)
-
-echo Building: %UI_NAME%
+echo Building: PySide6 Fluent UI
 echo Spec file: %SPEC_FILE%
 echo.
 
@@ -56,7 +46,6 @@ echo ========================================
 echo   Build completed successfully!
 echo ========================================
 echo.
-echo UI Version: %UI_NAME%
 echo Executable location:
 echo   dist\PFRSentinel\PFRSentinel.exe
 echo.
