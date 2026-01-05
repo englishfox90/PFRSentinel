@@ -27,6 +27,7 @@ class ImageProcessingPanel(QScrollArea):
     """
     
     settings_changed = Signal()
+    raw16_mode_changed = Signal(bool)  # Emitted when user toggles RAW16 mode
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -203,6 +204,36 @@ class ImageProcessingPanel(QScrollArea):
         self.preserve_blacks_switch.toggled.connect(self._on_stretch_settings_changed)
         stretch_card.add_widget(self.preserve_blacks_switch)
         
+        # Normalize channels (dark scene fix)
+        self.normalize_channels_switch = SwitchRow(
+            "Dark Scene Color Fix",
+            "Equalize R/G/B medians before stretch (fixes purple/magenta in dark images)"
+        )
+        self.normalize_channels_switch.set_checked(True)
+        self.normalize_channels_switch.toggled.connect(self._on_stretch_settings_changed)
+        stretch_card.add_widget(self.normalize_channels_switch)
+        
+        # Dark scene threshold
+        threshold_row = QHBoxLayout()
+        threshold_row.setSpacing(Spacing.md)
+        
+        self.dark_threshold_slider = ClickSlider(Qt.Horizontal)
+        self.dark_threshold_slider.setRange(1, 15)  # 0.01 to 0.15 scaled by 100
+        self.dark_threshold_slider.setValue(5)  # 0.05 default
+        self.dark_threshold_slider.setToolTip("Dark scene threshold: 0.05")
+        self.dark_threshold_slider.valueChanged.connect(self._on_stretch_settings_changed)
+        self.dark_threshold_slider.valueChanged.connect(lambda v: self.dark_threshold_slider.setToolTip(f"Dark scene threshold: {v/100.0:.2f}"))
+        threshold_row.addWidget(self.dark_threshold_slider, 1)
+        
+        self.dark_threshold_label = BodyLabel("0.05")
+        self.dark_threshold_label.setFixedWidth(50)
+        self.dark_threshold_label.setStyleSheet(f"color: {Colors.text_primary};")
+        threshold_row.addWidget(self.dark_threshold_label)
+        
+        threshold_widget = QWidget()
+        threshold_widget.setLayout(threshold_row)
+        stretch_card.add_row("Dark Threshold", threshold_widget, "Median below this enables color fix")
+        
         # Shadow aggressiveness
         shadow_row = QHBoxLayout()
         shadow_row.setSpacing(Spacing.md)
@@ -246,6 +277,49 @@ class ImageProcessingPanel(QScrollArea):
         stretch_card.add_row("Saturation Boost", boost_widget, "Post-stretch saturation enhancement")
         
         layout.addWidget(stretch_card)
+        
+        # === DEV MODE ===
+        dev_card = CollapsibleCard("Developer Mode", FluentIcon.DEVELOPER_TOOLS)
+        
+        self.dev_mode_switch = SwitchRow(
+            "Enable Dev Mode",
+            "Save raw images to raw_debug folder for troubleshooting"
+        )
+        self.dev_mode_switch.toggled.connect(self._on_dev_mode_changed)
+        dev_card.add_widget(self.dev_mode_switch)
+        
+        self.dev_stats_switch = SwitchRow(
+            "Log Channel Statistics",
+            "Log detailed per-channel histogram stats (R, G, B medians, MAD, etc.)"
+        )
+        self.dev_stats_switch.set_checked(True)
+        self.dev_stats_switch.toggled.connect(self._on_dev_stats_changed)
+        dev_card.add_widget(self.dev_stats_switch)
+        
+        # RAW16 mode toggle (requires camera support)
+        self.raw16_switch = SwitchRow(
+            "Use RAW16 Mode",
+            "Capture full sensor bit depth (12-14 bit) instead of RAW8"
+        )
+        self.raw16_switch.toggled.connect(self._on_raw16_changed)
+        self.raw16_switch.setEnabled(False)  # Disabled until camera connected
+        dev_card.add_widget(self.raw16_switch)
+        
+        # RAW16 status label
+        self.raw16_status = CaptionLabel("Connect camera to check RAW16 support")
+        self.raw16_status.setStyleSheet(f"color: {Colors.text_secondary}; padding: 4px 8px;")
+        dev_card.add_widget(self.raw16_status)
+        
+        # Info label
+        dev_info = CaptionLabel(
+            "When enabled, raw images are saved before any processing (stretch, overlays). "
+            "Check logs for per-channel statistics to diagnose color balance issues."
+        )
+        dev_info.setStyleSheet(f"color: {Colors.text_secondary}; padding: 8px;")
+        dev_info.setWordWrap(True)
+        dev_card.add_widget(dev_info)
+        
+        layout.addWidget(dev_card)
         
         layout.addStretch()
     
@@ -305,6 +379,7 @@ class ImageProcessingPanel(QScrollArea):
         self.target_median_label.setText(f"{self.target_median_slider.value() / 100:.2f}")
         self.shadow_label.setText(f"{self.shadow_slider.value() / 10:.1f}")
         self.sat_boost_label.setText(f"{self.sat_boost_slider.value() / 10:.1f}x")
+        self.dark_threshold_label.setText(f"{self.dark_threshold_slider.value() / 100:.2f}")
         
         if self._loading_config:
             return
@@ -313,10 +388,88 @@ class ImageProcessingPanel(QScrollArea):
             stretch['target_median'] = self.target_median_slider.value() / 100
             stretch['linked_stretch'] = self.linked_stretch_switch.is_checked()
             stretch['preserve_blacks'] = self.preserve_blacks_switch.is_checked()
+            stretch['normalize_channels'] = self.normalize_channels_switch.is_checked()
+            stretch['dark_scene_threshold'] = self.dark_threshold_slider.value() / 100
             stretch['shadow_aggressiveness'] = self.shadow_slider.value() / 10
             stretch['saturation_boost'] = self.sat_boost_slider.value() / 10
             self.main_window.config.set('auto_stretch', stretch)
             self.settings_changed.emit()
+    
+    def _on_dev_mode_changed(self, checked):
+        if self._loading_config:
+            return
+        if self.main_window and hasattr(self.main_window, 'config'):
+            dev_mode = self.main_window.config.get('dev_mode', {})
+            dev_mode['enabled'] = checked
+            self.main_window.config.set('dev_mode', dev_mode)
+            self.main_window.config.save()  # CRITICAL: Save immediately so setting persists
+            self.settings_changed.emit()
+            from services.logger import app_logger
+            app_logger.info(f"Dev Mode {'enabled' if checked else 'disabled'}: raw images will {'be saved to raw_debug/' if checked else 'not be saved'}")
+    
+    def _on_dev_stats_changed(self, checked):
+        if self._loading_config:
+            return
+        if self.main_window and hasattr(self.main_window, 'config'):
+            dev_mode = self.main_window.config.get('dev_mode', {})
+            dev_mode['save_histogram_stats'] = checked
+            self.main_window.config.set('dev_mode', dev_mode)
+            self.settings_changed.emit()
+    
+    def _on_raw16_changed(self, checked):
+        """Handle RAW16 mode toggle"""
+        if self._loading_config:
+            return
+        if self.main_window and hasattr(self.main_window, 'config'):
+            dev_mode = self.main_window.config.get('dev_mode', {})
+            dev_mode['use_raw16'] = checked
+            self.main_window.config.set('dev_mode', dev_mode)
+            self.main_window.config.save()
+            self.settings_changed.emit()
+            
+            # Emit signal to update camera if capturing
+            self.raw16_mode_changed.emit(checked)
+            
+            from services.logger import app_logger
+            app_logger.info(f"RAW16 mode {'enabled' if checked else 'disabled'}: {'Full' if checked else 'Standard 8-bit'} sensor bit depth will be used")
+    
+    def update_camera_capabilities(self, supports_raw16: bool, bit_depth: int):
+        """
+        Update RAW16 toggle based on connected camera's capabilities.
+        Called by main_window when camera connects.
+        
+        Args:
+            supports_raw16: Whether camera supports RAW16 mode
+            bit_depth: Camera's native ADC bit depth (e.g., 12)
+        """
+        self._loading_config = True
+        try:
+            if supports_raw16:
+                self.raw16_switch.setEnabled(True)
+                self.raw16_status.setText(f"✓ Camera supports RAW16 ({bit_depth}-bit ADC)")
+                self.raw16_status.setStyleSheet(f"color: {Colors.success_text}; padding: 4px 8px;")
+                # Restore saved preference
+                if self.main_window and hasattr(self.main_window, 'config'):
+                    dev_mode = self.main_window.config.get('dev_mode', {})
+                    self.raw16_switch.set_checked(dev_mode.get('use_raw16', False))
+            else:
+                self.raw16_switch.setEnabled(False)
+                self.raw16_switch.set_checked(False)
+                self.raw16_status.setText(f"✗ Camera does not support RAW16 ({bit_depth}-bit ADC, RAW8 only)")
+                self.raw16_status.setStyleSheet(f"color: {Colors.text_secondary}; padding: 4px 8px;")
+        finally:
+            self._loading_config = False
+    
+    def reset_camera_capabilities(self):
+        """Reset RAW16 toggle when camera disconnects"""
+        self._loading_config = True
+        try:
+            self.raw16_switch.setEnabled(False)
+            self.raw16_switch.set_checked(False)
+            self.raw16_status.setText("Connect camera to check RAW16 support")
+            self.raw16_status.setStyleSheet(f"color: {Colors.text_secondary}; padding: 4px 8px;")
+        finally:
+            self._loading_config = False
     
     # === CONFIG LOADING ===
     
@@ -354,6 +507,13 @@ class ImageProcessingPanel(QScrollArea):
             self.linked_stretch_switch.set_checked(stretch.get('linked_stretch', True))
             self.preserve_blacks_switch.set_checked(stretch.get('preserve_blacks', True))
             
+            # Dark scene color fix
+            self.normalize_channels_switch.set_checked(stretch.get('normalize_channels', True))
+            
+            dark_threshold = int(stretch.get('dark_scene_threshold', 0.05) * 100)
+            self.dark_threshold_slider.setValue(dark_threshold)
+            self.dark_threshold_label.setText(f"{dark_threshold / 100:.2f}")
+            
             shadow = int(stretch.get('shadow_aggressiveness', 2.8) * 10)
             self.shadow_slider.setValue(shadow)
             self.shadow_label.setText(f"{shadow / 10:.1f}")
@@ -361,5 +521,10 @@ class ImageProcessingPanel(QScrollArea):
             boost = int(stretch.get('saturation_boost', 1.5) * 10)
             self.sat_boost_slider.setValue(boost)
             self.sat_boost_label.setText(f"{boost / 10:.1f}x")
+            
+            # Dev mode
+            dev_mode = config.get('dev_mode', {})
+            self.dev_mode_switch.set_checked(dev_mode.get('enabled', False))
+            self.dev_stats_switch.set_checked(dev_mode.get('save_histogram_stats', True))
         finally:
             self._loading_config = False

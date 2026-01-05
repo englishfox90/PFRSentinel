@@ -69,6 +69,7 @@ class ZWOCamera:
         self.flip = flip  # 0=none, 1=horizontal, 2=vertical, 3=both
         self.offset = offset
         self.bayer_pattern = bayer_pattern  # RGGB, BGGR, GRBG, GBRG
+        self.use_raw16 = False  # Use RAW16 mode for full bit depth (set by dev mode)
         
         # Scheduled capture settings
         self.scheduled_capture_enabled = scheduled_capture_enabled
@@ -119,6 +120,26 @@ class ZWOCamera:
     def cameras(self, value):
         """Set cameras list"""
         self._connection.cameras = value
+    
+    @property
+    def supports_raw16(self) -> bool:
+        """Whether camera supports RAW16 mode (delegated to connection manager)"""
+        return self._connection.supports_raw16
+    
+    @property
+    def sensor_bit_depth(self) -> int:
+        """Camera's native ADC bit depth (delegated to connection manager)"""
+        return self._connection.bit_depth
+    
+    @property
+    def camera_info(self) -> dict:
+        """Camera properties dict (delegated to connection manager)"""
+        return self._connection.camera_info
+    
+    @property
+    def current_bit_depth(self) -> int:
+        """Current capture bit depth (8 for RAW8, 16 for RAW16)"""
+        return self._connection.current_bit_depth
     
     def __del__(self):
         """Destructor to ensure camera is disconnected when object is destroyed"""
@@ -189,6 +210,7 @@ class ZWOCamera:
             'wb_mode': self.wb_mode,
             'offset': self.offset,
             'flip': self.flip,
+            'use_raw16': self.use_raw16,  # Preserve RAW16 mode after reconnection
         }
         
         success = self._connection.reconnect_safe(
@@ -220,6 +242,7 @@ class ZWOCamera:
             'wb_mode': self.wb_mode,
             'offset': self.offset,
             'flip': self.flip,
+            'use_raw16': self.use_raw16,  # RAW16 mode for full bit depth
         }
         
         # Delegate connection to connection manager
@@ -245,7 +268,10 @@ class ZWOCamera:
             return
         
         self.log("Initializing calibration manager...")
-        self.calibration_manager = CameraCalibration(self.camera, self.asi, self.log)
+        self.calibration_manager = CameraCalibration(
+            self.camera, self.asi, self.log, 
+            bit_depth=self.current_bit_depth  # Pass current RAW mode bit depth
+        )
         self.calibration_manager.update_settings(
             exposure_seconds=self.exposure_seconds,
             gain=self.gain,
@@ -270,9 +296,59 @@ class ZWOCamera:
             'wb_mode': self.wb_mode,
             'offset': self.offset,
             'flip': self.flip,
+            'use_raw16': self.use_raw16,  # RAW16 mode for full bit depth
         }
         self._connection.configure(settings)
     
+    def set_raw16_mode(self, enabled: bool) -> bool:
+        """
+        Change RAW mode (RAW8/RAW16) during live capture.
+        
+        Args:
+            enabled: True for RAW16, False for RAW8
+            
+        Returns:
+            True if mode changed successfully
+        """
+        if not self.camera:
+            self.log("Cannot change RAW mode: camera not connected")
+            return False
+        
+        if enabled and not self.supports_raw16:
+            self.log("Camera does not support RAW16 mode")
+            return False
+        
+        try:
+            # Update our setting
+            self.use_raw16 = enabled
+            
+            # Get camera info for ROI
+            camera_info = self.camera.get_camera_property()
+            width = camera_info['MaxWidth']
+            height = camera_info['MaxHeight']
+            
+            # Set new image type
+            image_type = self.asi.ASI_IMG_RAW16 if enabled else self.asi.ASI_IMG_RAW8
+            self.camera.set_roi(start_x=0, start_y=0, width=width, height=height, 
+                               bins=1, image_type=image_type)
+            self.camera.set_image_type(image_type)
+            
+            # Update connection manager state
+            self._connection.current_image_type = image_type
+            self._connection.current_bit_depth = 16 if enabled else 8
+            
+            # Update calibration manager bit depth
+            if self.calibration_manager:
+                self.calibration_manager.bit_depth = self.current_bit_depth
+            
+            mode_str = "RAW16" if enabled else "RAW8"
+            self.log(f"Switched to {mode_str} mode ({self.current_bit_depth}-bit capture)")
+            return True
+            
+        except Exception as e:
+            self.log(f"Error changing RAW mode: {e}")
+            return False
+
     def disconnect_camera(self):
         """Disconnect from camera gracefully (idempotent - safe to call multiple times)"""
         # Stop capture first if active
@@ -357,7 +433,13 @@ class ZWOCamera:
             temp_info = self._get_temperature()
             
             # Convert raw Bayer to RGB using utility functions
-            img_rgb = debayer_raw_image(img_data, width, height, self.bayer_pattern)
+            # Pass bit_depth for RAW16 mode support, request raw16 for dev mode
+            img_rgb, img_rgb_raw16 = debayer_raw_image(
+                img_data, width, height, self.bayer_pattern, 
+                bit_depth=self.current_bit_depth,
+                return_raw16=(self.current_bit_depth == 16)  # Get raw uint16 for RAW16 mode
+            )
+            img_rgb_no_wb = img_rgb.copy()  # 8-bit pre-WB version for display
             img_rgb = apply_white_balance(img_rgb, self.wb_config)
             img = Image.fromarray(img_rgb, mode='RGB')
             
@@ -386,7 +468,15 @@ class ZWOCamera:
                 'STD_DEV': f"{stats['std_dev']:.2f}",
                 'P25': f"{stats['p25']:.1f}",
                 'P75': f"{stats['p75']:.1f}",
-                'P95': f"{stats['p95']:.1f}"
+                'P95': f"{stats['p95']:.1f}",
+                'RAW_RGB_NO_WB': img_rgb_no_wb,  # Pre-white-balance RGB (uint8) for display
+                'RAW_RGB_16BIT': img_rgb_raw16,  # Full uint16 RGB for dev mode (None if RAW8)
+                # Camera sensor info for proper FITS saving
+                'CAMERA_BIT_DEPTH': camera_info.get('BitDepth', 8),  # ADC bit depth (e.g., 12)
+                'IMAGE_BIT_DEPTH': self.current_bit_depth,  # Current capture mode (RAW8=8, RAW16=16)
+                'BAYER_PATTERN': self.bayer_pattern,
+                'PIXEL_SIZE': camera_info.get('PixelSize', 0),
+                'ELEC_PER_ADU': camera_info.get('ElecPerADU', 1.0),
             }
             
             return img, metadata
@@ -536,10 +626,15 @@ class ZWOCamera:
                 
                 except Exception as e:
                     consecutive_errors += 1
-                    self.log(f"✗ ERROR in capture loop: {e}")
+                    error_msg = str(e)
+                    self.log(f"✗ ERROR in capture loop: {error_msg}")
                     self.log(f"Consecutive errors: {consecutive_errors}/{max_reconnect_attempts}")
                     import traceback
                     self.log(f"Stack trace: {traceback.format_exc()}")
+                    
+                    # Notify error callback on first error (for Discord alerts etc.)
+                    if consecutive_errors == 1 and hasattr(self, 'on_error_callback') and self.on_error_callback:
+                        self.on_error_callback(f"Capture error: {error_msg} - attempting recovery...")
                     
                     # Try to recover from camera disconnect
                     if consecutive_errors <= max_reconnect_attempts:

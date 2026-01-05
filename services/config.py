@@ -109,7 +109,17 @@ DEFAULT_CONFIG = {
         "preserve_blacks": True,  # Keep true blacks dark instead of lifting to grey
         "black_point": 0.0,  # Manual black point (0.0-0.1) - pixels below this stay black
         "shadow_aggressiveness": 2.8,  # MAD multiplier for shadow clipping (1.5=aggressive, 2.8=standard, 4.0=gentle)
-        "saturation_boost": 1.5  # Post-stretch saturation boost (1.0=none, 1.5=moderate, 2.0=strong)
+        "saturation_boost": 1.5,  # Post-stretch saturation boost (1.0=none, 1.5=moderate, 2.0=strong)
+        "normalize_channels": True,  # Equalize R/G/B medians before stretch (fixes color cast in dark scenes)
+        "dark_scene_threshold": 0.05  # Median below this triggers dark scene mode (0.0-0.2)
+    },
+    
+    # Developer Mode settings - for troubleshooting raw image data
+    "dev_mode": {
+        "enabled": False,  # Save raw images before any processing
+        "raw_folder": "raw_debug",  # Subfolder name for raw images (relative to output_directory)
+        "save_histogram_stats": True,  # Log detailed per-channel statistics
+        "use_raw16": False  # Use RAW16 mode for full bit depth (requires camera support)
     },
     
     # Overlay settings

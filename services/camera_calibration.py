@@ -8,7 +8,7 @@ from .camera_utils import calculate_brightness, check_clipping
 class CameraCalibration:
     """Handles camera calibration and auto-exposure adjustments"""
     
-    def __init__(self, camera, asi, logger_callback=None):
+    def __init__(self, camera, asi, logger_callback=None, bit_depth=8):
         """
         Initialize calibration manager
         
@@ -16,10 +16,12 @@ class CameraCalibration:
             camera: ZWO camera instance
             asi: ZWO ASI SDK instance
             logger_callback: Optional callback for logging
+            bit_depth: Current capture bit depth (8 for RAW8, 16 for RAW16)
         """
         self.camera = camera
         self.asi = asi
         self.logger_callback = logger_callback
+        self.bit_depth = bit_depth  # RAW8 = 8, RAW16 = 16
         
         # Auto-exposure settings
         self.target_brightness = 30
@@ -90,7 +92,13 @@ class CameraCalibration:
                 height = camera_info['MaxHeight']
                 
                 # Convert to numpy array for brightness calculation
-                img_array = np.frombuffer(data, dtype=np.uint8).reshape((height, width))
+                # Use correct dtype based on RAW mode (RAW8 = uint8, RAW16 = uint16)
+                dtype = np.uint16 if self.bit_depth == 16 else np.uint8
+                img_array = np.frombuffer(data, dtype=dtype).reshape((height, width))
+                
+                # For brightness calculation, scale RAW16 to 8-bit range
+                if self.bit_depth == 16:
+                    img_array = (img_array / 256).astype(np.uint8)
                 
                 # Calculate brightness
                 brightness = calculate_brightness(
