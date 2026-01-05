@@ -68,6 +68,9 @@ installer/Output/
 output/
 watch_dir_test/
 test_output/
+stretch_tuner_out/
+noise_models/
+colorized_out/
 
 # Temporary Files
 *.tmp
