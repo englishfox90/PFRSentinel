@@ -80,6 +80,28 @@ MODE_DEFAULTS: dict[str, RecipeParams] = {
         chroma_blur=1,
         midtone_wb=False,
     ),
+    "NIGHT_ROOF_CLOSED_VERY_DARK": RecipeParams(
+        # For p99 < 0.05 frames (extreme low light)
+        black_pct=5.0,
+        white_pct=99.9,
+        asinh=30.0,
+        gamma=1.05,
+        color_strength=1.20,
+        chroma_clip=0.55,
+        blue_suppress=0.85,
+        blue_floor=0.020,
+        desaturate=0.05,
+        corner_sigma_bp=1.5,
+        rgb_bias_subtract=True,
+        hp_dab=True,
+        hp_k=7.0,
+        hp_max_luma=0.35,
+        shadow_denoise=0.80,
+        shadow_start=0.0,
+        shadow_end=0.30,
+        chroma_blur=6,
+        midtone_wb=False,
+    ),
     "NIGHT_ROOF_OPEN": RecipeParams(
         black_pct=3.0,
         white_pct=99.9,
@@ -223,7 +245,12 @@ def apply_bp_guardrails(
 
     raw_bp = corner_sigma_bp * sigma
     max_bp_wp = 0.25 * wp
-    max_bp_p10 = p10 * 1.5  # Allow slightly above p10
+    
+    # For very dark frames (p10 near 0), skip p10 guardrail to allow noise floor clipping
+    if p10 < 0.001:
+        max_bp_p10 = raw_bp  # Don't limit based on p10 for extreme low-light
+    else:
+        max_bp_p10 = p10 * 1.5  # Allow slightly above p10
 
     clamped_bp = min(raw_bp, max_bp_wp, max_bp_p10)
 

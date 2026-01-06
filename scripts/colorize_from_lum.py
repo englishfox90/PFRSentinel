@@ -105,6 +105,10 @@ def process_single(
         closed_delta=args.closed_delta,
     )
     mode = mode_info["mode"]
+    
+    # Refine mode for very dark frames
+    if mode == "NIGHT_ROOF_CLOSED" and mode_info.get("stats", {}).get("very_dark_frame", False):
+        mode = "NIGHT_ROOF_CLOSED_VERY_DARK"
 
     # Bias subtract LUM (always, after classification)
     lum01_corr = np.clip(lum01 - bias, 0, 1)

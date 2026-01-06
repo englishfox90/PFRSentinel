@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
         
         # RAW16 mode toggle - update camera on the fly if capturing
-        self.processing_panel.raw16_mode_changed.connect(self._on_raw16_mode_changed)
+        self.capture_panel.raw16_mode_changed.connect(self._on_raw16_mode_changed)
         
         # Settings panel actions
         self.settings_panel.test_discord_requested.connect(self._on_test_discord)
@@ -707,9 +707,9 @@ class MainWindow(QMainWindow):
             
             if mode == 'camera' and self.camera_controller:
                 self.camera_controller.stop_capture()
-                # Reset camera capabilities in image processing panel
-                if hasattr(self, 'processing_panel'):
-                    self.processing_panel.reset_camera_capabilities()
+                # Reset camera capabilities in capture settings panel
+                if hasattr(self, 'capture_panel'):
+                    self.capture_panel.reset_camera_capabilities()
             elif self.watch_controller:
                 self.watch_controller.stop_watching()
             
@@ -748,12 +748,12 @@ class MainWindow(QMainWindow):
             self.app_bar.camera_chip.set_label('Connected')
             app_logger.info("Camera capture started")
             
-            # Update image processing panel with camera capabilities (RAW16 support)
-            if self.camera_controller.zwo_camera and hasattr(self, 'processing_panel'):
+            # Update capture settings panel with camera capabilities (RAW16 support)
+            if self.camera_controller.zwo_camera and hasattr(self, 'capture_panel'):
                 try:
                     supports_raw16 = self.camera_controller.zwo_camera.supports_raw16
                     bit_depth = self.camera_controller.zwo_camera.sensor_bit_depth
-                    self.processing_panel.update_camera_capabilities(supports_raw16, bit_depth)
+                    self.capture_panel.update_camera_capabilities(supports_raw16, bit_depth)
                 except Exception as e:
                     app_logger.debug(f"Could not update camera capabilities: {e}")
         else:
@@ -827,7 +827,7 @@ class MainWindow(QMainWindow):
         self.config_changed.emit()
     
     def _on_raw16_mode_changed(self, enabled: bool):
-        """Handle RAW16 mode toggle from image processing panel"""
+        """Handle RAW16 mode toggle from capture settings panel"""
         if not self.camera_controller or not self.camera_controller.is_capturing:
             # Not capturing - setting will apply on next capture start
             return
@@ -837,10 +837,10 @@ class MainWindow(QMainWindow):
             success = self.camera_controller.zwo_camera.set_raw16_mode(enabled)
             if not success:
                 # Revert toggle if mode change failed
-                if hasattr(self, 'processing_panel'):
-                    self.processing_panel._loading_config = True
-                    self.processing_panel.raw16_switch.set_checked(not enabled)
-                    self.processing_panel._loading_config = False
+                if hasattr(self, 'capture_panel'):
+                    self.capture_panel._loading_config = True
+                    self.capture_panel.raw16_switch.set_checked(not enabled)
+                    self.capture_panel._loading_config = False
     
     def save_config(self):
         """Save current configuration"""

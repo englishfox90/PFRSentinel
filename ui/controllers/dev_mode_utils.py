@@ -2,23 +2,31 @@
 Dev Mode Utilities for Image Processor
 
 Handles saving debug data (FITS files, calibration JSON) when dev_mode is enabled.
-Contains image analysis functions for stretch calibration and mode detection.
+Orchestrates image analysis, file writing, and context gathering.
 """
 import os
-import json
 import numpy as np
-from datetime import datetime, date
-from zoneinfo import ZoneInfo
-
-try:
-    from astral import LocationInfo
-    from astral.sun import sun
-    ASTRAL_AVAILABLE = True
-except ImportError:
-    ASTRAL_AVAILABLE = False
+from datetime import datetime
 
 from services.logger import app_logger
-from services.config import Config
+
+# Import context fetchers (moon, roof, weather)
+from ui.controllers.context_fetchers import (
+    compute_moon_context,
+    fetch_roof_state,
+    fetch_weather_context,
+    estimate_seeing_conditions,
+)
+
+# Import extracted modules
+from ui.controllers.file_writers import save_raw_fits, save_luminance_fits, write_json
+from ui.controllers.time_context import compute_time_context
+from ui.controllers.image_analysis import (
+    infer_normalization_denom,
+    compute_luminance,
+    compute_corner_analysis,
+    log_channel_statistics,
+)
 
 
 class DevModeDataSaver:
@@ -53,7 +61,7 @@ class DevModeDataSaver:
             image_bit_depth = metadata.get('IMAGE_BIT_DEPTH', 8)
             
             # Infer correct normalization denominator with full diagnostics
-            denom, denom_reason, denom_details = self._infer_normalization_denom(
+            denom, denom_reason, denom_details = infer_normalization_denom(
                 raw_array, image_bit_depth, camera_bit_depth
             )
             
@@ -92,33 +100,27 @@ class DevModeDataSaver:
             
             # === Save raw RGB/mono FITS ===
             raw_fits_path = os.path.join(raw_dir, f"raw_{timestamp}.fits")
-            self._save_raw_fits(raw_fits_path, raw_array, image_bit_depth, base_header)
+            save_raw_fits(raw_fits_path, raw_array, image_bit_depth, base_header)
             
             # === Compute normalized array for statistics ===
             norm_array = raw_array.astype(np.float32) / denom
             
             # === Log per-channel statistics ===
             if dev_config.get('save_histogram_stats', True):
-                self._log_channel_statistics(norm_array, raw_array)
+                log_channel_statistics(norm_array, raw_array)
             
             # === Compute and save grayscale luminance FITS ===
-            lum = self._compute_luminance(norm_array)
+            lum = compute_luminance(norm_array)
             
             lum_fits_path = os.path.join(raw_dir, f"lum_{timestamp}.fits")
-            lum_header = base_header.copy()
-            lum_header['COMMENT'] = 'Grayscale luminance (0.299R + 0.587G + 0.114B)'
-            lum_header['DATATYPE'] = ('float32', 'Luminance in 0..1 range')
-            self._write_fits(lum_fits_path, lum.astype(np.float32), lum_header)
-            app_logger.info(
-                f"DEV MODE: ✓ Saved luminance FITS to lum_{timestamp}.fits (shape: {lum.shape})"
-            )
+            save_luminance_fits(lum_fits_path, lum, base_header)
             
             # === Generate and save stretch calibration JSON ===
             calibration = self._compute_stretch_calibration(
                 lum, norm_array, metadata, denom, denom_reason, denom_details
             )
             json_path = os.path.join(raw_dir, f"calibration_{timestamp}.json")
-            self._write_json(json_path, calibration)
+            write_json(json_path, calibration)
             app_logger.info(f"DEV MODE: ✓ Saved calibration JSON to calibration_{timestamp}.json")
             
             # Log key calibration values
@@ -144,275 +146,6 @@ class DevModeDataSaver:
             app_logger.error(f"DEV MODE: Failed to save debug data: {e}")
             app_logger.error(traceback.format_exc())
     
-    def _infer_normalization_denom(self, raw_array, image_bit_depth, camera_bit_depth):
-        """
-        Infer the correct normalization denominator based on actual data.
-        
-        Analyzes actual pixel values to detect:
-        - 8-bit payload in 16-bit container
-        - 12-bit data (max <= 4095)
-        - 12-bit left-shifted to 16-bit (many multiples of 16)
-        - True 16-bit data
-        """
-        # Early exit for 8-bit capture mode
-        if image_bit_depth == 8:
-            return 255.0, "8-bit capture mode (IMAGE_BIT_DEPTH=8)", {
-                'raw_min': int(np.min(raw_array)),
-                'raw_max': int(np.max(raw_array)),
-                'mul16_rate': 0.0,
-                'unique_ratio': 1.0,
-                'unique_count': 0,
-            }
-        
-        # For 16-bit container, analyze actual values
-        if raw_array.dtype == np.uint8:
-            return 255.0, "8-bit array dtype despite IMAGE_BIT_DEPTH=16", {
-                'raw_min': int(np.min(raw_array)),
-                'raw_max': int(np.max(raw_array)),
-                'mul16_rate': 0.0,
-                'unique_ratio': 1.0,
-                'unique_count': 0,
-            }
-        
-        # Compute statistics on flattened array
-        flat = raw_array.flatten().astype(np.uint16)
-        
-        raw_min = int(np.min(flat))
-        raw_max = int(np.max(flat))
-        raw_median = int(np.median(flat))
-        raw_p99 = int(np.percentile(flat, 99))
-        
-        # Sample for expensive computations
-        sample_size = min(100000, flat.size)
-        if flat.size > sample_size:
-            sample = flat[np.random.choice(flat.size, sample_size, replace=False)]
-        else:
-            sample = flat
-        
-        # Detect left-shifted 12-bit data (values are multiples of 16 = 2^4)
-        mul16_rate = float(np.mean(sample % 16 == 0))
-        
-        # Unique value analysis
-        unique_vals = np.unique(sample)
-        unique_count = len(unique_vals)
-        unique_ratio = unique_count / len(sample)
-        
-        # Build base details dict
-        details = {
-            'raw_min': raw_min,
-            'raw_max': raw_max,
-            'raw_median': raw_median,
-            'raw_p99': raw_p99,
-            'mul16_rate': round(mul16_rate, 4),
-            'unique_count': unique_count,
-            'unique_ratio': round(unique_ratio, 6),
-            'sample_size': len(sample),
-        }
-        
-        # === Inference rules (in priority order) ===
-        
-        # Rule 1: 8-bit payload in 16-bit container
-        if raw_max <= 255:
-            details['suggested_downshift_bits'] = 0
-            return 255.0, f"8-bit payload detected (max={raw_max})", details
-        
-        # Rule 2: 12-bit range (max <= 4095)
-        if raw_max <= 4095:
-            details['suggested_downshift_bits'] = 0
-            return 4095.0, f"12-bit range detected (max={raw_max})", details
-        
-        # Rule 3: Left-shifted 12-bit data
-        if mul16_rate >= 0.90:
-            details['suggested_downshift_bits'] = 4
-            return 65535.0, f"12-bit left-shifted (mul16_rate={mul16_rate:.2f})", details
-        
-        # Rule 4: Default to 16-bit
-        details['suggested_downshift_bits'] = 0
-        return 65535.0, f"16-bit range detected (max={raw_max})", details
-    
-    def _compute_luminance(self, norm_array):
-        """Compute luminance from normalized RGB array using Rec.601 coefficients."""
-        if norm_array.ndim == 2:
-            return norm_array
-        elif norm_array.ndim == 3 and norm_array.shape[2] == 3:
-            return 0.299 * norm_array[:,:,0] + 0.587 * norm_array[:,:,1] + 0.114 * norm_array[:,:,2]
-        else:
-            app_logger.warning(f"DEV MODE: Unexpected array shape {norm_array.shape}")
-            return norm_array.mean(axis=-1) if norm_array.ndim > 2 else norm_array
-    
-    def _save_raw_fits(self, path, raw_array, image_bit_depth, header_kv):
-        """Save raw image data as FITS, preserving true dynamic range."""
-        try:
-            from astropy.io import fits
-            
-            if image_bit_depth == 16:
-                data = raw_array.astype(np.uint16)
-                header_kv['SCALED'] = (False, 'Data saved without scaling')
-                header_kv['COMMENT'] = 'RAW16 data - true sensor values preserved'
-            else:
-                data = (raw_array.astype(np.uint16) * 257)
-                header_kv['SCALED'] = (True, 'RAW8 scaled to 16-bit (x257)')
-                header_kv['COMMENT'] = 'RAW8 data scaled to 16-bit for FITS'
-            
-            if data.ndim == 3 and data.shape[2] == 3:
-                data = np.transpose(data, (2, 0, 1))
-                header_kv['COLORTYP'] = ('RGB', 'Color type of image')
-            elif data.ndim == 2:
-                header_kv['COLORTYP'] = ('MONO', 'Grayscale/mono image')
-            
-            self._write_fits(path, data, header_kv)
-            app_logger.info(
-                f"DEV MODE: ✓ Saved raw FITS to {os.path.basename(path)} "
-                f"(shape: {data.shape}, scaled={image_bit_depth != 16})"
-            )
-            
-        except ImportError:
-            from PIL import Image
-            tiff_path = path.replace('.fits', '.tiff')
-            Image.fromarray(raw_array).save(tiff_path, 'TIFF', compression=None)
-            app_logger.info(
-                f"DEV MODE: ✓ Saved raw TIFF to {os.path.basename(tiff_path)} "
-                "(astropy not installed)"
-            )
-    
-    def _write_fits(self, path, data, header_kv):
-        """Write data to FITS file with header keywords."""
-        from astropy.io import fits
-        
-        hdu = fits.PrimaryHDU(data)
-        for key, val in header_kv.items():
-            if isinstance(val, tuple) and len(val) == 2:
-                hdu.header[key] = val
-            else:
-                hdu.header[key] = val
-        
-        hdu.writeto(path, overwrite=True)
-    
-    def _write_json(self, path, payload):
-        """Write dictionary to JSON file with pretty formatting"""
-        with open(path, 'w') as f:
-            json.dump(payload, f, indent=2, default=str)
-    
-    def _compute_corner_analysis(self, lum, norm_array=None, roi_size=50, margin=5):
-        """
-        Compute corner-vs-center analysis for mode classification.
-        
-        This analysis helps detect:
-        - Roof open vs closed (corners ~= center when closed)
-        - Day vs night (absolute brightness levels)
-        - Overscan bias levels (corner medians)
-        """
-        h, w = lum.shape
-        
-        # Define corner ROIs (50x50, 5px margin from edge)
-        corners = {
-            'tl': lum[margin:margin+roi_size, margin:margin+roi_size],
-            'tr': lum[margin:margin+roi_size, w-margin-roi_size:w-margin],
-            'bl': lum[h-margin-roi_size:h-margin, margin:margin+roi_size],
-            'br': lum[h-margin-roi_size:h-margin, w-margin-roi_size:w-margin],
-        }
-        
-        all_corners = np.concatenate([c.flatten() for c in corners.values()])
-        
-        # Define center ROI (central 25% of image)
-        ch, cw = h // 4, w // 4
-        center = lum[ch:3*ch, cw:3*cw]
-        
-        # Compute corner stats
-        corner_med = float(np.median(all_corners))
-        corner_p90 = float(np.percentile(all_corners, 90))
-        corner_mad = float(np.median(np.abs(all_corners - corner_med)))
-        corner_stddev = float(corner_mad * 1.4826)
-        
-        corner_meds = {k: float(np.median(c)) for k, c in corners.items()}
-        
-        # Compute center stats
-        center_flat = center.flatten()
-        center_med = float(np.median(center_flat))
-        center_p90 = float(np.percentile(center_flat, 90))
-        
-        # Ratios for mode classification
-        corner_to_center_ratio = corner_med / center_med if center_med > 0.001 else 1.0
-        center_minus_corner = center_med - corner_med
-        
-        result = {
-            'roi_size': roi_size,
-            'margin': margin,
-            'corner_med': round(corner_med, 6),
-            'corner_p90': round(corner_p90, 6),
-            'corner_stddev': round(corner_stddev, 6),
-            'corner_meds': {k: round(v, 6) for k, v in corner_meds.items()},
-            'center_med': round(center_med, 6),
-            'center_p90': round(center_p90, 6),
-            'corner_to_center_ratio': round(corner_to_center_ratio, 4),
-            'center_minus_corner': round(center_minus_corner, 6),
-        }
-        
-        # Per-channel RGB corner bias (if RGB array provided)
-        if norm_array is not None and norm_array.ndim == 3 and norm_array.shape[2] == 3:
-            rgb_bias = {}
-            for c, name in enumerate(['bias_r', 'bias_g', 'bias_b']):
-                channel = norm_array[:,:,c]
-                ch_corners = np.concatenate([
-                    channel[margin:margin+roi_size, margin:margin+roi_size].flatten(),
-                    channel[margin:margin+roi_size, w-margin-roi_size:w-margin].flatten(),
-                    channel[h-margin-roi_size:h-margin, margin:margin+roi_size].flatten(),
-                    channel[h-margin-roi_size:h-margin, w-margin-roi_size:w-margin].flatten(),
-                ])
-                rgb_bias[name] = round(float(np.median(ch_corners)), 6)
-            result['rgb_corner_bias'] = rgb_bias
-        
-        return result
-    
-    def _log_channel_statistics(self, norm_array, raw_array):
-        """Log detailed per-channel statistics"""
-        channel_names = ['R', 'G', 'B'] if norm_array.ndim == 3 and norm_array.shape[2] == 3 else ['Y']
-        
-        for c, channel_name in enumerate(channel_names):
-            if norm_array.ndim == 3:
-                channel = norm_array[:, :, c]
-                raw_channel = raw_array[:, :, c]
-            else:
-                channel = norm_array
-                raw_channel = raw_array
-            
-            median = np.median(channel)
-            mean = np.mean(channel)
-            std = np.std(channel)
-            min_val = np.min(channel)
-            max_val = np.max(channel)
-            p1 = np.percentile(channel, 1)
-            p99 = np.percentile(channel, 99)
-            mad = np.median(np.abs(channel - median))
-            
-            raw_min = int(np.min(raw_channel))
-            raw_max = int(np.max(raw_channel))
-            
-            app_logger.info(
-                f"DEV MODE {channel_name}: median={median:.4f}, mean={mean:.4f}, "
-                f"std={std:.4f}, MAD={mad:.4f}, min={min_val:.4f}, max={max_val:.4f}, "
-                f"p1={p1:.4f}, p99={p99:.4f}, raw_range=[{raw_min}-{raw_max}]"
-            )
-            
-            if norm_array.ndim == 2:
-                break
-        
-        # Log luminance stats for RGB
-        if norm_array.ndim == 3 and norm_array.shape[2] == 3:
-            lum = self._compute_luminance(norm_array)
-            app_logger.info(
-                f"DEV MODE Luminance: median={np.median(lum):.4f}, mean={np.mean(lum):.4f}, "
-                f"MAD={np.median(np.abs(lum - np.median(lum))):.4f}"
-            )
-            
-            r_mean = np.mean(norm_array[:,:,0])
-            g_mean = np.mean(norm_array[:,:,1])
-            b_mean = np.mean(norm_array[:,:,2])
-            app_logger.info(
-                f"DEV MODE Color Balance: R/G={r_mean/g_mean:.3f}, B/G={b_mean/g_mean:.3f} "
-                f"(1.0 = neutral)"
-            )
-    
     def _compute_stretch_calibration(self, lum, norm_array, metadata, denom, denom_reason, denom_details):
         """
         Compute stretch calibration parameters from luminance.
@@ -424,6 +157,10 @@ class DevModeDataSaver:
             - Stretch parameters (black/white point, percentiles)
             - Corner analysis (for mode detection: day/night, roof open/closed)
             - Color balance
+            - Moon phase and visibility
+            - Roof state from NINA
+            - Weather conditions
+            - Estimated seeing conditions
         """
         # Extended percentile stats
         p1 = float(np.percentile(lum, 1))
@@ -445,7 +182,7 @@ class DevModeDataSaver:
             asinh_strength = 500
         
         # Compute corner analysis
-        corner_analysis = self._compute_corner_analysis(lum, norm_array)
+        corner_analysis = compute_corner_analysis(lum, norm_array)
         
         # Color balance
         color_balance = {}
@@ -458,6 +195,9 @@ class DevModeDataSaver:
                     'r_g': round(r_mean / g_mean, 3),
                     'b_g': round(b_mean / g_mean, 3)
                 }
+        
+        # Fetch weather once for both weather_context and seeing_estimate
+        weather_ctx = fetch_weather_context()
         
         return {
             'timestamp': datetime.now().isoformat(),
@@ -495,272 +235,11 @@ class DevModeDataSaver:
             },
             'corner_analysis': corner_analysis,
             'color_balance': color_balance,
-            'time_context': self._compute_time_context(),
-        }
-    
-    def _compute_time_context(self):
-        """
-        Compute time-of-day context for mode classification using astral.
-        
-        Uses configured latitude/longitude from weather settings to calculate
-        accurate sunrise, sunset, and twilight times.
-        
-        Twilight phases:
-        - Civil twilight: Sun 0° to -6° below horizon (enough light for outdoor activities)
-        - Nautical twilight: Sun -6° to -12° (horizon still visible at sea)
-        - Astronomical twilight: Sun -12° to -18° (sky dark enough for astronomy)
-        - Night: Sun below -18° (true astronomical darkness)
-        
-        Returns:
-            dict with time context information including accurate twilight phases
-        """
-        now = datetime.now()
-        hour = now.hour
-        
-        # Try to get location from config for accurate calculations
-        lat, lon, location_name = self._get_configured_location()
-        
-        # If astral available and location configured, use accurate calculations
-        if ASTRAL_AVAILABLE and lat is not None and lon is not None:
-            return self._compute_astral_time_context(now, lat, lon, location_name)
-        
-        # Fallback to simple hour-based classification
-        return self._compute_simple_time_context(now)
-    
-    def _get_configured_location(self):
-        """
-        Get latitude/longitude from weather config.
-        
-        Returns:
-            tuple: (latitude, longitude, location_name) or (None, None, None) if not configured
-        """
-        try:
-            config = Config()
-            weather_config = config.get('weather', {})
-            
-            lat_str = weather_config.get('latitude', '')
-            lon_str = weather_config.get('longitude', '')
-            location_name = weather_config.get('location', 'Observatory')
-            
-            if lat_str and lon_str:
-                return float(lat_str), float(lon_str), location_name
-            
-            return None, None, None
-        except Exception as e:
-            app_logger.debug(f"Could not get location from config: {e}")
-            return None, None, None
-    
-    def _compute_astral_time_context(self, now, lat, lon, location_name):
-        """
-        Compute accurate twilight times using astral package.
-        
-        Args:
-            now: Current datetime (naive local time)
-            lat: Latitude in degrees
-            lon: Longitude in degrees  
-            location_name: Name of location for logging
-            
-        Returns:
-            dict with accurate sun position and twilight phase
-        """
-        try:
-            # Create location (timezone will be inferred or use local)
-            loc = LocationInfo(
-                name=location_name,
-                region="",
-                timezone="UTC",  # astral returns UTC times
-                latitude=lat,
-                longitude=lon
-            )
-            
-            # Get sun times for today (returns UTC)
-            today = date.today()
-            s = sun(loc.observer, date=today)
-            
-            # Convert now to UTC for comparison with astral times
-            # Assume naive datetime is local time
-            import time
-            local_tz_offset = time.timezone if time.daylight == 0 else time.altzone
-            from datetime import timedelta
-            now_utc = now + timedelta(seconds=local_tz_offset)
-            
-            # Extract times (all in UTC, strip tzinfo for comparison)
-            dawn = s.get('dawn')
-            sunrise = s.get('sunrise')
-            noon = s.get('noon')
-            sunset = s.get('sunset')
-            dusk = s.get('dusk')
-            
-            # Strip timezone for easier comparison
-            def strip_tz(dt):
-                return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
-            
-            dawn_naive = strip_tz(dawn)
-            sunrise_naive = strip_tz(sunrise)
-            noon_naive = strip_tz(noon)
-            sunset_naive = strip_tz(sunset)
-            dusk_naive = strip_tz(dusk)
-            
-            # Create dict with naive UTC times for classification
-            sun_times_naive = {
-                'dawn': dawn_naive,
-                'sunrise': sunrise_naive,
-                'noon': noon_naive,
-                'sunset': sunset_naive,
-                'dusk': dusk_naive,
-            }
-            
-            # Determine current period based on sun position (now_utc vs UTC sun times)
-            period, detailed_period = self._classify_time_period(now_utc, sun_times_naive)
-            
-            # Is it astronomical night? (sun more than 18° below horizon)
-            is_astro_night = False
-            try:
-                # Get astronomical twilight times (sun at -18°)
-                from astral.sun import twilight
-                astro_twilight = twilight(loc.observer, date=today, direction=1)  # Dawn
-                astro_dusk = twilight(loc.observer, date=today, direction=-1)  # Dusk
-                
-                if astro_twilight and astro_dusk:
-                    astro_dawn_start = strip_tz(astro_twilight[0])
-                    astro_dusk_end = strip_tz(astro_dusk[1])
-                    # Astronomical night: before dawn starts OR after dusk ends
-                    is_astro_night = now_utc < astro_dawn_start or now_utc > astro_dusk_end
-            except Exception as e:
-                app_logger.debug(f"Could not get astronomical twilight: {e}")
-                # Fallback: use civil twilight as proxy
-                if dawn_naive and dusk_naive:
-                    is_astro_night = now_utc < dawn_naive or now_utc > dusk_naive
-            
-            return {
-                'hour': now.hour,
-                'minute': now.minute,
-                'period': period,
-                'detailed_period': detailed_period,
-                'is_daylight': period == 'day',
-                'is_astronomical_night': is_astro_night,
-                'location': {
-                    'name': location_name,
-                    'latitude': lat,
-                    'longitude': lon,
-                },
-                'sun_times': {
-                    'dawn': dawn.isoformat() if dawn else None,
-                    'sunrise': sunrise.isoformat() if sunrise else None,
-                    'noon': noon.isoformat() if noon else None,
-                    'sunset': sunset.isoformat() if sunset else None,
-                    'dusk': dusk.isoformat() if dusk else None,
-                },
-                'calculation_method': 'astral',
-            }
-            
-        except Exception as e:
-            app_logger.warning(f"Astral calculation failed, using fallback: {e}")
-            return self._compute_simple_time_context(now)
-    
-    def _classify_time_period(self, now, sun_times):
-        """
-        Classify current time into period and detailed_period.
-        
-        Args:
-            now: Current datetime (naive, local time)
-            sun_times: Dict from astral.sun.sun() with dawn/sunrise/sunset/dusk
-            
-        Returns:
-            tuple: (period, detailed_period)
-        """
-        # Make times comparable (strip timezone for comparison)
-        def to_naive(dt):
-            if dt is None:
-                return None
-            return dt.replace(tzinfo=None) if dt.tzinfo else dt
-        
-        dawn = to_naive(sun_times.get('dawn'))
-        sunrise = to_naive(sun_times.get('sunrise'))
-        noon = to_naive(sun_times.get('noon'))
-        sunset = to_naive(sun_times.get('sunset'))
-        dusk = to_naive(sun_times.get('dusk'))
-        
-        # Determine period
-        if sunrise and sunset and sunrise <= now <= sunset:
-            period = 'day'
-        elif (dawn and sunrise and dawn <= now < sunrise) or \
-             (sunset and dusk and sunset < now <= dusk):
-            period = 'twilight'
-        else:
-            period = 'night'
-        
-        # Determine detailed period
-        if dawn and now < dawn:
-            detailed_period = 'night'
-        elif dawn and sunrise and dawn <= now < sunrise:
-            detailed_period = 'dawn'
-        elif sunrise and noon and sunrise <= now < noon:
-            detailed_period = 'morning'
-        elif noon and sunset:
-            # Afternoon until ~2 hours before sunset
-            afternoon_end = sunset.replace(
-                hour=max(0, sunset.hour - 2),
-                minute=sunset.minute
-            )
-            if noon <= now < afternoon_end:
-                detailed_period = 'afternoon'
-            elif afternoon_end <= now < sunset:
-                detailed_period = 'evening'
-            elif sunset <= now:
-                if dusk and now <= dusk:
-                    detailed_period = 'dusk'
-                else:
-                    detailed_period = 'night'
-            else:
-                detailed_period = 'afternoon'
-        else:
-            # Fallback based on hour
-            detailed_period = self._hour_to_detailed_period(now.hour)
-        
-        return period, detailed_period
-    
-    def _hour_to_detailed_period(self, hour):
-        """Simple hour-based detailed period (fallback)."""
-        if 5 <= hour < 8:
-            return 'dawn'
-        elif 8 <= hour < 12:
-            return 'morning'
-        elif 12 <= hour < 17:
-            return 'afternoon'
-        elif 17 <= hour < 20:
-            return 'evening'
-        elif 20 <= hour < 22:
-            return 'dusk'
-        else:
-            return 'night'
-    
-    def _compute_simple_time_context(self, now):
-        """
-        Fallback: Simple hour-based time classification.
-        
-        Used when astral is not available or location not configured.
-        """
-        hour = now.hour
-        
-        # Simple day/night classification
-        if 6 <= hour < 18:
-            period = 'day'
-        elif 18 <= hour < 21 or 5 <= hour < 6:
-            period = 'twilight'
-        else:
-            period = 'night'
-        
-        detailed_period = self._hour_to_detailed_period(hour)
-        
-        return {
-            'hour': hour,
-            'minute': now.minute,
-            'period': period,
-            'detailed_period': detailed_period,
-            'is_daylight': 6 <= hour < 20,
-            'is_astronomical_night': hour >= 22 or hour < 5,
-            'calculation_method': 'simple_hour_based',
+            'time_context': compute_time_context(),
+            'moon_context': compute_moon_context(),
+            'roof_state': fetch_roof_state(),
+            'weather_context': weather_ctx,
+            'seeing_estimate': estimate_seeing_conditions(weather_ctx),
         }
 
 

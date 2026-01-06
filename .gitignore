@@ -69,6 +69,7 @@ test_output/
 stretch_tuner_out/
 noise_models/
 colorize_out/
+stacked_out/
 
 # Temporary Files
 *.tmp
