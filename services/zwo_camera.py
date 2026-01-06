@@ -511,6 +511,15 @@ class ZWOCamera:
         max_reconnect_attempts = 5
         last_schedule_log = None  # Track last schedule status to avoid log spam
         
+        # Recalibration rate limiting to prevent infinite loops
+        # (e.g., someone turning lights on/off repeatedly)
+        last_recalibration_time = 0
+        recalibration_cooldown_sec = 60  # Minimum 60 seconds between recalibrations
+        recalibration_count = 0  # Count recalibrations in current window
+        recalibration_window_start = time.time()
+        max_recalibrations_per_window = 3  # Max 3 recalibrations per 10-minute window
+        recalibration_window_sec = 600  # 10-minute window
+        
         try:
             # Run rapid calibration if auto exposure is enabled
             if self.auto_exposure and not self.calibration_complete:
@@ -598,18 +607,63 @@ class ZWOCamera:
                     consecutive_errors = 0
                     
                     # Auto-adjust exposure based on image brightness
+                    # Check if drastic brightness change requires recalibration
                     if self.auto_exposure:
                         img_array = np.array(img)
-                        self.adjust_exposure_auto(img_array)
+                        exposure_result = self.adjust_exposure_auto(img_array)
+                        if exposure_result and exposure_result.get('needs_recalibration', False):
+                            current_time = time.time()
+                            
+                            # Reset recalibration window if expired
+                            if current_time - recalibration_window_start > recalibration_window_sec:
+                                recalibration_count = 0
+                                recalibration_window_start = current_time
+                            
+                            # Check rate limits before allowing recalibration
+                            time_since_last = current_time - last_recalibration_time
+                            can_recalibrate = (
+                                time_since_last >= recalibration_cooldown_sec and
+                                recalibration_count < max_recalibrations_per_window
+                            )
+                            
+                            if can_recalibrate:
+                                self.log(f"⚠ Drastic scene change detected - running rapid calibration")
+                                self.log(f"  (Recalibration {recalibration_count + 1}/{max_recalibrations_per_window} in current window)")
+                                
+                                # Notify calibration starting
+                                if self.on_calibration_callback:
+                                    self.on_calibration_callback(True)
+                                
+                                # Run rapid calibration to quickly find optimal exposure
+                                try:
+                                    self.run_calibration()
+                                    last_recalibration_time = time.time()
+                                    recalibration_count += 1
+                                except Exception as cal_error:
+                                    self.log(f"Recalibration error: {cal_error} - continuing with adjusted exposure")
+                                
+                                # Notify calibration complete
+                                if self.on_calibration_callback:
+                                    self.on_calibration_callback(False)
+                                
+                                # Skip publishing this badly-exposed frame
+                                # Next iteration will capture with calibrated exposure
+                                continue
+                            else:
+                                # Rate limited - log why and continue with normal aggressive adjustment
+                                if time_since_last < recalibration_cooldown_sec:
+                                    wait_time = int(recalibration_cooldown_sec - time_since_last)
+                                    self.log(f"⚠ Scene change detected but recalibration on cooldown ({wait_time}s remaining)")
+                                else:
+                                    self.log(f"⚠ Scene change detected but max recalibrations reached ({max_recalibrations_per_window} per {recalibration_window_sec//60}min window)")
+                                self.log(f"  Using aggressive auto-exposure adjustment instead")
+                                # Don't skip frame - let normal aggressive adjustment handle it
                     
                     # Call callback with image and metadata
                     if self.on_frame_callback:
                         self.on_frame_callback(img, metadata)
                     
                     self.log(f"Captured frame: {metadata['FILENAME']}")
-                    
-                    # Reset error counter on successful capture
-                    consecutive_errors = 0
                     
                     # Check for dropped frames (helps diagnose USB bandwidth issues)
                     try:
@@ -779,12 +833,19 @@ class ZWOCamera:
             self.on_calibration_callback(False)
     
     def adjust_exposure_auto(self, img_array):
-        """Adjust exposure based on image brightness with intelligent step sizing"""
+        """
+        Adjust exposure based on image brightness with intelligent step sizing.
+        
+        Returns:
+            dict with 'needs_recalibration' flag and brightness info, or None if auto-exposure disabled
+        """
         if not self.auto_exposure or not self.calibration_manager:
-            return
+            return None
         
         # Use calibration manager to adjust exposure
-        self.calibration_manager.adjust_exposure_auto(img_array)
+        result = self.calibration_manager.adjust_exposure_auto(img_array)
         
         # Update our exposure from calibration manager
         self.exposure_seconds = self.calibration_manager.exposure_seconds
+        
+        return result

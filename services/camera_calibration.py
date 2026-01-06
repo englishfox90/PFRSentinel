@@ -219,7 +219,19 @@ class CameraCalibration:
         
         Args:
             img_array: Image as numpy array
+            
+        Returns:
+            dict with:
+                - 'needs_recalibration': True if drastic change detected and recalibration needed
+                - 'brightness': Current brightness value
+                - 'clipping_percent': Percentage of clipped pixels (if clipping)
         """
+        result = {
+            'needs_recalibration': False,
+            'brightness': 0,
+            'clipping_percent': 0
+        }
+        
         try:
             # Calculate brightness using selected algorithm
             brightness = calculate_brightness(
@@ -227,9 +239,11 @@ class CameraCalibration:
                 self.exposure_algorithm, 
                 self.exposure_percentile
             )
+            result['brightness'] = brightness
             
             # Check for clipping
             clipped_percent, is_clipping = check_clipping(img_array, self.clipping_threshold)
+            result['clipping_percent'] = clipped_percent
             
             # Calculate how far off target we are
             deviation_percent = abs(brightness - self.target_brightness) / self.target_brightness
@@ -237,6 +251,22 @@ class CameraCalibration:
             # Calculate acceptable range (±20% of target)
             lower_bound = self.target_brightness * 0.8
             upper_bound = self.target_brightness * 1.2
+            
+            # DRASTIC CHANGE DETECTION: Trigger recalibration if:
+            # 1. Brightness is >300% off target (extreme change like turning lights on/off)
+            # 2. OR heavy clipping (>50% pixels saturated) indicating sudden bright scene
+            # 3. OR extremely dark (<10% of target) indicating sudden dark scene
+            drastic_change = (
+                deviation_percent > 3.0 or  # More than 300% off target
+                clipped_percent > 50.0 or   # More than 50% pixels clipped (saturated)
+                (brightness < self.target_brightness * 0.1 and self.exposure_seconds >= self.max_exposure_sec * 0.9)  # Very dark at max exposure
+            )
+            
+            if drastic_change:
+                self.log(f"⚠ DRASTIC brightness change detected: brightness={brightness:.1f}, target={self.target_brightness}, clipping={clipped_percent:.1f}%")
+                self.log(f"  Triggering rapid recalibration to quickly find optimal exposure")
+                result['needs_recalibration'] = True
+                return result
             
             # Determine if we need aggressive or conservative adjustment
             # If brightness is >50% off target, use aggressive adjustment (like calibration)
@@ -248,7 +278,7 @@ class CameraCalibration:
                 # But respect clipping prevention
                 if self.clipping_prevention and is_clipping:
                     self.log(f"Image dark but clipping detected ({clipped_percent:.1f}%) - not increasing exposure")
-                    return
+                    return result
                 
                 if needs_aggressive_adjustment:
                     # Significant deviation - use aggressive adjustment
@@ -315,8 +345,11 @@ class CameraCalibration:
                 # Within acceptable range - no adjustment needed
                 self.log(f"Auto-exposure: maintaining {self.exposure_seconds*1000:.2f}ms (brightness={brightness:.1f} within target range)")
             
+            return result
+            
         except Exception as e:
             self.log(f"Error adjusting exposure: {e}")
+            return result
     
     def update_settings(self, exposure_seconds=None, gain=None, target_brightness=None,
                        max_exposure_sec=None, algorithm=None, percentile=None,
