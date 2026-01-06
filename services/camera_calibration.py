@@ -203,6 +203,9 @@ class CameraCalibration:
                     # Check if we want to go higher but are at max
                     if new_exposure > self.max_exposure_sec and brightness < self.target_brightness:
                         self.log(f"  Reached maximum exposure limit ({self.max_exposure_sec*1000:.0f}ms)")
+                        # Actually SET the exposure to max before completing
+                        self.exposure_seconds = self.max_exposure_sec
+                        self.camera.set_control_value(self.asi.ASI_EXPOSURE, int(self.max_exposure_sec * 1000000))
                         self.log(f"Calibration complete at max exposure. Brightness: {brightness:.1f} (target was {self.target_brightness})")
                         return True
                     
