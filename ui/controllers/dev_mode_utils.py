@@ -9,6 +9,7 @@ import numpy as np
 from datetime import datetime
 
 from services.logger import app_logger
+from services.dev_mode_config import is_dev_mode_available
 
 # Import context fetchers (moon, roof, weather, allsky)
 from ui.controllers.context_fetchers import (
@@ -38,6 +39,8 @@ class DevModeDataSaver:
         """
         Save raw data and calibration JSON when dev_mode is enabled.
         
+        PRODUCTION BUILD CHECK: Returns early if DEV_MODE_AVAILABLE=False in dev_mode_config.py
+        
         Creates:
         - raw_YYYYMMDD_HHMMSS.fits - Raw RGB FITS file
         - lum_YYYYMMDD_HHMMSS.fits - Grayscale luminance FITS
@@ -50,6 +53,10 @@ class DevModeDataSaver:
             metadata: Image metadata dict
             dev_config: Dev mode configuration dict
         """
+        # PRODUCTION BUILD: Skip all dev mode operations if not available
+        if not is_dev_mode_available():
+            return
+        
         try:
             # Create raw_debug subdirectory
             raw_dir = os.path.join(output_dir, 'raw_debug')

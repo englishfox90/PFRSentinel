@@ -308,7 +308,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,  # Compress executable
+    upx=False,  # DISABLED: UPX triggers false positives in Windows Defender
     console=False,  # Windowed application (no console)
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -324,7 +324,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,  # Compress DLLs and binaries
+    upx=False,  # DISABLED: UPX triggers false positives in Windows Defender
     upx_exclude=[
         # Don't compress these (may cause issues or no benefit)
         'vcruntime140.dll',

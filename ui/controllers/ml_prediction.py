@@ -3,6 +3,8 @@ ML Prediction integration for Dev Mode
 
 Provides roof state predictions from the trained ML model to include
 in calibration JSON files for validation and monitoring.
+
+PRODUCTION BUILD: ML features disabled if DEV_MODE_AVAILABLE=False
 """
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ from typing import Optional
 import numpy as np
 
 from services.logger import app_logger
+from services.dev_mode_config import is_dev_mode_available
 
 # Try to import the roof classifier
 ML_AVAILABLE = False
@@ -19,6 +22,11 @@ _classifier_error = None
 def _init_classifier():
     """Initialize the classifier singleton on first use."""
     global ML_AVAILABLE, _classifier, _classifier_error
+    
+    # PRODUCTION BUILD: Disable ML features if not in dev mode
+    if not is_dev_mode_available():
+        _classifier_error = "ML features disabled in production build (DEV_MODE_AVAILABLE=False)"
+        return False
     
     if _classifier is not None:
         return True

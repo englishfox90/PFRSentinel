@@ -15,6 +15,7 @@ from qfluentwidgets import (
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..components.cards import SettingsCard, FormRow, SwitchRow, CollapsibleCard, ClickSlider
+from services.dev_mode_config import is_dev_mode_available
 
 
 class ImageProcessingPanel(QScrollArea):
@@ -277,34 +278,35 @@ class ImageProcessingPanel(QScrollArea):
         
         layout.addWidget(stretch_card)
         
-        # === DEV MODE ===
-        dev_card = CollapsibleCard("Developer Mode", FluentIcon.DEVELOPER_TOOLS)
-        
-        self.dev_mode_switch = SwitchRow(
-            "Enable Dev Mode",
-            "Save raw images to raw_debug folder for troubleshooting"
-        )
-        self.dev_mode_switch.toggled.connect(self._on_dev_mode_changed)
-        dev_card.add_widget(self.dev_mode_switch)
-        
-        self.dev_stats_switch = SwitchRow(
-            "Log Channel Statistics",
-            "Log detailed per-channel histogram stats (R, G, B medians, MAD, etc.)"
-        )
-        self.dev_stats_switch.set_checked(True)
-        self.dev_stats_switch.toggled.connect(self._on_dev_stats_changed)
-        dev_card.add_widget(self.dev_stats_switch)
-        
-        # Info label
-        dev_info = CaptionLabel(
-            "When enabled, raw images are saved before any processing (stretch, overlays). "
-            "Check logs for per-channel statistics to diagnose color balance issues."
-        )
-        dev_info.setStyleSheet(f"color: {Colors.text_secondary}; padding: 8px;")
-        dev_info.setWordWrap(True)
-        dev_card.add_widget(dev_info)
-        
-        layout.addWidget(dev_card)
+        # === DEV MODE === (Only show in development builds)
+        if is_dev_mode_available():
+            dev_card = CollapsibleCard("Developer Mode", FluentIcon.DEVELOPER_TOOLS)
+            
+            self.dev_mode_switch = SwitchRow(
+                "Enable Dev Mode",
+                "Save raw images to raw_debug folder for troubleshooting"
+            )
+            self.dev_mode_switch.toggled.connect(self._on_dev_mode_changed)
+            dev_card.add_widget(self.dev_mode_switch)
+            
+            self.dev_stats_switch = SwitchRow(
+                "Log Channel Statistics",
+                "Log detailed per-channel histogram stats (R, G, B medians, MAD, etc.)"
+            )
+            self.dev_stats_switch.set_checked(True)
+            self.dev_stats_switch.toggled.connect(self._on_dev_stats_changed)
+            dev_card.add_widget(self.dev_stats_switch)
+            
+            # Info label
+            dev_info = CaptionLabel(
+                "When enabled, raw images are saved before any processing (stretch, overlays). "
+                "Check logs for per-channel statistics to diagnose color balance issues."
+            )
+            dev_info.setStyleSheet(f"color: {Colors.text_secondary}; padding: 8px;")
+            dev_info.setWordWrap(True)
+            dev_card.add_widget(dev_info)
+            
+            layout.addWidget(dev_card)
         
         layout.addStretch()
     
