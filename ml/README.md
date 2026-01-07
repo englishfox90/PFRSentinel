@@ -1,227 +1,400 @@
 # PFR Sentinel ML Module
 
-Machine learning model for automatic scene understanding and recipe optimization.
+Machine learning model for automatic scene understanding and image stretch optimization.
 
-## Goals
+## Overview
 
-1. **Scene Classification**: Automatically detect day/night, roof open/closed, weather conditions
-2. **Recipe Prediction**: Optimal stretch parameters for each scene type
-3. **Stacking Advisor**: When and how many frames to stack for best results
+The PFR Sentinel ML model analyzes pier camera images to automatically determine:
+1. **Roof state** (open/closed) - Primary classification
+2. **Weather conditions** - Sky quality assessment  
+3. **Celestial information** - Stars visibility, density, and moon presence
+
+This enables automatic selection of optimal image stretch parameters for 24/7 unattended operation.
+
+## Why This Model?
+
+**The Core Problem**: The pier camera captures images in vastly different conditions:
+- Daytime vs nighttime
+- Roof open (sky visible) vs roof closed (dark enclosure)
+- Clear skies vs cloudy/overcast
+- Moon up vs moonless nights
+
+Each scenario requires different image processing (stretch) parameters to produce quality output. Currently this requires manual intervention or pre-programmed schedules.
+
+**The Solution**: Train a model to recognize these conditions from the pier camera image alone, then automatically select appropriate stretch recipes.
+
+## Production Environment
+
+### Local Model Integration
+
+The ML model runs **locally** on the same machine as PFR Sentinel - it is NOT a cloud API. This enables:
+
+- **Zero latency**: Direct integration with image processing pipeline
+- **No internet required**: Works offline once model is trained
+- **Privacy**: Images never leave the local machine
+- **Real-time inference**: Can process every captured frame
+
+The model will be loaded by PFR Sentinel at startup and called during the image processing pipeline to determine optimal stretch parameters.
+
+### Available Inputs
+
+**⚠️ CRITICAL**: In production, the model will ONLY have access to:
+
+| Available | NOT Available |
+|-----------|---------------|
+| ✅ **Pier camera image** (full resolution) | ❌ Weather API |
+| ✅ Image statistics (luminance, percentiles, corners) | ❌ Roof state from NINA |
+| ✅ Timestamp / date | ❌ All-sky camera |
+| ✅ Computed astral data (sun/moon ephemeris) | ❌ Any external sensors |
+
+The model uses the **actual image pixels** (not just statistics) to analyze the scene. A vision model can directly see:
+- Sky patterns vs dark enclosure
+- Star fields and their distribution
+- Cloud structures and gradients
+- Moon glow and position
+
+Image statistics serve as supplementary features, but the primary input is the image itself.
+
+## Training Data Strategy
+
+### Ground Truth Sources (Training Only)
+
+During training, we collect rich context that won't be available in production:
+
+| Source | Provides | Purpose |
+|--------|----------|---------|
+| **NINA API** | Roof open/closed state | Ground truth for roof classification |
+| **Weather API** | Cloud %, conditions, humidity | Ground truth for weather inference |
+| **All-Sky Camera** | Visual sky conditions | Ground truth when pier camera can't see sky |
+| **Manual Labels** | Human verification | Corrects API errors, adds nuance |
+
+### The All-Sky Camera's Role
+
+When the roof is closed, the pier camera sees only darkness - it cannot determine weather conditions. However, the **all-sky camera** can see the actual sky regardless of roof state.
+
+By correlating:
+- All-sky observations (stars, clouds, moon) → Weather labels
+- Pier camera statistics when roof closed → Input features
+
+The model learns patterns like:
+- "When pier camera shows uniform darkness with these statistics AND weather was cloudy, the all-sky showed clouds"
+- Later in production: "I see similar pier camera statistics → likely cloudy conditions"
+
+This allows the model to make weather inferences even when it can't directly see the sky.
+
+## Development Phases
+
+### Phase 1: Roof State Classification ✅ (Current)
+
+**Goal**: Reliably detect if the roof is open or closed from pier camera image.
+
+**Model Input**: Full pier camera image (resized for inference)
+
+**What the model sees**:
+- **Roof Open**: Sky gradient, possible stars/clouds, irregular brightness patterns
+- **Roof Closed**: Uniform darkness, possibly telescope silhouette, no sky features
+
+**Supplementary Features**:
+- `corner_to_center_ratio` - Roof closed ≈ 1.0 (uniform), open < 0.95 (sky gradient)
+- `median_lum` - Overall brightness
+- Time of day context
+
+**Labels**: `roof_open` (boolean)
+
+**Target**: 95%+ accuracy
+
+### Phase 2: Weather Classification
+
+**Goal**: Determine sky conditions when roof is open.
+
+**Key Features**:
+- Image statistics (contrast, brightness distribution)
+- Corner analysis (sky gradient patterns)
+- Correlation with historical weather patterns
+
+**Labels**: `sky_condition` (Clear, Mostly Clear, Partly Cloudy, Mostly Cloudy, Overcast, Fog/Haze)
+
+**Challenge**: Model must learn weather patterns from training data since weather API won't be available in production.
+
+### Phase 3: Celestial Detection
+
+**Goal**: Detect stars and moon presence/quantity.
+
+**Key Features**:
+- Image statistics at different percentiles
+- Computed moon ephemeris (available in production)
+- Star density from labeled training data
+
+**Labels**: 
+- `stars_visible` (boolean)
+- `star_density` (0-1 scale: none → milky way)
+- `moon_visible` (boolean)
+
+### Phase 4: Stretch Recipe Prediction (Future)
+
+**Goal**: Output optimal image processing parameters.
+
+**Output**: Stretch mode/recipe selection based on classified scene.
 
 ## Directory Structure
 
 ```
 ml/
-├── README.md           # This file
-├── schema.py           # Extended calibration schema (dataclasses + feature lists)
-├── collect_labels.py   # Script to add manual labels to calibration files
-├── train_model.py      # Model training script (TODO)
-├── predict.py          # Inference module (TODO)
-├── data/
-│   └── README.md       # Training data instructions
-└── models/
-│   └── README.md       # Trained model storage
+├── README.md              # This file
+├── labeling_tool.py       # GUI for efficient data labeling
+├── label_report.py        # Dataset distribution analysis
+├── schema.py              # Calibration data schema
+├── context_fetchers.py    # Data collection utilities
+├── train_model.py         # Model training (TODO)
+├── predict.py             # Production inference (TODO)
+└── models/                # Trained model storage
 ```
 
 ## Calibration Data Structure
 
-Each calibration JSON file now captures comprehensive scene information:
+Each sample consists of three files with matching timestamps:
 
-### Auto-Populated Fields (captured automatically by dev_mode)
+```
+calibration_20260105_220825.json  # Context + labels
+lum_20260105_220825.fits          # Luminance FITS image
+allsky_20260105_220825.jpg        # All-sky camera snapshot
+```
+
+### Auto-Collected Context (in calibration JSON)
 
 | Section | Fields | Source |
 |---------|--------|--------|
-| **Basic Metadata** | timestamp, camera, exposure, gain, bit depths, bayer_pattern | Camera/metadata |
-| **Normalization** | denom, raw_min/max, mul16_rate, unique_ratio | Image analysis |
-| **Stretch** | black_point, white_point, median_lum, dynamic_range, is_dark_scene, recommended_asinh | Image analysis |
-| **Percentiles** | p1, p10, p50, p90, p99 | Luminance histogram |
-| **Corner Analysis** | corner_med, center_med, corner_to_center_ratio, rgb_corner_bias | Spatial analysis |
-| **Color Balance** | r_g, b_g ratios | RGB channel means |
-| **Time Context** | period, is_daylight, is_astronomical_night, sun_times | Astral library |
-| **Moon Context** | phase_value, phase_name, illumination_pct, moon_is_up | Astral library |
-| **Roof State** | is_safe, roof_open, device_name | NINA API |
-| **Weather Context** | temperature, clouds, humidity, visibility, is_clear | OpenWeatherMap |
-| **Seeing Estimate** | overall_score, quality, dew_risk | Derived from weather |
-| **All-Sky Snapshot** | url, saved_path, filename | External all-sky camera |
+| **Image Stats** | percentiles, median_lum, dynamic_range | Image analysis |
+| **Corner Analysis** | corner_to_center_ratio, rgb_corner_bias | Spatial analysis |
+| **Time Context** | period, is_daylight, is_astronomical_night | Astral library |
+| **Moon Context** | phase_name, illumination_pct, moon_is_up | Astral library |
+| **Roof State** | roof_open, source | NINA API *(training only)* |
+| **Weather Context** | condition, cloud_coverage_pct, is_clear | Weather API *(training only)* |
 
-> **Note**: The pier camera can't see the sky when the roof is closed. The all-sky
-> snapshot provides visual ground truth of actual sky conditions, which is especially
-> useful when weather data shows clouds (the reason the roof may have closed).
-
-### Manual Labels (require human annotation)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `scene.moon_in_frame` | bool | Moon actually visible in the image |
-| `scene.stars_visible` | bool | Stars visible in processed output |
-| `scene.clouds_visible` | bool | Clouds visible in frame |
-| `scene.star_density` | 0-1 | 0=none, 0.5=moderate, 1=milky way |
-| `scene.output_quality_rating` | 1-5 | Quality of processed result |
-| `recipe_used.*` | float | Parameters that produced good results |
-| `stacking.*` | various | Stacking decisions and outcomes |
-
-## Example Calibration Output
+### Manual Labels (added via labeling tool)
 
 ```json
 {
-  "timestamp": "2026-01-05T21:41:54",
-  "camera": "ZWO ASI676MC",
-  "exposure": "20.0s",
-  "gain": "180",
-  "image_bit_depth": 16,
-  "camera_bit_depth": 12,
-  
-  "stretch": {
-    "black_point": 0.0206,
-    "white_point": 0.0298,
-    "median_lum": 0.0219,
-    "is_dark_scene": true,
-    "recommended_asinh_strength": 227.9
-  },
-  
-  "corner_analysis": {
-    "corner_to_center_ratio": 0.9739,
-    "rgb_corner_bias": {
-      "bias_r": 0.0195,
-      "bias_g": 0.0188,
-      "bias_b": 0.0401
-    }
-  },
-  
-  "time_context": {
-    "period": "night",
-    "is_astronomical_night": true,
-    "calculation_method": "astral"
-  },
-  
-  "moon_context": {
-    "phase_name": "waning_gibbous",
-    "illumination_pct": 84.8,
-    "moon_is_up": false
-  },
-  
-  "roof_state": {
-    "source": "nina_api",
-    "roof_open": false
-  },
-  
-  "weather_context": {
-    "condition": "Clear",
-    "cloud_coverage_pct": 0,
-    "humidity_pct": 46,
-    "is_clear": true
-  },
-  
-  "seeing_estimate": {
-    "overall_score": 0.87,
-    "quality": "excellent",
-    "dew_risk": true
+  "labels": {
+    "roof_open": true,
+    "sky_condition": "Mostly Clear",
+    "clouds_visible": false,
+    "stars_visible": true,
+    "star_density": 0.7,
+    "moon_visible": false,
+    "labeled_at": "2026-01-07T14:30:00"
   }
 }
 ```
 
-## Model Transferability
+## Dataset Requirements
 
-The model uses **normalized features** that transfer well across different cameras:
+### Current Collection Targets
 
-### Camera-Agnostic Features (use these for cross-camera models)
+| Category | Target | Purpose |
+|----------|--------|---------|
+| **Roof Open** | 200 | Learn open-roof characteristics |
+| **Roof Closed** | 200 | Learn closed-roof characteristics |
+| **Night + Open** | 150 | Primary imaging scenario |
+| **Night + Closed** | 100 | Dark reference |
+| **Day + Open** | 50 | Daytime sky |
+| **Day + Closed** | 50 | Daytime internal |
+| **Twilight** | 50 | Transition periods |
+| **Clear Sky** | 100 | Best conditions |
+| **Cloudy/Overcast** | 75 | Weather variation |
+| **Moon Visible** | 75 | Moon detection |
+| **High Star Density** | 50 | Milky Way nights |
 
-- **Percentile ratios**: p99/p50, p90/p10, dynamic_range/p50
-- **Spatial ratios**: corner_to_center_ratio, center_minus_corner/p50
-- **Color ratios**: r_g, b_g, RGB imbalance (max/min bias)
-- **Boolean flags**: is_dark_scene, is_daylight, roof_open, is_clear
+### Run Label Report
 
-### Camera-Specific Features (need per-camera calibration)
+```bash
+python ml/label_report.py "E:\Pier Camera ML Data"
+```
 
-- Absolute percentile values (p1, p50, p99)
-- Corner/center medians (absolute brightness)
-- Black/white points
-
-### Transfer Strategy
-
-1. Train primarily on normalized features
-2. New camera captures 5-10 calibration frames across different modes
-3. Model learns camera-specific offset/scaling
-4. Fine-tune or apply offset correction
+Shows current progress vs targets and recommends priority collection.
 
 ## Usage
 
-### Adding Manual Labels to Existing Files
+### Labeling Workflow
 
 ```bash
-# Interactive labeling session
-python ml/collect_labels.py "H:\raw_debug" --interactive
-
-# Add normalized features only (no manual labels)
-python ml/collect_labels.py "H:\raw_debug" --add-features
-
-# Process single file
-python ml/collect_labels.py calibration_20260105_214154.json --interactive
+# Launch labeling GUI
+python ml/labeling_tool.py "E:\Pier Camera ML Data"
 ```
 
-### Training Data Requirements
+**Keyboard shortcuts**:
+- `Space` - Save & Next
+- `A` / `←` - Previous
+- `D` / `→` - Next
+- `S` - Save
 
-Collect samples from all 4 primary modes:
+**Features**:
+- Auto-suggests labels from collected context
+- "Skip labeled" checkbox to process only new samples
+- Shows all-sky + pier camera images side by side
 
-| Mode | Description | Example Conditions |
-|------|-------------|-------------------|
-| `day_roof_open` | Daytime with sky visible | Clear day, blue sky |
-| `day_roof_closed` | Daytime internal view | Roof closed during day |
-| `night_roof_open` | Nighttime with sky | Stars/moon visible |
-| `night_roof_closed` | Very dark internal | Roof closed at night |
+### Data Collection
 
-Plus twilight transitions (dawn/dusk).
+Use the calibration collector (in PFR Sentinel dev mode) to capture samples:
+- Runs every N seconds
+- Captures pier camera luminance FITS
+- Fetches all-sky snapshot
+- Records weather, roof state, and astral context
 
-**Minimum recommended**: 20-30 samples per mode with manual labels.
+**Priority scenarios to capture**:
+1. Clear nights with roof open (stars visible)
+2. Twilight transitions (dawn/dusk)
+3. Various weather conditions
+4. Moon rise/set periods
 
-### Model Training (TODO)
+## Model Architecture (Planned)
 
-```bash
-# Train scene classifier + recipe predictor
-python ml/train_model.py --data "H:\raw_debug" --output ml/models/v1.pkl
+### Approach: CNN + Metadata Fusion
 
-# Evaluate on held-out test set
-python ml/train_model.py --data "H:\raw_debug" --eval-only --model ml/models/v1.pkl
+The model combines:
+1. **Vision backbone** (CNN/ViT) - Analyzes the actual image pixels
+2. **Metadata branch** - Time context and computed features
+3. **Fusion layer** - Combines visual and metadata features
+
+```
+┌─────────────────┐     ┌──────────────────┐
+│  Pier Camera    │     │  Metadata        │
+│  Image (256x256)│     │  (time, astral)  │
+└────────┬────────┘     └────────┬─────────┘
+         │                       │
+    ┌────▼────┐             ┌────▼────┐
+    │   CNN   │             │  Dense  │
+    │ Backbone│             │  Layers │
+    └────┬────┘             └────┬────┘
+         │                       │
+         └───────────┬───────────┘
+                     │
+              ┌──────▼──────┐
+              │   Fusion    │
+              │   Layer     │
+              └──────┬──────┘
+                     │
+              ┌──────▼──────┐
+              │  Predictions│
+              │  (roof,sky, │
+              │  stars,moon)│
+              └─────────────┘
 ```
 
-### Inference (TODO)
-
-```bash
-# Predict optimal recipe for new image
-python ml/predict.py calibration_file.json
-
-# Output:
-# Mode: night_roof_closed
-# Confidence: 0.94
-# Recommended Recipe:
-#   asinh: 280
-#   gamma: 0.65
-#   shadow_denoise: 0.7
-#   chroma_blur: 5
-# Stacking: Recommended (3-5 frames)
-```
-
-## Mode Classification Logic
-
-The `classify_mode()` function in `schema.py` determines the scene type:
+### Input Features (Production)
 
 ```python
-def classify_mode(cal: dict) -> str:
-    # 1. Check time_context.is_daylight / is_astronomical_night
-    # 2. Check roof_state.roof_open (from NINA API)
-    # 3. Fallback: infer roof from corner_to_center_ratio
-    #    - ratio ~1.0 = uniform brightness = roof closed
-    #    - ratio <0.95 = sky visible = roof open
+# Primary input: the actual image
+image = load_image("pier_camera_frame.fits")  # Resized to 256x256
+
+# Secondary input: metadata features
+metadata = {
+    # Image statistics (computed from image)
+    'median_lum': 0.0219,
+    'p99_p50_ratio': 1.36,
+    'corner_to_center_ratio': 0.974,
+    'dynamic_range': 0.0092,
     
-    return f"{time_period}_{roof_state}"  # e.g., "night_roof_closed"
+    # Time context (computed locally)
+    'hour': 22,
+    'is_astronomical_night': True,
+    'moon_illumination': 0.85,
+    'moon_is_up': False,
+}
 ```
 
-## Key Insights from Your Data
+### Output Predictions
 
-From the example calibration:
+```python
+predictions = {
+    'roof_open': False,           # Phase 1
+    'roof_confidence': 0.97,
+    
+    'sky_condition': 'Clear',     # Phase 2
+    'clouds_likely': False,
+    
+    'stars_visible': False,       # Phase 3 (roof closed, can't see)
+    'star_density': 0.0,
+    'moon_visible': False,
+    
+    'recommended_stretch': 'night_dark',  # Phase 4
+}
+```
 
-1. **Roof detection works**: `corner_to_center_ratio: 0.9739` (~1.0) confirms roof closed
-2. **RGB bias shows blue excess**: `bias_b: 0.0401` vs `bias_r: 0.0195` - typical for camera sensor
-3. **Very dark scene**: `median_lum: 0.0219` (only 2.2% of dynamic range used)
-4. **Excellent seeing**: `overall_score: 0.87` but `dew_risk: true` - watch for condensation
-5. **NINA integration works**: `source: "nina_api"` confirms live API connection
+## Key Insights
+
+### Roof Detection Heuristics
+
+- `corner_to_center_ratio ≈ 1.0` → Roof closed (uniform darkness)
+- `corner_to_center_ratio < 0.95` → Roof open (sky visible, gradient)
+- Works well at night; daytime needs additional features
+
+### Weather Correlation
+
+The model learns correlations between:
+- Historical weather patterns + pier camera statistics
+- All-sky visual observations + image characteristics
+
+This enables weather inference without real-time API access.
+
+### Stretch Mode Mapping
+
+| Scene | Recommended Stretch |
+|-------|-------------------|
+| Night + Open + Clear | High asinh, star enhancement |
+| Night + Open + Cloudy | Moderate asinh, cloud detail |
+| Night + Closed | Minimal stretch, dark reference |
+| Day + Open | Low asinh, sky gradient |
+| Day + Closed | Minimal stretch |
+| Twilight | Adaptive based on brightness |
+
+## PFR Sentinel Integration
+
+### Loading the Model
+
+```python
+# In PFR Sentinel startup
+from ml.predict import SceneClassifier
+
+classifier = SceneClassifier.load("ml/models/scene_v1.onnx")
+```
+
+### Using in Image Pipeline
+
+```python
+# During image processing
+def process_image(image_path):
+    # Load image
+    image = load_fits(image_path)
+    
+    # Get model prediction
+    prediction = classifier.predict(image)
+    
+    # Select stretch based on prediction
+    if prediction['roof_open']:
+        if prediction['sky_condition'] == 'Clear':
+            stretch = 'night_clear_sky'
+        else:
+            stretch = 'night_cloudy'
+    else:
+        stretch = 'roof_closed_dark'
+    
+    # Apply stretch
+    processed = apply_stretch(image, stretch)
+    return processed
+```
+
+### Model Format
+
+The trained model will be exported as **ONNX** for:
+- Fast inference without full ML framework
+- Easy deployment (no PyTorch/TensorFlow runtime needed)
+- Cross-platform compatibility
+
+## Future Enhancements
+
+1. **Continuous learning**: Update model with new samples over time
+2. **Anomaly detection**: Flag unusual conditions (frost, light leaks)
+3. **Quality scoring**: Rate output image quality for feedback loop
+4. **Multi-camera support**: Transfer learning to new camera setups
+5. **GPU acceleration**: Optional CUDA inference for faster processing
