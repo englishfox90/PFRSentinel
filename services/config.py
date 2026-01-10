@@ -119,7 +119,12 @@ DEFAULT_CONFIG = {
         "enabled": False,  # Save raw images before any processing
         "raw_folder": "raw_debug",  # Subfolder name for raw images (relative to output_directory)
         "save_histogram_stats": True,  # Log detailed per-channel statistics
-        "use_raw16": False  # Use RAW16 mode for full bit depth (requires camera support)
+        "use_raw16": False,  # Use RAW16 mode for full bit depth (requires camera support)
+        "ml_predictions": {
+            "enabled": True,  # Run ML model predictions on each capture
+            "roof_classifier": True,  # Predict roof open/closed state
+            "sky_classifier": True,   # Predict sky condition (only when roof open)
+        }
     },
     
     # Overlay settings

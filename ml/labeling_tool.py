@@ -43,12 +43,20 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-# Optional: ML model for predictions
+# Optional: ML models for predictions
 try:
     from ml.roof_classifier import RoofClassifier
-    ML_AVAILABLE = True
+    ROOF_ML_AVAILABLE = True
 except ImportError:
-    ML_AVAILABLE = False
+    ROOF_ML_AVAILABLE = False
+
+try:
+    from ml.sky_classifier import SkyClassifier
+    SKY_ML_AVAILABLE = True
+except ImportError:
+    SKY_ML_AVAILABLE = False
+
+ML_AVAILABLE = ROOF_ML_AVAILABLE or SKY_ML_AVAILABLE
 
 # Import review tab
 from ml.review_tab import ReviewTab, to_bool
@@ -161,16 +169,30 @@ class LabelingTool(QMainWindow):
         self.current_cal = {}
         self.unsaved_changes = False
         
-        # Load ML model if available
-        self.classifier = None
-        if ML_AVAILABLE:
+        # Load ML models if available
+        self.roof_classifier = None
+        self.sky_classifier = None
+        
+        if ROOF_ML_AVAILABLE:
             model_path = Path(__file__).parent / 'models' / 'roof_classifier_v1.pth'
             if model_path.exists():
                 try:
-                    self.classifier = RoofClassifier.load(str(model_path), image_size=128)
-                    print(f"Loaded ML model from {model_path}")
+                    self.roof_classifier = RoofClassifier.load(str(model_path), image_size=128)
+                    print(f"✓ Loaded roof classifier from {model_path}")
                 except Exception as e:
-                    print(f"Warning: Failed to load ML model: {e}")
+                    print(f"Warning: Failed to load roof model: {e}")
+        
+        if SKY_ML_AVAILABLE:
+            model_path = Path(__file__).parent / 'models' / 'sky_classifier_v1.pth'
+            if model_path.exists():
+                try:
+                    self.sky_classifier = SkyClassifier.load(str(model_path), image_size=256)
+                    print(f"✓ Loaded sky classifier from {model_path}")
+                except Exception as e:
+                    print(f"Warning: Failed to load sky model: {e}")
+        
+        # Legacy alias for compatibility
+        self.classifier = self.roof_classifier
         
         self.setWindowTitle(f"ML Labeling Tool - {data_dir}")
         self.setMinimumSize(1400, 900)
@@ -311,13 +333,13 @@ class LabelingTool(QMainWindow):
         context_layout.addWidget(self.context_text)
         scroll_layout.addWidget(context_group)
         
-        # Model prediction panel (read-only)
-        model_group = QGroupBox("🤖 ML Model Prediction")
+        # Model prediction panel (read-only) - expanded for sky classifier
+        model_group = QGroupBox("🤖 ML Model Predictions")
         model_group.setStyleSheet("QGroupBox { font-weight: bold; color: #8b5cf6; }")
         model_layout = QVBoxLayout(model_group)
         self.model_text = QTextEdit()
         self.model_text.setReadOnly(True)
-        self.model_text.setMaximumHeight(100)
+        self.model_text.setMaximumHeight(220)  # Taller to fit sky predictions
         self.model_text.setStyleSheet("background: #1e1b2e; font-family: monospace; border: 2px solid #8b5cf6;")
         model_layout.addWidget(self.model_text)
         scroll_layout.addWidget(model_group)
@@ -621,14 +643,16 @@ class LabelingTool(QMainWindow):
         
         self.context_text.setText("\n".join(context_lines))
         
-        # Run ML model prediction
+        # Run ML model prediction and store results for prefill
+        self.last_roof_prediction = None
+        self.last_sky_prediction = None
         self.run_model_prediction()
         
         # Classified mode
         mode = self.classify_mode(cal)
         self.mode_label.setText(mode)
         
-        # Load manual labels (or infer from context if not yet labeled)
+        # Load manual labels (or prefill from ML if not yet labeled)
         labels = cal.get('labels', {})
         has_labels = bool(labels.get('labeled_at'))
         
@@ -654,63 +678,89 @@ class LabelingTool(QMainWindow):
             
             self.notes_edit.setText(labels.get('notes', '') or '')
         else:
-            # Pre-populate from auto-collected context
-            rs = cal.get('roof_state', {})
-            ca = cal.get('corner_analysis', {})
-            wc = cal.get('weather_context', {})
-            mc = cal.get('moon_context', {})
+            # Pre-populate from ML predictions (much better than API heuristics)
+            ml_prefilled = False
             
-            # Roof: prefer NINA API, fallback to corner ratio heuristic
-            if rs.get('available') and rs.get('source') == 'nina_api':
-                self.roof_open.setChecked(to_bool(rs.get('roof_open', False)))
+            # Roof from ML prediction
+            if self.last_roof_prediction is not None:
+                self.roof_open.setChecked(bool(self.last_roof_prediction.roof_open))
+                ml_prefilled = True
             else:
-                # Corner ratio ~1.0 = roof closed (uniform darkness)
-                ratio = ca.get('corner_to_center_ratio', 1.0)
-                self.roof_open.setChecked(ratio < 0.95)
-            
-            # Weather/sky condition from API
-            if wc.get('available'):
-                cloud_pct = wc.get('cloud_coverage_pct', 0)
-                self.clouds_visible.setChecked(cloud_pct > 10)
-                
-                # Map cloud percentage to sky condition
-                if cloud_pct <= 10:
-                    sky_cond = "Clear"
-                elif cloud_pct <= 25:
-                    sky_cond = "Mostly Clear"
-                elif cloud_pct <= 50:
-                    sky_cond = "Partly Cloudy"
-                elif cloud_pct <= 75:
-                    sky_cond = "Mostly Cloudy"
+                # Fallback to API/heuristic
+                rs = cal.get('roof_state', {})
+                ca = cal.get('corner_analysis', {})
+                if rs.get('available') and rs.get('source') == 'nina_api':
+                    self.roof_open.setChecked(to_bool(rs.get('roof_open', False)))
                 else:
-                    sky_cond = "Overcast"
+                    ratio = ca.get('corner_to_center_ratio', 1.0)
+                    self.roof_open.setChecked(ratio < 0.95)
+            
+            # Sky condition, stars, moon from ML prediction
+            if self.last_sky_prediction is not None:
+                sky_pred = self.last_sky_prediction
                 
-                idx = self.sky_condition.findText(sky_cond)
+                # Sky condition
+                idx = self.sky_condition.findText(sky_pred.sky_condition)
                 self.sky_condition.setCurrentIndex(idx if idx >= 0 else 0)
+                
+                # Clouds: infer from sky condition
+                cloudy_conditions = ['Partly Cloudy', 'Mostly Cloudy', 'Overcast']
+                self.clouds_visible.setChecked(sky_pred.sky_condition in cloudy_conditions)
+                
+                # Stars
+                self.stars_visible.setChecked(bool(sky_pred.stars_visible))
+                self.star_density.setValue(sky_pred.star_density if sky_pred.stars_visible else 0)
+                
+                # Moon
+                self.moon_visible.setChecked(bool(sky_pred.moon_visible))
+                ml_prefilled = True
             else:
-                self.clouds_visible.setChecked(False)
-                self.sky_condition.setCurrentIndex(0)
-            
-            # Moon from ephemeris
-            if mc.get('available'):
-                self.moon_visible.setChecked(mc.get('moon_is_up', False))
-            else:
-                self.moon_visible.setChecked(False)
-            
-            # Stars: infer from time + roof + weather
-            tc = cal.get('time_context', {})
-            is_night = tc.get('is_astronomical_night', False)
-            roof_open = self.roof_open.isChecked()
-            is_clear = wc.get('is_clear', False) if wc.get('available') else True
-            
-            stars_likely = is_night and roof_open and is_clear
-            self.stars_visible.setChecked(stars_likely)
-            self.star_density.setValue(0.5 if stars_likely else 0)
+                # Fallback to API heuristics
+                wc = cal.get('weather_context', {})
+                mc = cal.get('moon_context', {})
+                tc = cal.get('time_context', {})
+                
+                if wc.get('available'):
+                    cloud_pct = wc.get('cloud_coverage_pct', 0)
+                    self.clouds_visible.setChecked(cloud_pct > 10)
+                    
+                    if cloud_pct <= 10:
+                        sky_cond = "Clear"
+                    elif cloud_pct <= 25:
+                        sky_cond = "Mostly Clear"
+                    elif cloud_pct <= 50:
+                        sky_cond = "Partly Cloudy"
+                    elif cloud_pct <= 75:
+                        sky_cond = "Mostly Cloudy"
+                    else:
+                        sky_cond = "Overcast"
+                    
+                    idx = self.sky_condition.findText(sky_cond)
+                    self.sky_condition.setCurrentIndex(idx if idx >= 0 else 0)
+                else:
+                    self.clouds_visible.setChecked(False)
+                    self.sky_condition.setCurrentIndex(0)
+                
+                if mc.get('available'):
+                    self.moon_visible.setChecked(mc.get('moon_is_up', False))
+                else:
+                    self.moon_visible.setChecked(False)
+                
+                is_night = tc.get('is_astronomical_night', False)
+                roof_open = self.roof_open.isChecked()
+                is_clear = wc.get('is_clear', False) if wc.get('available') else True
+                stars_likely = is_night and roof_open and is_clear
+                self.stars_visible.setChecked(stars_likely)
+                self.star_density.setValue(0.5 if stars_likely else 0)
             
             self.notes_edit.setText('')
             
-            self.label_state.setText("⚡ Auto-suggested (review & save)")
-            self.label_state.setStyleSheet("color: #f59e0b; font-weight: bold;")
+            if ml_prefilled:
+                self.label_state.setText("🤖 ML-suggested (review & save)")
+                self.label_state.setStyleSheet("color: #8b5cf6; font-weight: bold;")
+            else:
+                self.label_state.setText("⚡ API-suggested (review & save)")
+                self.label_state.setStyleSheet("color: #f59e0b; font-weight: bold;")
         
         # Unblock signals
         for widget in [self.roof_open, self.stars_visible, self.moon_visible, 
@@ -745,48 +795,136 @@ class LabelingTool(QMainWindow):
         return f"{time_period}_{roof_str}"
     
     def run_model_prediction(self):
-        """Run the ML model on the current image and display results."""
+        """Run ML models on the current image and display results. Stores results for prefill."""
         sample = self.samples[self.current_index]
+        lines = []
         
-        if not self.classifier:
-            self.model_text.setText("⚠️ ML model not loaded\n(train with: python ml/train_roof_classifier.py)")
+        # Reset stored predictions
+        self.last_roof_prediction = None
+        self.last_sky_prediction = None
+        
+        if not self.roof_classifier and not self.sky_classifier:
+            self.model_text.setText("⚠️ No ML models loaded\n\nTo train models:\n  python ml/train_roof_classifier.py\n  python ml/train_sky_classifier.py")
             return
         
         if 'lum' not in sample:
             self.model_text.setText("⚠️ No FITS image available for prediction")
             return
         
-        try:
-            # Run prediction
-            result = self.classifier.predict_from_fits(sample['lum'])
+        # Get metadata for sky classifier
+        metadata = None
+        if self.current_cal:
+            tc = self.current_cal.get('time_context', {})
+            ca = self.current_cal.get('corner_analysis', {})
+            mc = self.current_cal.get('moon_context', {})
+            st = self.current_cal.get('stretch', {})
+            metadata = {
+                'corner_to_center_ratio': ca.get('corner_to_center_ratio', 1.0),
+                'median_lum': st.get('median_lum', 0.0),
+                'is_astronomical_night': tc.get('is_astronomical_night', False),
+                'hour': tc.get('hour', 12),
+                'moon_illumination': mc.get('illumination_pct', 0.0),
+                'moon_is_up': mc.get('moon_is_up', False),
+            }
+        
+        # === ROOF CLASSIFIER ===
+        if self.roof_classifier:
+            try:
+                result = self.roof_classifier.predict_from_fits(sample['lum'])
+                self.last_roof_prediction = result  # Store for prefill
+                roof_status = "🟢 OPEN" if result.roof_open else "🔴 CLOSED"
+                conf_bar = "█" * int(result.confidence * 10) + "░" * (10 - int(result.confidence * 10))
+                
+                lines.append("━━━ ROOF CLASSIFIER ━━━")
+                lines.append(f"State:      {roof_status}")
+                lines.append(f"Confidence: [{conf_bar}] {result.confidence:.1%}")
+                
+                # Compare with context/label
+                rs = self.current_cal.get('roof_state', {})
+                if rs.get('available'):
+                    ctx_roof = to_bool(rs.get('roof_open', False))
+                    match = "✓" if ctx_roof == result.roof_open else "✗"
+                    lines.append(f"vs API:     {match}")
+                
+                labels = self.current_cal.get('labels', {})
+                if labels.get('labeled_at'):
+                    lbl_roof = to_bool(labels.get('roof_open', False))
+                    match = "✓" if lbl_roof == result.roof_open else "✗"
+                    lines.append(f"vs Label:   {match}")
+                    
+            except Exception as e:
+                lines.append(f"━━━ ROOF CLASSIFIER ━━━")
+                lines.append(f"⚠️ Error: {e}")
+        
+        # === SKY CLASSIFIER ===
+        # Only run if roof is OPEN (pier camera can't see sky through closed roof)
+        roof_is_open = self.last_roof_prediction and self.last_roof_prediction.roof_open
+        
+        if self.sky_classifier:
+            lines.append("")
+            lines.append("━━━ SKY CLASSIFIER ━━━")
             
-            # Format output
-            roof_status = "🟢 OPEN" if result.roof_open else "🔴 CLOSED"
-            confidence_bar = "█" * int(result.confidence * 10) + "░" * (10 - int(result.confidence * 10))
-            
-            lines = [
-                f"Roof State:  {roof_status}",
-                f"Confidence:  [{confidence_bar}] {result.confidence:.1%}",
-            ]
-            
-            # Compare with context data
-            rs = self.current_cal.get('roof_state', {})
-            if rs.get('available'):
-                context_roof = to_bool(rs.get('roof_open', False))
-                match = "✓ MATCH" if context_roof == result.roof_open else "✗ MISMATCH"
-                lines.append(f"vs Context:  {match}")
-            
-            # Compare with existing label if present
-            labels = self.current_cal.get('labels', {})
-            if labels.get('labeled_at'):
-                label_roof = to_bool(labels.get('roof_open', False))
-                match = "✓ MATCH" if label_roof == result.roof_open else "✗ MISMATCH"
-                lines.append(f"vs Label:    {match}")
-            
-            self.model_text.setText("\n".join(lines))
-            
-        except Exception as e:
-            self.model_text.setText(f"⚠️ Prediction error:\n{e}")
+            if not roof_is_open:
+                # Can't predict sky/weather through closed roof
+                lines.append("⛔ N/A - Roof is CLOSED")
+                lines.append("   (Pier camera cannot see sky)")
+                lines.append("")
+                lines.append("   Note: Manual labels still work")
+                lines.append("   (use all-sky camera reference)")
+                # Don't store prediction - can't be used for prefill
+                self.last_sky_prediction = None
+            else:
+                try:
+                    result = self.sky_classifier.predict_from_fits(sample['lum'], metadata)
+                    self.last_sky_prediction = result  # Store for prefill
+                    
+                    # Sky condition with probabilities
+                    lines.append(f"Sky:     {result.sky_condition} ({result.sky_confidence:.0%})")
+                    
+                    # Show top 3 probabilities as mini-bars
+                    sorted_probs = sorted(result.sky_probabilities.items(), key=lambda x: -x[1])
+                    for cond, prob in sorted_probs[:3]:
+                        bar = "█" * int(prob * 10) + "░" * (10 - int(prob * 10))
+                        marker = "◄" if cond == result.sky_condition else " "
+                        lines.append(f"  [{bar}] {prob:5.1%} {cond[:12]:<12}{marker}")
+                    
+                    # Stars
+                    stars_icon = "⭐" if result.stars_visible else "  "
+                    lines.append(f"Stars:   {stars_icon} {'Yes' if result.stars_visible else 'No'} ({result.stars_confidence:.0%})")
+                    if result.stars_visible:
+                        density_bar = "★" * int(result.star_density * 5) + "☆" * (5 - int(result.star_density * 5))
+                        lines.append(f"         Density: [{density_bar}] {result.star_density:.2f}")
+                    
+                    # Moon
+                    moon_icon = "🌙" if result.moon_visible else "  "
+                    lines.append(f"Moon:    {moon_icon} {'Yes' if result.moon_visible else 'No'} ({result.moon_confidence:.0%})")
+                    
+                    # Compare with labels if present
+                    labels = self.current_cal.get('labels', {})
+                    if labels.get('labeled_at'):
+                        lines.append("")
+                        lines.append("vs Manual Labels:")
+                        
+                        # Sky condition match
+                        lbl_sky = labels.get('sky_condition', '')
+                        if lbl_sky:
+                            match = "✓" if lbl_sky == result.sky_condition else "✗"
+                            lines.append(f"  Sky:   {match} (label: {lbl_sky})")
+                        
+                        # Stars match
+                        lbl_stars = to_bool(labels.get('stars_visible', False))
+                        match = "✓" if lbl_stars == result.stars_visible else "✗"
+                        lines.append(f"  Stars: {match}")
+                        
+                        # Moon match
+                        lbl_moon = to_bool(labels.get('moon_visible', False))
+                        match = "✓" if lbl_moon == result.moon_visible else "✗"
+                        lines.append(f"  Moon:  {match}")
+                        
+                except Exception as e:
+                    lines.append(f"⚠️ Error: {e}")
+        
+        self.model_text.setText("\n".join(lines))
     
     def save_labels(self):
         """Save labels to calibration file."""

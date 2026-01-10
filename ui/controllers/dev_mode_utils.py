@@ -29,7 +29,7 @@ from ui.controllers.image_analysis import (
     compute_corner_analysis,
     log_channel_statistics,
 )
-from ui.controllers.ml_prediction import predict_roof_state, get_ml_status
+from ui.controllers.ml_prediction import predict_roof_state, predict_sky_condition, get_ml_status
 
 
 class DevModeDataSaver:
@@ -128,7 +128,8 @@ class DevModeDataSaver:
             calibration = self._compute_stretch_calibration(
                 lum, norm_array, metadata, denom, denom_reason, denom_details,
                 raw_dir, timestamp,  # Pass for allsky snapshot saving
-                raw_array  # Pass for ML prediction
+                raw_array,  # Pass for ML prediction
+                dev_config  # Pass for ML config
             )
             json_path = os.path.join(raw_dir, f"calibration_{timestamp}.json")
             write_json(json_path, calibration)
@@ -158,9 +159,21 @@ class DevModeDataSaver:
             app_logger.error(traceback.format_exc())
     
     def _compute_stretch_calibration(self, lum, norm_array, metadata, denom, denom_reason, denom_details,
-                                       output_dir=None, timestamp=None, raw_array=None):
+                                       output_dir=None, timestamp=None, raw_array=None, dev_config=None):
         """
         Compute stretch calibration parameters from luminance.
+        
+        Args:
+            lum: Luminance array
+            norm_array: Normalized RGB array
+            metadata: Image metadata
+            denom: Normalization denominator
+            denom_reason: Reason for denominator choice
+            denom_details: Details about normalization
+            output_dir: Output directory for allsky snapshot
+            timestamp: Timestamp for allsky snapshot filename
+            raw_array: Raw image array for ML prediction
+            dev_config: Dev mode configuration dict
         
         Returns:
             dict with calibration data including:
@@ -174,7 +187,7 @@ class DevModeDataSaver:
             - Weather conditions
             - Estimated seeing conditions
             - All-sky camera snapshot (visual sky reference)
-            - ML model predictions (roof state)
+            - ML model predictions (roof and sky state)
         """
         # Extended percentile stats
         p1 = float(np.percentile(lum, 1))
@@ -216,15 +229,41 @@ class DevModeDataSaver:
         # Compute time context (needed for ML prediction too)
         time_ctx = compute_time_context()
         
-        # Run ML model prediction if available
-        ml_prediction = None
-        if raw_array is not None:
-            ml_prediction = predict_roof_state(raw_array, corner_analysis, time_ctx)
-            if ml_prediction:
-                app_logger.info(
-                    f"DEV MODE ML Prediction: roof_open={ml_prediction['roof_open']}, "
-                    f"confidence={ml_prediction['confidence']:.1%}"
-                )
+        # Compute moon context (needed for sky prediction)
+        moon_ctx = compute_moon_context()
+        
+        # Get ML prediction config
+        ml_config = (dev_config or {}).get('ml_predictions', {})
+        ml_enabled = ml_config.get('enabled', True)
+        roof_enabled = ml_config.get('roof_classifier', True)
+        sky_enabled = ml_config.get('sky_classifier', True)
+        
+        # Run ML model predictions if available and enabled
+        ml_roof_prediction = None
+        ml_sky_prediction = None
+        
+        if raw_array is not None and ml_enabled:
+            # Roof prediction
+            if roof_enabled:
+                ml_roof_prediction = predict_roof_state(raw_array, corner_analysis, time_ctx)
+                if ml_roof_prediction:
+                    app_logger.info(
+                        f"DEV MODE ML Roof: roof_open={ml_roof_prediction['roof_open']}, "
+                        f"confidence={ml_roof_prediction['confidence']:.1%}"
+                    )
+                    
+                    # Sky prediction (only when roof is predicted OPEN)
+                    if ml_roof_prediction['roof_open'] and sky_enabled:
+                        ml_sky_prediction = predict_sky_condition(
+                            raw_array, corner_analysis, time_ctx, moon_ctx
+                        )
+                        if ml_sky_prediction:
+                            app_logger.info(
+                                f"DEV MODE ML Sky: {ml_sky_prediction['sky_condition']} "
+                                f"({ml_sky_prediction['sky_confidence']:.1%}), "
+                                f"stars={ml_sky_prediction['stars_visible']}, "
+                            f"moon={ml_sky_prediction['moon_visible']}"
+                        )
         
         return {
             'timestamp': datetime.now().isoformat(),
@@ -263,12 +302,15 @@ class DevModeDataSaver:
             'corner_analysis': corner_analysis,
             'color_balance': color_balance,
             'time_context': time_ctx,
-            'moon_context': compute_moon_context(),
+            'moon_context': moon_ctx,
             'roof_state': fetch_roof_state(),
             'weather_context': weather_ctx,
             'seeing_estimate': estimate_seeing_conditions(weather_ctx),
             'allsky_snapshot': fetch_allsky_snapshot(output_dir, timestamp),  # Visual sky reference
-            'ml_prediction': ml_prediction,  # ML model roof state prediction
+            'ml_prediction': {
+                'roof': ml_roof_prediction,  # ML model roof state prediction
+                'sky': ml_sky_prediction,    # ML model sky condition prediction (if roof open)
+            },
         }
 
 

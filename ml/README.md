@@ -84,11 +84,11 @@ This allows the model to make weather inferences even when it can't directly see
 
 ## Development Phases
 
-### Phase 1: Roof State Classification ✅ (Current)
+### Phase 1: Roof State Classification ✅ COMPLETE
 
 **Goal**: Reliably detect if the roof is open or closed from pier camera image.
 
-**Model Input**: Full pier camera image (resized for inference)
+**Model Input**: Full pier camera image (resized to 128x128)
 
 **What the model sees**:
 - **Roof Open**: Sky gradient, possible stars/clouds, irregular brightness patterns
@@ -99,36 +99,65 @@ This allows the model to make weather inferences even when it can't directly see
 - `median_lum` - Overall brightness
 - Time of day context
 
-**Labels**: `roof_open` (boolean)
+**Results**: 100% accuracy on validation set
 
-**Target**: 95%+ accuracy
+### Phase 2: Sky/Celestial Classification ✅ COMPLETE
 
-### Phase 2: Weather Classification
+**Goal**: Determine sky conditions and detect celestial objects when roof is open.
 
-**Goal**: Determine sky conditions when roof is open.
+**Model Input**: Pier camera image (256x256) + metadata
 
-**Key Features**:
-- Image statistics (contrast, brightness distribution)
-- Corner analysis (sky gradient patterns)
-- Correlation with historical weather patterns
+**Predictions**:
+- `sky_condition`: Clear, Mostly Clear, Partly Cloudy, Mostly Cloudy, Overcast
+- `stars_visible`: Boolean
+- `star_density`: 0-1 scale
+- `moon_visible`: Boolean
 
-**Labels**: `sky_condition` (Clear, Mostly Clear, Partly Cloudy, Mostly Cloudy, Overcast, Fog/Haze)
+**Training Strategy**: Trained on both pier camera (roof open only) AND all-sky camera images for increased dataset size, validated on pier camera only.
 
-**Challenge**: Model must learn weather patterns from training data since weather API won't be available in production.
+**Results**:
+- Sky Condition: 85.3% accuracy
+- Stars Visible: 91.2% accuracy  
+- Moon Visible: 100% accuracy
 
-### Phase 3: Celestial Detection
+### Phase 3: Production Integration ✅ COMPLETE
 
-**Goal**: Detect stars and moon presence/quantity.
+**Goal**: Integrate ML predictions into PFR Sentinel DEV MODE for validation.
 
-**Key Features**:
-- Image statistics at different percentiles
-- Computed moon ephemeris (available in production)
-- Star density from labeled training data
+**Implementation**:
+- Roof classifier runs on every captured frame
+- Sky classifier runs only when roof is predicted OPEN
+- Predictions saved to `calibration_*.json` files for future validation
+- Configurable via `dev_mode.ml_predictions` settings
 
-**Labels**: 
-- `stars_visible` (boolean)
-- `star_density` (0-1 scale: none → milky way)
-- `moon_visible` (boolean)
+**Usage in PFR Sentinel**:
+```python
+from ui.controllers.ml_prediction import predict_roof_state, predict_sky_condition, get_ml_status
+
+# Check ML availability
+status = get_ml_status()
+print(status['roof_classifier']['available'])  # True
+print(status['sky_classifier']['available'])   # True
+
+# Run predictions
+roof_result = predict_roof_state(image, corner_analysis, time_context)
+if roof_result['roof_open']:
+    sky_result = predict_sky_condition(image, corner_analysis, time_context, moon_context)
+```
+
+**Config Settings** (in `config.json`):
+```json
+{
+  "dev_mode": {
+    "enabled": true,
+    "ml_predictions": {
+      "enabled": true,
+      "roof_classifier": true,
+      "sky_classifier": true
+    }
+  }
+}
+```
 
 ### Phase 4: Stretch Recipe Prediction (Future)
 
