@@ -22,7 +22,7 @@ def _register_backends():
     
     # ZWO ASI cameras
     try:
-        from .zwo_adapter import ZWOCameraAdapter
+        from .zwo import ZWOCameraAdapter
         _BACKENDS['zwo'] = ZWOCameraAdapter
         _BACKENDS['asi'] = ZWOCameraAdapter  # Alias
     except ImportError:
@@ -30,7 +30,7 @@ def _register_backends():
     
     # File/Directory watch mode
     try:
-        from .file_adapter import FileWatchAdapter
+        from .file import FileWatchAdapter
         _BACKENDS['file'] = FileWatchAdapter
         _BACKENDS['watch'] = FileWatchAdapter  # Alias
         _BACKENDS['directory'] = FileWatchAdapter  # Alias
@@ -39,7 +39,8 @@ def _register_backends():
     
     # ASCOM cameras
     try:
-        from .ascom_adapter import ASCOMCameraAdapter, ASCOM_AVAILABLE
+        from .ascom import ASCOMCameraAdapter
+        from .ascom.adapter import ASCOM_AVAILABLE
         if ASCOM_AVAILABLE:
             _BACKENDS['ascom'] = ASCOMCameraAdapter
             _BACKENDS['alpaca'] = ASCOMCameraAdapter  # Alias
@@ -103,7 +104,7 @@ def get_backend_info() -> Dict[str, Dict[str, Any]]:
     
     # ASCOM
     if 'ascom' in _BACKENDS:
-        from .ascom_adapter import check_ascom_availability
+        from .ascom import check_ascom_availability
         ascom_status = check_ascom_availability()
         info['ascom'] = {
             'name': 'ASCOM',

@@ -8,14 +8,14 @@ import threading
 from typing import Optional, Dict, Any, List, Callable, Tuple
 from PIL import Image
 
-from .interface import (
+from ..interface import (
     CameraInterface,
     CameraCapabilities,
     CameraInfo,
     CameraState,
     CaptureResult,
 )
-from ..zwo_camera import ZWOCamera
+from .camera import ZWOCamera
 
 
 class ZWOCameraAdapter(CameraInterface):

@@ -22,7 +22,7 @@ from typing import Optional, Dict, Any, List, Callable, Tuple
 from datetime import datetime
 from PIL import Image
 
-from .interface import (
+from ..interface import (
     CameraInterface,
     CameraCapabilities,
     CameraInfo,

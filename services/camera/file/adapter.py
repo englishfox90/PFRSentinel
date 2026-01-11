@@ -12,15 +12,15 @@ from typing import Optional, Dict, Any, List, Callable, Tuple
 from datetime import datetime
 from PIL import Image
 
-from .interface import (
+from ..interface import (
     CameraInterface,
     CameraCapabilities,
     CameraInfo,
     CameraState,
     CaptureResult,
 )
-from ..watcher import FileWatcher
-from ..processor import parse_sidecar_file, derive_metadata
+from ...watcher import FileWatcher
+from ...processor import parse_sidecar_file, derive_metadata
 
 
 class FileWatchAdapter(CameraInterface):
