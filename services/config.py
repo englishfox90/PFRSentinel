@@ -88,6 +88,27 @@ DEFAULT_CONFIG = {
     "scheduled_start_time": "17:00",  # 5:00 PM
     "scheduled_end_time": "09:00",    # 9:00 AM (next day for overnight captures)
     
+    # ASCOM Camera settings (Alpaca API)
+    "ascom_host": "localhost",
+    "ascom_port": 11111,
+    "ascom_selected_camera": 0,
+    "ascom_device_id": "",
+    "ascom_exposure_ms": 1000.0,  # milliseconds (1 second default)
+    "ascom_gain": 0,
+    "ascom_offset": 0,
+    "ascom_interval": 5.0,  # seconds between captures
+    "ascom_auto_exposure": False,
+    "ascom_max_exposure_ms": 30000.0,  # milliseconds (30 seconds default)
+    "ascom_target_brightness": 100,  # Target brightness (0-255)
+    "ascom_scheduled_enabled": False,
+    "ascom_scheduled_start": "17:00",
+    "ascom_scheduled_end": "09:00",
+    "ascom_wb_mode": "manual",  # "manual" | "gray_world"
+    "ascom_wb_r": 50,  # Manual WB red (0-100, 50=neutral)
+    "ascom_wb_b": 50,  # Manual WB blue (0-100, 50=neutral)
+    "ascom_wb_gw_low": 5,  # Gray world low percentile
+    "ascom_wb_gw_high": 95,  # Gray world high percentile
+    
     # White Balance configuration
     "white_balance": {
         "mode": "asi_auto",  # "asi_auto" | "manual" | "gray_world"
@@ -156,7 +177,8 @@ DEFAULT_CONFIG = {
             "offset_y": 10,
             "font_size": 24,
             "font_style": "normal",
-            "color": "white"
+            "color": "white",
+            "text_align": "left"  # "left", "center", "right"
         }
     ],
     

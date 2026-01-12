@@ -79,6 +79,14 @@ except Exception as e:
     print(f"⚠ onnxruntime: {e}")
     onnx_datas, onnx_binaries, onnx_hiddenimports = [], [], []
 
+# --- alpaca/alpyca (ASCOM Alpaca camera support) ---
+try:
+    alpaca_datas, alpaca_binaries, alpaca_hiddenimports = collect_all('alpaca')
+    print(f"✓ alpaca: {len(alpaca_datas)} datas, {len(alpaca_hiddenimports)} imports")
+except Exception as e:
+    print(f"⚠ alpaca: {e}")
+    alpaca_datas, alpaca_binaries, alpaca_hiddenimports = [], [], []
+
 # --- Python 3.13 critical: xml.parsers.expat binary ---
 xml_binaries = []
 try:
@@ -139,6 +147,10 @@ hiddenimports = [
     # --- ZWO Camera (optional, fails gracefully) ---
     'zwoasi',
     
+    # --- ASCOM/Alpaca Camera (optional, fails gracefully) ---
+    'alpaca', 'alpaca.camera', 'alpaca.discovery', 'alpaca.device',
+    'ifaddr', 'enum_tools',
+    
     # --- Package management (Python 3.13 compatibility) ---
     'importlib.metadata', 'importlib.resources',
     'pkg_resources',
@@ -168,8 +180,8 @@ hiddenimports = [
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=fluent_binaries + requests_binaries + jaraco_binaries + pystray_binaries + platformdirs_binaries + onnx_binaries + xml_binaries,
-    datas=added_files + fluent_datas + requests_datas + jaraco_datas + pystray_datas + platformdirs_datas + onnx_datas,
+    binaries=fluent_binaries + requests_binaries + jaraco_binaries + pystray_binaries + platformdirs_binaries + onnx_binaries + alpaca_binaries + xml_binaries,
+    datas=added_files + fluent_datas + requests_datas + jaraco_datas + pystray_datas + platformdirs_datas + onnx_datas + alpaca_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

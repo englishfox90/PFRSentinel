@@ -134,16 +134,22 @@ class ImageProcessorWorker(QThread):
                 dev_mode_saver.save_dev_mode_data(img, raw_array, output_dir, metadata, dev_mode_config)
             
             # Get auto-exposure settings for histogram display
-            # Check if camera controller exists and has auto_exposure enabled
-            zwo_auto_exposure = False
+            # Priority: 1. Metadata (works for ASCOM), 2. ZWO camera controller, 3. Defaults
+            auto_exposure_enabled = False
             target_brightness = 30
             
-            if self._main_window:
+            # First check metadata (works for both ZWO and ASCOM)
+            if metadata and 'AUTO_EXPOSURE' in metadata:
+                auto_exposure_enabled = metadata.get('AUTO_EXPOSURE', False)
+                target_brightness = metadata.get('TARGET_BRIGHTNESS', 100)
+                app_logger.debug(f"Histogram config from metadata: auto_exposure={auto_exposure_enabled}, target={target_brightness}")
+            # Fallback to ZWO camera controller for ZWO cameras
+            elif self._main_window:
                 if hasattr(self._main_window, 'camera_controller') and self._main_window.camera_controller:
                     if hasattr(self._main_window.camera_controller, 'zwo_camera') and self._main_window.camera_controller.zwo_camera:
-                        zwo_auto_exposure = self._main_window.camera_controller.zwo_camera.auto_exposure
+                        auto_exposure_enabled = self._main_window.camera_controller.zwo_camera.auto_exposure
                         target_brightness = self._main_window.camera_controller.zwo_camera.target_brightness
-                        app_logger.debug(f"Histogram config from camera: auto_exposure={zwo_auto_exposure}, target={target_brightness}")
+                        app_logger.debug(f"Histogram config from ZWO camera: auto_exposure={auto_exposure_enabled}, target={target_brightness}")
             
             # Calculate histogram - use appropriate range based on bit depth
             # 16-bit data needs to be scaled down for 256-bin histogram display
@@ -157,7 +163,7 @@ class ImageProcessorWorker(QThread):
                 'r': np.histogram(hist_array[:, :, 0], bins=256, range=(0, 256))[0],
                 'g': np.histogram(hist_array[:, :, 1], bins=256, range=(0, 256))[0],
                 'b': np.histogram(hist_array[:, :, 2], bins=256, range=(0, 256))[0],
-                'auto_exposure': zwo_auto_exposure,
+                'auto_exposure': auto_exposure_enabled,
                 'target_brightness': target_brightness
             }
             del hist_array

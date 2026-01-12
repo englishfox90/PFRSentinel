@@ -183,7 +183,7 @@ class Layout:
     
     # Header
     app_bar_height = 56
-    status_chip_height = 24
+    status_chip_height = 28
 
 
 # =============================================================================

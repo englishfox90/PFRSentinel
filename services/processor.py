@@ -450,6 +450,7 @@ def add_text_overlay(img, draw, overlay, metadata):
         anchor = overlay.get('anchor', 'Bottom-Left')
         x_offset = overlay.get('offset_x', 10)  # Match config key
         y_offset = overlay.get('offset_y', 10)  # Match config key
+        text_align = overlay.get('text_align', 'left')  # "left", "center", "right"
         background_enabled = overlay.get('background_enabled', False)
         background_color = overlay.get('background_color', 'black')
         
@@ -463,32 +464,48 @@ def add_text_overlay(img, draw, overlay, metadata):
                 # Fall back to default font
                 font = ImageFont.load_default()
         
-        # Calculate text bounding box for proper padding
-        # Get bbox relative to (0, 0) to find actual text dimensions including descenders
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
+        # Split text into lines and calculate dimensions
+        lines = text.split('\n')
+        line_heights = []
+        line_widths = []
         
-        # Calculate position
-        x, y = calculate_position(img.size, (text_width, text_height), anchor, x_offset, y_offset)
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_widths.append(bbox[2] - bbox[0])
+            line_heights.append(bbox[3] - bbox[1])
+        
+        text_width = max(line_widths) if line_widths else 0
+        line_height = max(line_heights) if line_heights else font_size
+        text_height = line_height * len(lines)
+        
+        # Calculate position for the bounding box
+        box_x, box_y = calculate_position(img.size, (text_width, text_height), anchor, x_offset, y_offset)
         
         # Draw background box if enabled and not transparent
         if background_enabled and background_color.lower() != 'transparent':
             padding = 5
-            # Get bbox at actual drawing position for accurate background box
-            text_bbox = draw.textbbox((x, y), text, font=font)
             box_coords = [
-                text_bbox[0] - padding,  # left
-                text_bbox[1] - padding,  # top
-                text_bbox[2] + padding,  # right
-                text_bbox[3] + padding   # bottom (includes descenders)
+                box_x - padding,
+                box_y - padding,
+                box_x + text_width + padding,
+                box_y + text_height + padding
             ]
-            # Parse background color (supports color names and hex)
             bg_color = parse_color(background_color)
             draw.rectangle(box_coords, fill=bg_color)
         
-        # Draw text
-        draw.text((x, y), text, fill=color, font=font)
+        # Draw each line with alignment
+        for i, line in enumerate(lines):
+            line_w = line_widths[i]
+            # Calculate x position based on text alignment within the bounding box
+            if text_align == 'center':
+                line_x = box_x + (text_width - line_w) // 2
+            elif text_align == 'right':
+                line_x = box_x + (text_width - line_w)
+            else:  # left
+                line_x = box_x
+            
+            line_y = box_y + (i * line_height)
+            draw.text((line_x, line_y), line, fill=color, font=font)
         
         return img
         

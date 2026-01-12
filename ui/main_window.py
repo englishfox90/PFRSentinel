@@ -267,11 +267,72 @@ class MainWindow(QMainWindow):
         self.image_processor.error_occurred.connect(self._on_processing_error)
     
     def _auto_detect_cameras(self):
-        """Auto-detect cameras on startup if SDK path is configured"""
-        sdk_path = self.config.get('zwo_sdk_path', '')
-        if sdk_path and os.path.exists(sdk_path):
-            app_logger.info("Auto-detecting cameras on startup...")
-            self._on_detect_cameras()
+        """Auto-detect cameras on startup based on capture mode"""
+        mode = self.config.get('capture_mode', 'camera')
+        
+        if mode == 'camera':
+            # ZWO mode - check SDK path
+            sdk_path = self.config.get('zwo_sdk_path', '')
+            if sdk_path and os.path.exists(sdk_path):
+                app_logger.info("Auto-detecting ZWO cameras on startup...")
+                self._on_detect_cameras()
+        elif mode == 'ascom':
+            # ASCOM mode - detect if host is configured
+            ascom_host = self.config.get('ascom_host', '')
+            if ascom_host:
+                app_logger.info("Auto-detecting ASCOM cameras on startup...")
+                self._on_detect_ascom_cameras()
+    
+    def _on_detect_ascom_cameras(self):
+        """Handle ASCOM camera detection"""
+        app_logger.info("=== ASCOM Camera Detection Initiated ===")
+        
+        from services.camera.ascom import check_ascom_availability
+        info = check_ascom_availability()
+        
+        if not info['available']:
+            self.capture_panel.set_detection_error(f"ASCOM not available: {info['error']}")
+            return
+        
+        # Show spinner/loading state
+        self.capture_panel.set_detecting(True)
+        
+        main_window = self
+        
+        import threading
+        def detect_thread():
+            try:
+                from services.camera.ascom import ASCOMCameraAdapter
+                
+                adapter = ASCOMCameraAdapter(
+                    config={
+                        'alpaca_host': main_window.config.get('ascom_host', 'localhost'),
+                        'alpaca_port': main_window.config.get('ascom_port', 11111),
+                    },
+                    logger=lambda msg: app_logger.debug(f"[ASCOM] {msg}")
+                )
+                adapter.initialize()
+                cameras = adapter.detect_cameras()
+                
+                if not cameras:
+                    main_window.cameras_detected.emit([], "No ASCOM cameras found")
+                    return
+                
+                # Format camera list for UI
+                camera_list = [f"{cam.name} (ASCOM {cam.index})" for cam in cameras]
+                
+                # Store device IDs for later connection
+                device_ids = {i: cam.device_id for i, cam in enumerate(cameras)}
+                main_window.config.set('ascom_device_ids', device_ids)
+                
+                app_logger.info(f"ASCOM detection complete: {len(cameras)} camera(s)")
+                main_window.cameras_detected.emit(camera_list, "")
+                
+            except Exception as e:
+                app_logger.error(f"ASCOM detection failed: {e}")
+                main_window.cameras_detected.emit([], str(e))
+        
+        threading.Thread(target=detect_thread, daemon=True).start()
     
     def _on_detect_cameras(self):
         """Handle camera detection request from capture panel"""
@@ -338,6 +399,8 @@ class MainWindow(QMainWindow):
         """Handle camera detection results (called via signal from thread)"""
         self.capture_panel.set_detecting(False)
         
+        mode = self.config.get('capture_mode', 'camera')
+        
         if error:
             self.capture_panel.set_detection_error(error)
             app_logger.error(f"Camera detection error: {error}")
@@ -345,50 +408,82 @@ class MainWindow(QMainWindow):
             self.app_bar.camera_chip.set_status('idle')
             self.app_bar.camera_chip.set_label('Camera')
         else:
-            self.capture_panel.set_cameras(cameras)
+            # Update appropriate combo box based on mode
+            if mode == 'ascom':
+                self._handle_ascom_cameras_detected(cameras)
+            else:
+                self._handle_zwo_cameras_detected(cameras)
+    
+    def _handle_ascom_cameras_detected(self, cameras: list):
+        """Handle ASCOM camera detection results"""
+        # Update ASCOM combo in capture panel
+        self.capture_panel.ascom_camera_combo.blockSignals(True)
+        self.capture_panel.ascom_camera_combo.clear()
+        
+        if cameras:
+            for cam in cameras:
+                self.capture_panel.ascom_camera_combo.addItem(cam)
             
-            # Store detected cameras in config to prevent re-detection in start_capture
-            self.config.set('available_cameras', cameras)
+            # Update camera chip
+            self.app_bar.camera_chip.set_status('connected')
+            self.app_bar.camera_chip.set_label('ASCOM Ready')
             
-            # Update camera chip to show ready
-            if cameras:
-                self.app_bar.camera_chip.set_status('connected')
-                self.app_bar.camera_chip.set_label('Ready')
+            # Store and restore selection
+            self.config.set('available_ascom_cameras', cameras)
+            saved_index = self.config.get('ascom_selected_camera', 0)
+            if saved_index < len(cameras):
+                self.capture_panel.ascom_camera_combo.setCurrentIndex(saved_index)
+        else:
+            self.capture_panel.ascom_camera_combo.setPlaceholderText("No ASCOM cameras found")
+        
+        self.capture_panel.ascom_camera_combo.blockSignals(False)
+    
+    def _handle_zwo_cameras_detected(self, cameras: list):
+        """Handle ZWO camera detection results"""
+        self.capture_panel.set_cameras(cameras)
+        
+        # Store detected cameras in config to prevent re-detection in start_capture
+        self.config.set('available_cameras', cameras)
+        
+        # Update camera chip to show ready
+        if cameras:
+            self.app_bar.camera_chip.set_status('connected')
+            self.app_bar.camera_chip.set_label('Ready')
+        
+        # Restore camera selection - prioritize name match over index
+        # (index can change if cameras are plugged in different order)
+        saved_name = self.config.get('zwo_selected_camera_name', '')
+        
+        self.capture_panel.camera_combo.blockSignals(True)
+        
+        if saved_name and cameras:
+            # Try to find camera by name (name is embedded in the combo text)
+            found = False
+            for i, cam in enumerate(cameras):
+                # cam format: "ZWO ASI676MC (Index: 2)"
+                # saved_name could be full text or just camera name
+                if saved_name in cam or cam.split(' (Index:')[0] in saved_name:
+                    self.capture_panel.camera_combo.setCurrentIndex(i)
+                    # Extract actual camera index from the string (e.g., "ZWO ASI676MC (Index: 1)" -> 1)
+                    # The combo box index i may differ from actual camera SDK index
+                    actual_index = i  # Default to combo index
+                    if '(Index: ' in cam:
+                        try:
+                            actual_index = int(cam.split('(Index: ')[1].rstrip(')'))
+                        except (IndexError, ValueError):
+                            pass
+                    # Update config with the actual camera index
+                    self.config.set('zwo_selected_camera', actual_index)
+                    self.config.set('zwo_selected_camera_name', cam)
+                    self.config.save()
+                    app_logger.info(f"Restored camera by name: {cam} (SDK Index: {actual_index})")
+                    found = True
+                    break
             
-            # Restore camera selection - prioritize name match over index
-            # (index can change if cameras are plugged in different order)
-            saved_name = self.config.get('zwo_selected_camera_name', '')
-            
-            self.capture_panel.camera_combo.blockSignals(True)
-            
-            if saved_name and cameras:
-                # Try to find camera by name (name is embedded in the combo text)
-                found = False
-                for i, cam in enumerate(cameras):
-                    # cam format: "ZWO ASI676MC (Index: 2)"
-                    # saved_name could be full text or just camera name
-                    if saved_name in cam or cam.split(' (Index:')[0] in saved_name:
-                        self.capture_panel.camera_combo.setCurrentIndex(i)
-                        # Extract actual camera index from the string (e.g., "ZWO ASI676MC (Index: 1)" -> 1)
-                        # The combo box index i may differ from actual camera SDK index
-                        actual_index = i  # Default to combo index
-                        if '(Index: ' in cam:
-                            try:
-                                actual_index = int(cam.split('(Index: ')[1].rstrip(')'))
-                            except (IndexError, ValueError):
-                                pass
-                        # Update config with the actual camera index
-                        self.config.set('zwo_selected_camera', actual_index)
-                        self.config.set('zwo_selected_camera_name', cam)
-                        self.config.save()
-                        app_logger.info(f"Restored camera by name: {cam} (SDK Index: {actual_index})")
-                        found = True
-                        break
-                
-                if not found:
-                    app_logger.warning(f"Saved camera '{saved_name}' not found in detected cameras")
-            
-            self.capture_panel.camera_combo.blockSignals(False)
+            if not found:
+                app_logger.warning(f"Saved camera '{saved_name}' not found in detected cameras")
+        
+        self.capture_panel.camera_combo.blockSignals(False)
     
     def _on_test_discord(self):
         """Test Discord webhook"""
@@ -661,7 +756,7 @@ class MainWindow(QMainWindow):
             app_logger.error(f"Failed to send Discord capture started notification: {e}")
     
     def start_capture(self):
-        """Start capture (camera or watch mode)"""
+        """Start capture (camera, ASCOM, or watch mode)"""
         mode = self.config.get('capture_mode', 'camera')
         
         try:
@@ -673,6 +768,12 @@ class MainWindow(QMainWindow):
                 # Check if camera capture actually started successfully
                 if self.camera_controller and not self.camera_controller.is_capturing:
                     app_logger.error("Camera capture failed to start")
+                    return
+            elif mode == 'ascom':
+                self._start_ascom_capture()
+                # Check if ASCOM capture actually started successfully
+                if self.ascom_controller and not self.ascom_controller.is_capturing:
+                    app_logger.error("ASCOM capture failed to start")
                     return
             else:
                 self._start_watch_mode()
@@ -710,6 +811,8 @@ class MainWindow(QMainWindow):
                 # Reset camera capabilities in capture settings panel
                 if hasattr(self, 'capture_panel'):
                     self.capture_panel.reset_camera_capabilities()
+            elif mode == 'ascom' and hasattr(self, 'ascom_controller') and self.ascom_controller:
+                self.ascom_controller.stop_capture()
             elif self.watch_controller:
                 self.watch_controller.stop_watching()
             
@@ -760,6 +863,30 @@ class MainWindow(QMainWindow):
             # Connection failed - camera_controller already logged the error
             self.app_bar.camera_chip.set_status('error')
             self.app_bar.camera_chip.set_label('Connection Failed')
+    
+    def _start_ascom_capture(self):
+        """Initialize and start ASCOM camera capture"""
+        from .controllers.ascom_controller import ASCOMControllerQt
+        
+        if not hasattr(self, 'ascom_controller') or not self.ascom_controller:
+            self.ascom_controller = ASCOMControllerQt(self)
+            # Connect calibration signal
+            self.ascom_controller.calibration_status.connect(self.on_calibration_status)
+            # Connect error signal to send Discord alerts
+            self.ascom_controller.error.connect(self._on_camera_error)
+        
+        self.ascom_controller.start_capture()
+        
+        # Only update status if capture actually started successfully
+        if self.ascom_controller.is_capturing:
+            # Update camera chip to show connected
+            self.app_bar.camera_chip.set_status('connected')
+            self.app_bar.camera_chip.set_label('ASCOM Connected')
+            app_logger.info("ASCOM camera capture started")
+        else:
+            # Connection failed
+            self.app_bar.camera_chip.set_status('error')
+            self.app_bar.camera_chip.set_label('ASCOM Connection Failed')
     
     def _start_watch_mode(self):
         """Initialize and start directory watch mode"""
@@ -1314,7 +1441,7 @@ class MainWindow(QMainWindow):
                     self.config.set('tray_mode_enabled', False)
                     # Update the UI switch if settings panel exists
                     if hasattr(self, 'settings_panel'):
-                        self.settings_panel.tray_enabled_switch.setChecked(False)
+                        self.settings_panel.tray_enabled_switch.set_checked(False)
                     return
                 
                 # Create system tray (hidden initially since window is already visible)
@@ -1328,7 +1455,7 @@ class MainWindow(QMainWindow):
                 # Reset the setting
                 self.config.set('tray_mode_enabled', False)
                 if hasattr(self, 'settings_panel'):
-                    self.settings_panel.tray_enabled_switch.setChecked(False)
+                    self.settings_panel.tray_enabled_switch.set_checked(False)
         
         elif not enabled and self.system_tray is not None:
             # Disable tray mode - stop and remove tray

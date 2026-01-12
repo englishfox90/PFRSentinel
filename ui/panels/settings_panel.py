@@ -15,6 +15,7 @@ from qfluentwidgets import (
     SpinBox, DoubleSpinBox, SwitchButton, FluentIcon, HyperlinkLabel
 )
 
+from version import __version__ as APP_VERSION
 from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..components.cards import SettingsCard, FormRow, SwitchRow, CollapsibleCard
 
@@ -75,13 +76,12 @@ class SettingsPanel(QScrollArea):
         )
         
         # System tray mode
-        tray_row = SwitchRow(
+        self.tray_enabled_switch = SwitchRow(
             "Enable System Tray",
             "Minimize to system tray instead of taskbar when closing window"
         )
-        self.tray_enabled_switch = tray_row.switch
-        self.tray_enabled_switch.checkedChanged.connect(self._on_system_changed)
-        system_card.add_widget(tray_row)
+        self.tray_enabled_switch.toggled.connect(self._on_system_changed)
+        system_card.add_widget(self.tray_enabled_switch)
         
         layout.addWidget(system_card)
         
@@ -92,13 +92,12 @@ class SettingsPanel(QScrollArea):
         )
         
         # Enable Discord
-        discord_enable_row = SwitchRow(
+        self.discord_enabled_switch = SwitchRow(
             "Enable Discord Alerts",
             "Send notifications to Discord via webhook"
         )
-        self.discord_enabled_switch = discord_enable_row.switch
-        self.discord_enabled_switch.checkedChanged.connect(self._on_discord_changed)
-        discord_card.add_widget(discord_enable_row)
+        self.discord_enabled_switch.toggled.connect(self._on_discord_changed)
+        discord_card.add_widget(self.discord_enabled_switch)
         
         # Webhook URL
         webhook_row = QHBoxLayout()
@@ -119,29 +118,26 @@ class SettingsPanel(QScrollArea):
         discord_card.add_row("Webhook URL", webhook_widget)
         
         # Notification types
-        startup_row = SwitchRow(
+        self.discord_startup_switch = SwitchRow(
             "Startup / Shutdown / Capture Started",
             "Notify when app starts, stops, or capture begins"
         )
-        self.discord_startup_switch = startup_row.switch
-        self.discord_startup_switch.checkedChanged.connect(self._on_discord_changed)
-        discord_card.add_widget(startup_row)
+        self.discord_startup_switch.toggled.connect(self._on_discord_changed)
+        discord_card.add_widget(self.discord_startup_switch)
         
-        error_row = SwitchRow(
+        self.discord_error_switch = SwitchRow(
             "Error Alerts",
             "Notify when errors occur"
         )
-        self.discord_error_switch = error_row.switch
-        self.discord_error_switch.checkedChanged.connect(self._on_discord_changed)
-        discord_card.add_widget(error_row)
+        self.discord_error_switch.toggled.connect(self._on_discord_changed)
+        discord_card.add_widget(self.discord_error_switch)
         
-        periodic_row = SwitchRow(
+        self.discord_periodic_switch = SwitchRow(
             "Periodic Updates",
             "Post periodic status updates with latest image"
         )
-        self.discord_periodic_switch = periodic_row.switch
-        self.discord_periodic_switch.checkedChanged.connect(self._on_discord_changed)
-        discord_card.add_widget(periodic_row)
+        self.discord_periodic_switch.toggled.connect(self._on_discord_changed)
+        discord_card.add_widget(self.discord_periodic_switch)
         
         # Periodic interval
         self.periodic_interval_spin = SpinBox()
@@ -244,13 +240,12 @@ class SettingsPanel(QScrollArea):
         )
         
         # Enable cleanup
-        cleanup_enable_row = SwitchRow(
+        self.cleanup_enabled_switch = SwitchRow(
             "Enable Auto-Cleanup",
             "Automatically delete old images when storage limit is reached"
         )
-        self.cleanup_enabled_switch = cleanup_enable_row.switch
-        self.cleanup_enabled_switch.checkedChanged.connect(self._on_cleanup_changed)
-        cleanup_card.add_widget(cleanup_enable_row)
+        self.cleanup_enabled_switch.toggled.connect(self._on_cleanup_changed)
+        cleanup_card.add_widget(self.cleanup_enabled_switch)
         
         # Storage limit (use DoubleSpinBox for decimal values like 0.1 GB)
         self.cleanup_size_spin = DoubleSpinBox()
@@ -264,7 +259,132 @@ class SettingsPanel(QScrollArea):
         
         layout.addWidget(cleanup_card)
         
+        # === ABOUT ===
+        about_card = self._create_about_card()
+        layout.addWidget(about_card)
+        
         layout.addStretch()
+    
+    def _create_about_card(self) -> SettingsCard:
+        """Create the About section card"""
+        about_card = SettingsCard(
+            "About",
+            "Application information"
+        )
+        
+        # App Version
+        version_label = BodyLabel(f"v{APP_VERSION}")
+        version_label.setStyleSheet(f"color: {Colors.text_primary};")
+        about_card.add_row("PFR Sentinel", version_label, "Application version")
+        
+        # ASI SDK Version
+        asi_version = self._get_asi_sdk_version()
+        asi_label = BodyLabel(asi_version)
+        asi_label.setStyleSheet(f"color: {Colors.text_primary};")
+        about_card.add_row("ZWO ASI SDK", asi_label, "Camera driver version")
+        
+        # ASCOM/Alpaca Version
+        ascom_version = self._get_ascom_version()
+        ascom_label = BodyLabel(ascom_version)
+        ascom_label.setStyleSheet(f"color: {Colors.text_primary};")
+        about_card.add_row("ASCOM Alpaca", ascom_label, "ASCOM camera support")
+        
+        # GitHub Repo
+        github_link = HyperlinkLabel()
+        github_link.setUrl("https://github.com/englishfox90/PFRSentinel")
+        github_link.setText("englishfox90/PFRSentinel")
+        about_card.add_row("GitHub", github_link, "Source code repository")
+        
+        # Developer
+        dev_label = BodyLabel("englishfox90")
+        dev_label.setStyleSheet(f"color: {Colors.text_primary};")
+        about_card.add_row("Developer", dev_label, "")
+        
+        # License
+        license_label = BodyLabel("MIT License")
+        license_label.setStyleSheet(f"color: {Colors.text_primary};")
+        about_card.add_row("License", license_label, "Open source license")
+        
+        return about_card
+    
+    def _get_asi_sdk_version(self) -> str:
+        """Get the ZWO ASI SDK version string from the DLL file"""
+        try:
+            import os
+            from utils_paths import resource_path
+            
+            # Try to find the SDK DLL
+            sdk_path = None
+            if self.main_window and hasattr(self.main_window, 'config'):
+                sdk_path = self.main_window.config.get('zwo_sdk_path', '')
+            
+            if not sdk_path or not os.path.exists(sdk_path):
+                sdk_path = resource_path("ASICamera2.dll")
+            
+            if not os.path.exists(sdk_path):
+                sdk_path = "ASICamera2.dll"
+            
+            if os.path.exists(sdk_path):
+                # Get file version using Windows API via ctypes
+                import ctypes
+                from ctypes import wintypes
+                
+                version_dll = ctypes.windll.version
+                size = version_dll.GetFileVersionInfoSizeW(sdk_path, None)
+                
+                if size:
+                    data = ctypes.create_string_buffer(size)
+                    if version_dll.GetFileVersionInfoW(sdk_path, 0, size, data):
+                        # Get the fixed file info
+                        p_buffer = ctypes.c_void_p()
+                        length = wintypes.UINT()
+                        if version_dll.VerQueryValueW(data, "\\\\", ctypes.byref(p_buffer), ctypes.byref(length)):
+                            # VS_FIXEDFILEINFO structure
+                            class VS_FIXEDFILEINFO(ctypes.Structure):
+                                _fields_ = [
+                                    ("dwSignature", wintypes.DWORD),
+                                    ("dwStrucVersion", wintypes.DWORD),
+                                    ("dwFileVersionMS", wintypes.DWORD),
+                                    ("dwFileVersionLS", wintypes.DWORD),
+                                    ("dwProductVersionMS", wintypes.DWORD),
+                                    ("dwProductVersionLS", wintypes.DWORD),
+                                    ("dwFileFlagsMask", wintypes.DWORD),
+                                    ("dwFileFlags", wintypes.DWORD),
+                                    ("dwFileOS", wintypes.DWORD),
+                                    ("dwFileType", wintypes.DWORD),
+                                    ("dwFileSubtype", wintypes.DWORD),
+                                    ("dwFileDateMS", wintypes.DWORD),
+                                    ("dwFileDateLS", wintypes.DWORD),
+                                ]
+                            
+                            info = ctypes.cast(p_buffer, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+                            major = (info.dwFileVersionMS >> 16) & 0xFFFF
+                            minor = info.dwFileVersionMS & 0xFFFF
+                            build = (info.dwFileVersionLS >> 16) & 0xFFFF
+                            revision = info.dwFileVersionLS & 0xFFFF
+                            return f"{major}.{minor}.{build}.{revision}"
+                
+                return "Unknown (DLL found)"
+            else:
+                return "Not installed"
+                
+        except Exception as e:
+            return f"Error: {str(e)[:20]}"
+    
+    def _get_ascom_version(self) -> str:
+        """Get the ASCOM/Alpaca library version"""
+        try:
+            from services.camera.ascom import check_ascom_availability
+            info = check_ascom_availability()
+            
+            if info['available']:
+                backend = info['backend'] or 'alpaca'
+                version = info['version'] or 'installed'
+                return f"v{version} ({backend})"
+            else:
+                return "Not installed"
+        except Exception as e:
+            return f"Error: {str(e)[:20]}"
     
     def _toggle_api_key_visibility(self):
         """Toggle API key visibility"""
@@ -280,7 +400,7 @@ class SettingsPanel(QScrollArea):
         if self._loading_config:
             return
         if self.main_window and hasattr(self.main_window, 'config'):
-            tray_enabled = self.tray_enabled_switch.isChecked()
+            tray_enabled = self.tray_enabled_switch.is_checked()
             self.main_window.config.set('tray_mode_enabled', tray_enabled)
             
             # Apply tray mode change immediately
@@ -295,11 +415,11 @@ class SettingsPanel(QScrollArea):
             return
         if self.main_window and hasattr(self.main_window, 'config'):
             discord = self.main_window.config.get('discord', {})
-            discord['enabled'] = self.discord_enabled_switch.isChecked()
+            discord['enabled'] = self.discord_enabled_switch.is_checked()
             discord['webhook_url'] = self.webhook_input.text()
-            discord['post_startup_shutdown'] = self.discord_startup_switch.isChecked()
-            discord['post_errors'] = self.discord_error_switch.isChecked()
-            discord['periodic_enabled'] = self.discord_periodic_switch.isChecked()
+            discord['post_startup_shutdown'] = self.discord_startup_switch.is_checked()
+            discord['post_errors'] = self.discord_error_switch.is_checked()
+            discord['periodic_enabled'] = self.discord_periodic_switch.is_checked()
             discord['periodic_interval_minutes'] = self.periodic_interval_spin.value()
             self.main_window.config.set('discord', discord)
             self.settings_changed.emit()
@@ -371,7 +491,7 @@ class SettingsPanel(QScrollArea):
         if self._loading_config:
             return
         if self.main_window and hasattr(self.main_window, 'config'):
-            self.main_window.config.set('cleanup_enabled', self.cleanup_enabled_switch.isChecked())
+            self.main_window.config.set('cleanup_enabled', self.cleanup_enabled_switch.is_checked())
             self.main_window.config.set('cleanup_max_size_gb', self.cleanup_size_spin.value())
             self.settings_changed.emit()
     
@@ -380,15 +500,15 @@ class SettingsPanel(QScrollArea):
         self._loading_config = True
         try:
             # System
-            self.tray_enabled_switch.setChecked(config.get('tray_mode_enabled', False))
+            self.tray_enabled_switch.set_checked(config.get('tray_mode_enabled', False))
             
             # Discord
             discord = config.get('discord', {})
-            self.discord_enabled_switch.setChecked(discord.get('enabled', False))
+            self.discord_enabled_switch.set_checked(discord.get('enabled', False))
             self.webhook_input.setText(discord.get('webhook_url', ''))
-            self.discord_startup_switch.setChecked(discord.get('post_startup_shutdown', True))
-            self.discord_error_switch.setChecked(discord.get('post_errors', False))
-            self.discord_periodic_switch.setChecked(discord.get('periodic_enabled', False))
+            self.discord_startup_switch.set_checked(discord.get('post_startup_shutdown', True))
+            self.discord_error_switch.set_checked(discord.get('post_errors', False))
+            self.discord_periodic_switch.set_checked(discord.get('periodic_enabled', False))
             self.periodic_interval_spin.setValue(discord.get('periodic_interval_minutes', 15))
             
             # Weather
@@ -403,7 +523,7 @@ class SettingsPanel(QScrollArea):
             self.units_combo.setCurrentIndex(idx)
             
             # Cleanup
-            self.cleanup_enabled_switch.setChecked(config.get('cleanup_enabled', False))
+            self.cleanup_enabled_switch.set_checked(config.get('cleanup_enabled', False))
             self.cleanup_size_spin.setValue(config.get('cleanup_max_size_gb', 10))
             
         finally:

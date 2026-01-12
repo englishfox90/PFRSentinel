@@ -72,6 +72,8 @@ ANCHOR_POSITIONS = [
     "Bottom-Left", "Bottom-Center", "Bottom-Right",
 ]
 
+TEXT_ALIGN_OPTIONS = ["left", "center", "right"]
+
 COLOR_OPTIONS = [
     "white", "black", "lightgray", "darkgray",
     "red", "green", "blue", "cyan", "magenta", 
@@ -328,6 +330,7 @@ class OverlaySettingsPanel(QWidget):
         font_size = overlay.get('font_size', 24)
         font_style = overlay.get('font_style', 'normal')
         color = overlay.get('color', 'white')
+        text_align = overlay.get('text_align', 'left')
         bg_enabled = overlay.get('bg_enabled', False)
         bg_color = overlay.get('bg_color', 'transparent')
         
@@ -353,7 +356,8 @@ class OverlaySettingsPanel(QWidget):
         # Calculate text bounds
         metrics = painter.fontMetrics()
         lines = sample_text.split('\n')
-        text_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+        line_widths = [metrics.horizontalAdvance(line) for line in lines]
+        text_width = max(line_widths) if line_widths else 0
         line_height = metrics.height()
         text_height = line_height * len(lines)
         
@@ -362,13 +366,13 @@ class OverlaySettingsPanel(QWidget):
         scaled_offset_y = int(offset_y * scale)
         margin = int(10 * scale)
         
-        # Calculate position based on anchor
+        # Calculate position based on anchor (this is the bounding box position)
         if 'Left' in anchor:
-            x = margin + scaled_offset_x
+            box_x = margin + scaled_offset_x
         elif 'Right' in anchor:
-            x = width - text_width - margin - scaled_offset_x
+            box_x = width - text_width - margin - scaled_offset_x
         else:  # Center
-            x = (width - text_width) // 2 + scaled_offset_x
+            box_x = (width - text_width) // 2 + scaled_offset_x
         
         if 'Top' in anchor:
             y = margin + line_height + scaled_offset_y
@@ -383,15 +387,23 @@ class OverlaySettingsPanel(QWidget):
             bg_qcolor.setAlpha(180)
             padding = int(5 * scale)
             painter.fillRect(
-                int(x - padding), int(y - line_height - padding//2),
+                int(box_x - padding), int(y - line_height - padding//2),
                 int(text_width + padding*2), int(text_height + padding),
                 bg_qcolor
             )
         
-        # Draw text
+        # Draw text with alignment
         painter.setPen(QColor(color))
         for i, line in enumerate(lines):
-            painter.drawText(int(x), int(y + i * line_height), line)
+            line_w = line_widths[i]
+            # Calculate x position based on text alignment within the bounding box
+            if text_align == 'center':
+                line_x = box_x + (text_width - line_w) // 2
+            elif text_align == 'right':
+                line_x = box_x + (text_width - line_w)
+            else:  # left
+                line_x = box_x
+            painter.drawText(int(line_x), int(y + i * line_height), line)
     
     def _render_image_overlay(self, painter: QPainter, overlay: dict, width: int, height: int):
         """Render image overlay"""
@@ -669,6 +681,11 @@ class OverlaySettingsPanel(QWidget):
         self.font_style_combo.currentTextChanged.connect(self._on_appearance_changed)
         layout.addWidget(FormRow("Style", self.font_style_combo))
         
+        self.text_align_combo = ComboBox()
+        self.text_align_combo.addItems(TEXT_ALIGN_OPTIONS)
+        self.text_align_combo.currentTextChanged.connect(self._on_appearance_changed)
+        layout.addWidget(FormRow("Text Align", self.text_align_combo))
+        
         # Background toggle
         self.bg_switch = SwitchRow("Background", "Draw rectangle behind text")
         self.bg_switch.toggled.connect(self._on_bg_toggle)
@@ -813,6 +830,7 @@ class OverlaySettingsPanel(QWidget):
             'font_size': 24,
             'font_style': 'normal',
             'color': 'white',
+            'text_align': 'left',
             'bg_enabled': False,
             'bg_color': 'transparent'
         }
@@ -904,6 +922,11 @@ class OverlaySettingsPanel(QWidget):
             if idx >= 0:
                 self.font_style_combo.setCurrentIndex(idx)
             
+            text_align = overlay.get('text_align', 'left')
+            idx = self.text_align_combo.findText(text_align)
+            if idx >= 0:
+                self.text_align_combo.setCurrentIndex(idx)
+            
             bg_enabled = overlay.get('bg_enabled', False)
             self.bg_switch.set_checked(bg_enabled)
             self.bg_color_widget.setVisible(bg_enabled)
@@ -935,7 +958,7 @@ class OverlaySettingsPanel(QWidget):
         widgets = [
             self.name_edit, self.type_combo, self.text_edit,
             self.font_size_spin, self.color_combo, self.font_style_combo,
-            self.bg_color_combo,
+            self.text_align_combo, self.bg_color_combo,
             self.image_path_edit, self.image_width_spin, self.image_height_spin,
             self.opacity_spin,
             self.anchor_combo, self.offset_x_spin, self.offset_y_spin
@@ -956,6 +979,7 @@ class OverlaySettingsPanel(QWidget):
         self.font_size_spin.setValue(24)
         self.color_combo.setCurrentIndex(0)
         self.font_style_combo.setCurrentIndex(0)
+        self.text_align_combo.setCurrentIndex(0)
         self.bg_switch.set_checked(False)
         self.bg_color_widget.hide()
         self.image_path_edit.clear()
@@ -980,6 +1004,7 @@ class OverlaySettingsPanel(QWidget):
                 overlay['font_size'] = self.font_size_spin.value()
                 overlay['color'] = self.color_combo.currentText()
                 overlay['font_style'] = self.font_style_combo.currentText()
+                overlay['text_align'] = self.text_align_combo.currentText()
                 overlay['bg_enabled'] = self.bg_switch.is_checked()
                 overlay['bg_color'] = self.bg_color_combo.currentText()
             else:
