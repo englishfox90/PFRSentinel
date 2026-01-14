@@ -331,8 +331,35 @@ class CameraConnection:
         except Exception as diag_err:
             self.log(f"  Could not query camera list for diagnostics: {diag_err}")
     
+    def _find_camera_index_by_name(self, cameras: List[Dict[str, Any]], camera_name: str) -> Optional[int]:
+        """
+        Find camera index by exact name match.
+        
+        Args:
+            cameras: List of detected cameras with 'index' and 'name' keys
+            camera_name: Name of camera to find
+            
+        Returns:
+            Camera index if found, None if not found
+        """
+        for cam in cameras:
+            if camera_name in cam['name']:
+                self.log(f"✓ Found camera '{camera_name}' at index {cam['index']}")
+                return cam['index']
+        
+        # Log available cameras for debugging
+        self.log(f"✗ Camera '{camera_name}' not found in detected cameras:")
+        for cam in cameras:
+            self.log(f"  - [{cam['index']}] {cam['name']}")
+        return None
+    
     def _find_camera_index(self, cameras: List[Dict[str, Any]], camera_name: Optional[str]) -> int:
-        """Find camera index by name, or return first camera index if not found."""
+        """
+        Find camera index by name, or return first camera index if no name specified.
+        
+        NOTE: This method is for initial connection when no specific camera is required.
+        For reconnection, use _find_camera_index_by_name() which enforces strict matching.
+        """
         if camera_name:
             for cam in cameras:
                 if camera_name in cam['name']:
@@ -340,12 +367,13 @@ class CameraConnection:
                     return cam['index']
             self.log(f"⚠ Warning: Could not find camera '{camera_name}' by name")
         
-        # Fall back to first camera
+        # Fall back to first camera (only for initial connection, not reconnection)
         self.log(f"Using first available camera at index {cameras[0]['index']}: {cameras[0]['name']}")
         return cameras[0]['index']
     
     def reconnect_safe(self, target_camera_name: Optional[str] = None,
-                       settings: Optional[Dict[str, Any]] = None) -> bool:
+                       settings: Optional[Dict[str, Any]] = None,
+                       allow_fallback: bool = False) -> bool:
         """
         Safely reconnect to camera by re-detecting available cameras first.
         
@@ -354,9 +382,24 @@ class CameraConnection:
             settings: Camera settings dict to apply after reconnection (ROI, gain, etc.)
                      CRITICAL: Without settings, camera may use default ROI causing
                      resolution mismatch and reshape errors during capture.
+            allow_fallback: If False (default), reconnection fails if target camera not found.
+                           If True, falls back to first available camera.
+                           
+        Returns:
+            True if reconnection successful, False otherwise
+            
+        IMPORTANT: By default, this method will NOT connect to a different camera
+        if the target camera is not found. This prevents accidentally connecting
+        to the wrong camera when the originally-selected camera loses power or
+        is disconnected.
         """
         self.log("=== Safe Camera Reconnection ===")
         camera_to_find = target_camera_name or self.camera_name
+        
+        if camera_to_find:
+            self.log(f"Target camera: '{camera_to_find}'")
+        else:
+            self.log("No target camera name specified - will use first available")
         
         # Detect cameras (with SDK reset fallback)
         detected = self.detect_cameras()
@@ -370,8 +413,27 @@ class CameraConnection:
                 self.log("✗ No cameras detected even after SDK reset")
                 return False
         
-        # Find target camera
-        target_index = self._find_camera_index(detected, camera_to_find)
+        # Find target camera - strict matching for reconnection
+        if camera_to_find:
+            target_index = self._find_camera_index_by_name(detected, camera_to_find)
+            if target_index is None:
+                if allow_fallback:
+                    self.log(f"⚠ Target camera not found, falling back to first available")
+                    target_index = detected[0]['index']
+                else:
+                    self.log(f"✗ RECONNECTION FAILED: Target camera '{camera_to_find}' not found")
+                    self.log("The originally-selected camera is not available.")
+                    self.log("This could mean:")
+                    self.log("  1. Camera lost power or was disconnected")
+                    self.log("  2. USB cable was unplugged")
+                    self.log("  3. Camera was connected to a different system")
+                    self.log("To connect to a different camera, use the Capture tab to select one.")
+                    return False
+        else:
+            # No target name - use first available (initial connection case)
+            target_index = detected[0]['index']
+            self.log(f"Using first available camera at index {target_index}")
+        
         self.camera_index = target_index
         
         # Connect with settings (with SDK reset fallback on failure)
@@ -387,7 +449,18 @@ class CameraConnection:
             self.log("✗ No cameras detected after SDK reset")
             return False
         
-        target_index = self._find_camera_index(detected, camera_to_find)
+        # Strict matching again after SDK reset
+        if camera_to_find:
+            target_index = self._find_camera_index_by_name(detected, camera_to_find)
+            if target_index is None:
+                if allow_fallback:
+                    target_index = detected[0]['index']
+                else:
+                    self.log(f"✗ Target camera '{camera_to_find}' still not found after SDK reset")
+                    return False
+        else:
+            target_index = detected[0]['index']
+            
         self.camera_index = target_index
         return self.connect(target_index, settings)
     

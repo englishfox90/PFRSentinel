@@ -176,6 +176,10 @@ class AppBar(QFrame):
         """)
         self.countdown_label.setAlignment(Qt.AlignCenter)
         self.countdown_label.setFixedWidth(100)
+        # Retain space when hidden to prevent layout shift
+        sp = self.countdown_label.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.countdown_label.setSizePolicy(sp)
         self.countdown_label.hide()
         progress_layout.addWidget(self.countdown_label)
         
@@ -184,6 +188,10 @@ class AppBar(QFrame):
         self.progress_bar.setFixedHeight(6)  # Slightly taller for visibility
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        # Retain space when hidden to prevent layout shift
+        sp = self.progress_bar.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.progress_bar.setSizePolicy(sp)
         self.progress_bar.hide()
         progress_layout.addWidget(self.progress_bar)
         
@@ -192,6 +200,10 @@ class AppBar(QFrame):
         self.processing_label.setStyleSheet(f"color: {Colors.accent_default};")
         self.processing_label.setAlignment(Qt.AlignCenter)
         self.processing_label.setFixedWidth(100)
+        # Retain space when hidden to prevent layout shift
+        sp = self.processing_label.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.processing_label.setSizePolicy(sp)
         self.processing_label.hide()
         progress_layout.addWidget(self.processing_label)
         

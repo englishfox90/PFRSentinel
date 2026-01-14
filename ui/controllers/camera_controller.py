@@ -71,8 +71,10 @@ class CameraControllerQt(QObject):
                 try:
                     name = asi.list_cameras()[i]
                     camera_list.append(f"{name} (Index: {i})")
-                except:
-                    camera_list.append(f"Camera {i}")
+                except Exception as e:
+                    # Skip cameras that fail to enumerate - they may be phantom devices
+                    # or cameras in a bad state that can't be used anyway
+                    app_logger.warning(f"Camera {i} failed to enumerate: {e} - skipping")
             
             self.cameras_detected.emit(camera_list)
             app_logger.info(f"Detected {len(camera_list)} camera(s)")
