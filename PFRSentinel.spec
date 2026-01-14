@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for PFR Sentinel v3.2.1
+PyInstaller spec file for PFR Sentinel
 LEAN BUILD - Only includes packages actually used by production code
 
 Required packages (from requirements.txt):
@@ -22,6 +22,66 @@ import os
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all
 
 block_cipher = None
+
+# ============================================================================
+# VERSION INFO - Read from version.py (single source of truth)
+# ============================================================================
+
+# Parse version from version.py
+version_file = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'version.py')
+version_str = "0.0.0"
+try:
+    with open(version_file, 'r') as f:
+        for line in f:
+            if line.startswith('__version__'):
+                version_str = line.split('=')[1].strip().strip('"\'')
+                break
+    print(f"✓ Version from version.py: {version_str}")
+except Exception as e:
+    print(f"⚠ Could not read version.py: {e}")
+
+# Parse version components (e.g., "3.2.3" -> (3, 2, 3, 0))
+version_parts = version_str.split('.')
+version_tuple = tuple(int(p) for p in version_parts[:3]) + (0,) * (4 - len(version_parts[:3]))
+
+# Create Windows version info structure dynamically
+from PyInstaller.utils.win32.versioninfo import (
+    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, 
+    StringStruct, VarFileInfo, VarStruct
+)
+
+version_info = VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers=version_tuple,
+        prodvers=version_tuple,
+        mask=0x3f,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0)
+    ),
+    kids=[
+        StringFileInfo([
+            StringTable(
+                '040904B0',
+                [
+                    StringStruct('CompanyName', 'Paul Fox-Reeks'),
+                    StringStruct('FileDescription', 'PFR Sentinel - Astrophotography Image Processor'),
+                    StringStruct('FileVersion', f'{version_str}.0'),
+                    StringStruct('InternalName', 'PFRSentinel'),
+                    StringStruct('LegalCopyright', 'Copyright (c) 2024-2026 Paul Fox-Reeks'),
+                    StringStruct('OriginalFilename', 'PFRSentinel.exe'),
+                    StringStruct('ProductName', 'PFR Sentinel'),
+                    StringStruct('ProductVersion', f'{version_str}.0'),
+                ]
+            )
+        ]),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])])
+    ]
+)
+
+print(f"✓ Version info generated: {version_tuple}")
 
 # ============================================================================
 # COLLECT REQUIRED PACKAGES
@@ -253,6 +313,8 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/app_icon.ico',
+    # Version info generated dynamically from version.py (helps AV heuristics)
+    version=version_info,
 )
 
 coll = COLLECT(

@@ -543,7 +543,7 @@ class LiveMonitoringPanel(QScrollArea):
         
         header_layout.addStretch()
         
-        # Countdown label
+        # Countdown label - uses retainSizeWhenHidden to prevent layout shift
         self.countdown_label = BodyLabel("")
         self.countdown_label.setStyleSheet(f"""
             color: {Colors.text_primary};
@@ -551,16 +551,25 @@ class LiveMonitoringPanel(QScrollArea):
             font-weight: 600;
         """)
         self.countdown_label.setAlignment(Qt.AlignRight)
+        self.countdown_label.setMinimumWidth(60)  # Reserve space for countdown text
+        # Retain space when hidden to prevent layout shift
+        sp = self.countdown_label.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.countdown_label.setSizePolicy(sp)
         self.countdown_label.hide()
         header_layout.addWidget(self.countdown_label)
         
         preview_layout.addLayout(header_layout)
         
-        # Progress bar (below header)
+        # Progress bar (below header) - uses retainSizeWhenHidden to prevent layout shift
         self.progress_bar = ProgressBar()
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        # Retain space when hidden to prevent layout shift
+        sp = self.progress_bar.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        self.progress_bar.setSizePolicy(sp)
         self.progress_bar.hide()
         preview_layout.addWidget(self.progress_bar)
         
