@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     },
     
     # ZWO Camera settings
-    "zwo_sdk_path": resource_path("ASICamera2.dll"),
+    "zwo_sdk_path": _get_default_zwo_sdk_path(),
     "zwo_camera_index": 0,
     "zwo_camera_name": "",  # Last selected camera name
     "zwo_selected_camera": 0,  # Last selected camera index
@@ -145,7 +145,7 @@ DEFAULT_CONFIG = {
         # ASCOM Safety Monitor file output (for NINA integration)
         "ascom_safety_file": {
             "enabled": False,  # Write roof status to file for NINA GenericFile safety monitor
-            "file_path": os.path.join(os.getenv('LOCALAPPDATA'), APP_DATA_FOLDER, 'RoofStatusFile.txt'),  # Default to AppData
+            "file_path": os.path.join(get_app_data_dir(), 'RoofStatusFile.txt'),  # Cross-platform AppData location
             "preamble": "Roof Status:",  # Text before the status value
             "open_trigger": "OPEN",  # Value when roof is open (Safe in NINA)
             "closed_trigger": "CLOSED",  # Value when roof is closed (Unsafe in NINA)
@@ -227,14 +227,18 @@ class Config:
     def __init__(self, config_path=None):
         # Store config in user data directory for persistence across upgrades
         if config_path is None:
-            user_data_dir = os.path.join(os.getenv('LOCALAPPDATA'), APP_DATA_FOLDER)
+            # Use cross-platform user data directory
+            user_data_dir = get_app_data_dir()
             os.makedirs(user_data_dir, exist_ok=True)
             config_path = os.path.join(user_data_dir, 'config.json')
             
-            # One-time migration from old ASIOverlayWatchDog location
-            old_appdata_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog')
-            if os.path.exists(old_appdata_dir) and not os.path.exists(config_path):
-                self._migrate_from_old_location(old_appdata_dir, user_data_dir, config_path)
+            # One-time migration from old ASIOverlayWatchDog location (Windows only)
+            if is_windows():
+                local_appdata = os.getenv('LOCALAPPDATA', '')
+                if local_appdata:
+                    old_appdata_dir = os.path.join(local_appdata, 'ASIOverlayWatchDog')
+                    if os.path.exists(old_appdata_dir) and not os.path.exists(config_path):
+                        self._migrate_from_old_location(old_appdata_dir, user_data_dir, config_path)
             
             # Migrate old config.json from app directory if it exists (legacy)
             old_config_path = 'config.json'
@@ -249,11 +253,13 @@ class Config:
         self.config_path = config_path
         self.data = self.load()
         
-        # Migrate any paths that still reference old ASIOverlayWatchDog
-        self._migrate_old_paths()
+        # Migrate any paths that still reference old ASIOverlayWatchDog (Windows only)
+        if is_windows():
+            self._migrate_old_paths()
         
-        # Always attempt to clean up old ASIOverlayWatchDog directory if it exists
-        self._cleanup_old_directory()
+        # Always attempt to clean up old ASIOverlayWatchDog directory if it exists (Windows only)
+        if is_windows():
+            self._cleanup_old_directory()
     
     def _migrate_from_old_location(self, old_dir, new_dir, new_config_path):
         """Migrate config and data from old ASIOverlayWatchDog location to new PFR\\Sentinel location"""
@@ -333,51 +339,64 @@ class Config:
             if value and 'ASIOverlayWatchDog' in value:
                 new_value = value.replace('ASIOverlayWatchDog', 'PFRSentinel')
                 
-                # For SDK path, also try to copy the DLL if it exists at old location but not new
+                # For SDK path, also try to copy the library if it exists at old location but not new
                 if key == 'sdk_path' and os.path.isfile(value):
                     new_dir = os.path.dirname(new_value)
                     if not os.path.exists(new_value) and os.path.exists(new_dir):
                         try:
                             shutil.copy2(value, new_value)
-                            app_logger.info(f"Copied SDK DLL from {value} to {new_value}")
+                            app_logger.info(f"Copied SDK library from {value} to {new_value}")
                         except Exception as e:
-                            app_logger.warning(f"Could not copy SDK DLL: {e}")
+                            app_logger.warning(f"Could not copy SDK library: {e}")
                 
                 self.data[key] = new_value
                 app_logger.info(f"Migrated {key}: {value} -> {new_value}")
                 updated = True
         
-        # Also check if sdk_path points to non-existent file - try to find it in new location
+        # Also check if sdk_path points to non-existent file - try to find it using cross-platform search
         sdk_path = self.data.get('sdk_path', '')
         if sdk_path and not os.path.isfile(sdk_path):
-            # Try to find SDK in the new PFRSentinel _internal folder
-            possible_locations = [
-                os.path.join(os.getenv('PROGRAMFILES(X86)', ''), 'PFRSentinel', '_internal', 'ASICamera2.dll'),
-                os.path.join(os.getenv('PROGRAMFILES', ''), 'PFRSentinel', '_internal', 'ASICamera2.dll'),
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), '_internal', 'ASICamera2.dll'),
-            ]
-            for loc in possible_locations:
-                if os.path.isfile(loc):
-                    self.data['sdk_path'] = loc
-                    app_logger.info(f"SDK path was invalid, found SDK at: {loc}")
+            # Use cross-platform SDK search if available
+            if _HAS_PLATFORM_MODULE:
+                found_sdk = find_zwo_sdk()
+                if found_sdk:
+                    self.data['sdk_path'] = found_sdk
+                    app_logger.info(f"SDK path was invalid, found SDK at: {found_sdk}")
                     updated = True
-                    break
             else:
-                if sdk_path:
-                    app_logger.warning(f"SDK path is invalid and could not find SDK: {sdk_path}")
+                # Fallback to Windows-specific locations
+                sdk_name = get_zwo_sdk_name() if 'get_zwo_sdk_name' in dir() else 'ASICamera2.dll'
+                possible_locations = [
+                    os.path.join(os.getenv('PROGRAMFILES(X86)', ''), 'PFRSentinel', '_internal', sdk_name),
+                    os.path.join(os.getenv('PROGRAMFILES', ''), 'PFRSentinel', '_internal', sdk_name),
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), '_internal', sdk_name),
+                ]
+                for loc in possible_locations:
+                    if os.path.isfile(loc):
+                        self.data['sdk_path'] = loc
+                        app_logger.info(f"SDK path was invalid, found SDK at: {loc}")
+                        updated = True
+                        break
+                else:
+                    if sdk_path:
+                        app_logger.warning(f"SDK path is invalid and could not find SDK: {sdk_path}")
         
         if updated:
             self.save()
         
-        # Clean up old Program Files installation if it exists and is empty or only has _internal
+        # Clean up old Program Files installation if it exists (Windows only)
         self._cleanup_old_program_files()
     
     def _cleanup_old_program_files(self):
-        """Attempt to remove old ASIOverlayWatchDog from Program Files if it exists (once per session)"""
+        """Attempt to remove old ASIOverlayWatchDog from Program Files if it exists (Windows only, once per session)"""
         # Only attempt cleanup once per application session
         if Config._cleanup_attempted:
             return
         Config._cleanup_attempted = True
+        
+        # Only run on Windows
+        if not is_windows():
+            return
         
         import shutil
         from services.logger import app_logger
@@ -399,11 +418,19 @@ class Config:
                     app_logger.warning(f"Could not remove old Program Files directory {old_dir}: {e}")
     
     def _cleanup_old_directory(self):
-        """Attempt to remove old ASIOverlayWatchDog directory if it still exists"""
+        """Attempt to remove old ASIOverlayWatchDog directory if it still exists (Windows only)"""
+        # Only run on Windows
+        if not is_windows():
+            return
+        
         import shutil
         from services.logger import app_logger
         
-        old_dir = os.path.join(os.getenv('LOCALAPPDATA'), 'ASIOverlayWatchDog')
+        local_appdata = os.getenv('LOCALAPPDATA', '')
+        if not local_appdata:
+            return
+        
+        old_dir = os.path.join(local_appdata, 'ASIOverlayWatchDog')
         if os.path.exists(old_dir):
             try:
                 shutil.rmtree(old_dir)

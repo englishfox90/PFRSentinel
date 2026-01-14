@@ -145,7 +145,7 @@ class CaptureSettingsPanel(CaptureSettingsHandlers, QScrollArea):
         sdk_row = QHBoxLayout()
         sdk_row.setSpacing(Spacing.sm)
         self.sdk_path_input = LineEdit()
-        self.sdk_path_input.setPlaceholderText("Path to ASICamera2.dll")
+        self.sdk_path_input.setPlaceholderText(f"Path to {get_zwo_sdk_name()}")
         self.sdk_path_input.textChanged.connect(self._on_sdk_path_changed)
         sdk_row.addWidget(self.sdk_path_input, 1)
         sdk_browse = PushButton("Browse")
@@ -257,14 +257,29 @@ class CaptureSettingsPanel(CaptureSettingsHandlers, QScrollArea):
         layout.setSpacing(Spacing.card_gap)
         
         # --- Connection ---
-        conn_card = SettingsCard("ASCOM Camera Connection", "Connect to ASCOM-compatible cameras")
+        conn_card = SettingsCard("ASCOM Camera Connection", "Connect to ASCOM-compatible cameras via Alpaca")
         
         from services.camera.ascom import check_ascom_availability, ASCOM_BACKEND, ASCOM_VERSION
         info = check_ascom_availability()
-        status = f"ASCOM: {ASCOM_BACKEND} v{ASCOM_VERSION}" if info['available'] else "ASCOM not available"
+        
+        # Platform-aware status message
+        if info['available']:
+            status = f"ASCOM: {ASCOM_BACKEND} v{ASCOM_VERSION}"
+            status_color = Colors.status_success
+        else:
+            status = "ASCOM not available - install alpyca: pip install alpyca"
+            status_color = Colors.status_error
+        
         status_lbl = CaptionLabel(status)
-        status_lbl.setStyleSheet(f"color: {Colors.status_success if info['available'] else Colors.status_error};")
+        status_lbl.setStyleSheet(f"color: {status_color};")
         conn_card.add_widget(status_lbl)
+        
+        # Add cross-platform note for non-Windows users
+        if sys.platform != 'win32':
+            note_lbl = CaptionLabel("Note: Use ASCOM Alpaca (network API). COM drivers are Windows-only.")
+            note_lbl.setStyleSheet(f"color: {Colors.text_muted}; font-style: italic;")
+            note_lbl.setWordWrap(True)
+            conn_card.add_widget(note_lbl)
         
         server_row = QHBoxLayout()
         server_row.setSpacing(Spacing.sm)
@@ -357,7 +372,18 @@ class CaptureSettingsPanel(CaptureSettingsHandlers, QScrollArea):
             line_edit.setText(path)
     
     def _browse_sdk(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select ASI SDK", "", "DLL Files (*.dll)")
+        # Platform-appropriate file filter for ZWO SDK
+        if sys.platform == 'win32':
+            file_filter = "DLL Files (*.dll)"
+        elif sys.platform == 'darwin':
+            file_filter = "Dynamic Libraries (*.dylib)"
+        else:
+            file_filter = "Shared Libraries (*.so)"
+        
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select ZWO ASI SDK", "", 
+            f"{file_filter};;All Files (*)"
+        )
         if path:
             self.sdk_path_input.setText(path)
     

@@ -320,7 +320,14 @@ class ImageProcessingPanel(QScrollArea):
         ascom_path_row.setSpacing(Spacing.sm)
         
         self.ascom_file_path = LineEdit()
-        self.ascom_file_path.setPlaceholderText("%LOCALAPPDATA%\\PFRSentinel\\RoofStatusFile.txt")
+        # Set platform-appropriate placeholder text
+        import sys
+        if sys.platform == 'win32':
+            self.ascom_file_path.setPlaceholderText("%LOCALAPPDATA%\\PFRSentinel\\RoofStatusFile.txt")
+        elif sys.platform == 'darwin':
+            self.ascom_file_path.setPlaceholderText("~/Library/Application Support/PFRSentinel/RoofStatusFile.txt")
+        else:
+            self.ascom_file_path.setPlaceholderText("~/.local/share/PFRSentinel/RoofStatusFile.txt")
         self.ascom_file_path.editingFinished.connect(self._on_ascom_path_changed)
         ascom_path_row.addWidget(self.ascom_file_path, 1)
         

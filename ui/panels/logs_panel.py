@@ -150,19 +150,24 @@ class LogsPanel(QScrollArea):
         self.log_text.clear()
     
     def _open_log_folder(self):
-        """Open log folder in file explorer"""
-        import subprocess
-        import platform
+        """Open log folder in file explorer (cross-platform)"""
         from services.logger import app_logger
         
-        log_dir = app_logger.get_log_dir()
+        log_dir = str(app_logger.get_log_dir())
         
-        if platform.system() == 'Windows':
-            subprocess.run(['explorer', log_dir])
-        elif platform.system() == 'Darwin':
-            subprocess.run(['open', log_dir])
-        else:
-            subprocess.run(['xdg-open', log_dir])
+        # Use platform module if available, otherwise fallback
+        try:
+            from services.platform import open_file_manager
+            open_file_manager(log_dir)
+        except ImportError:
+            import subprocess
+            import platform
+            if platform.system() == 'Windows':
+                subprocess.run(['explorer', log_dir])
+            elif platform.system() == 'Darwin':
+                subprocess.run(['open', log_dir])
+            else:
+                subprocess.run(['xdg-open', log_dir])
     
     def append_log(self, message: str):
         """Append a single log message"""

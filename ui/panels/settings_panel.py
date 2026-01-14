@@ -75,10 +75,18 @@ class SettingsPanel(QScrollArea):
             "Application behavior settings"
         )
         
-        # System tray mode
+        # System tray mode - platform-aware description
+        import sys
+        if sys.platform == 'darwin':
+            tray_desc = "Show icon in menu bar when running in background"
+        elif sys.platform == 'win32':
+            tray_desc = "Minimize to system tray instead of taskbar when closing window"
+        else:
+            tray_desc = "Show icon in system tray when running in background"
+        
         self.tray_enabled_switch = SwitchRow(
             "Enable System Tray",
-            "Minimize to system tray instead of taskbar when closing window"
+            tray_desc
         )
         self.tray_enabled_switch.toggled.connect(self._on_system_changed)
         system_card.add_widget(self.tray_enabled_switch)
@@ -308,68 +316,108 @@ class SettingsPanel(QScrollArea):
         return about_card
     
     def _get_asi_sdk_version(self) -> str:
-        """Get the ZWO ASI SDK version string from the DLL file"""
+        """Get the ZWO ASI SDK version string (cross-platform)
+        
+        Windows: Reads DLL file version via Windows API
+        macOS/Linux: Returns "Installed" if library found, version info not available
+        """
+        import sys
+        import os
+        from utils_paths import resource_path
+        
         try:
-            import os
-            from utils_paths import resource_path
+            # Import cross-platform helpers
+            try:
+                from app_config import get_zwo_sdk_name
+                from services.platform import get_library_version, find_zwo_sdk
+                _has_platform = True
+            except ImportError:
+                _has_platform = False
+                def get_zwo_sdk_name():
+                    if sys.platform == 'win32':
+                        return "ASICamera2.dll"
+                    elif sys.platform == 'darwin':
+                        return "libASICamera2.dylib"
+                    return "libASICamera2.so"
             
-            # Try to find the SDK DLL
+            sdk_name = get_zwo_sdk_name()
+            
+            # Try to find the SDK
             sdk_path = None
             if self.main_window and hasattr(self.main_window, 'config'):
                 sdk_path = self.main_window.config.get('zwo_sdk_path', '')
             
             if not sdk_path or not os.path.exists(sdk_path):
-                sdk_path = resource_path("ASICamera2.dll")
+                sdk_path = resource_path(sdk_name)
             
             if not os.path.exists(sdk_path):
-                sdk_path = "ASICamera2.dll"
+                sdk_path = sdk_name
             
-            if os.path.exists(sdk_path):
-                # Get file version using Windows API via ctypes
-                import ctypes
-                from ctypes import wintypes
+            # Try platform module's find function
+            if not os.path.exists(sdk_path) and _has_platform:
+                sdk_path = find_zwo_sdk()
+            
+            if sdk_path and os.path.exists(sdk_path):
+                # Try to get version (works on Windows only)
+                if _has_platform:
+                    version = get_library_version(sdk_path)
+                    if version:
+                        return version
+                elif sys.platform == 'win32':
+                    # Windows-specific version extraction
+                    version = self._get_windows_dll_version(sdk_path)
+                    if version:
+                        return version
                 
-                version_dll = ctypes.windll.version
-                size = version_dll.GetFileVersionInfoSizeW(sdk_path, None)
-                
-                if size:
-                    data = ctypes.create_string_buffer(size)
-                    if version_dll.GetFileVersionInfoW(sdk_path, 0, size, data):
-                        # Get the fixed file info
-                        p_buffer = ctypes.c_void_p()
-                        length = wintypes.UINT()
-                        if version_dll.VerQueryValueW(data, "\\\\", ctypes.byref(p_buffer), ctypes.byref(length)):
-                            # VS_FIXEDFILEINFO structure
-                            class VS_FIXEDFILEINFO(ctypes.Structure):
-                                _fields_ = [
-                                    ("dwSignature", wintypes.DWORD),
-                                    ("dwStrucVersion", wintypes.DWORD),
-                                    ("dwFileVersionMS", wintypes.DWORD),
-                                    ("dwFileVersionLS", wintypes.DWORD),
-                                    ("dwProductVersionMS", wintypes.DWORD),
-                                    ("dwProductVersionLS", wintypes.DWORD),
-                                    ("dwFileFlagsMask", wintypes.DWORD),
-                                    ("dwFileFlags", wintypes.DWORD),
-                                    ("dwFileOS", wintypes.DWORD),
-                                    ("dwFileType", wintypes.DWORD),
-                                    ("dwFileSubtype", wintypes.DWORD),
-                                    ("dwFileDateMS", wintypes.DWORD),
-                                    ("dwFileDateLS", wintypes.DWORD),
-                                ]
-                            
-                            info = ctypes.cast(p_buffer, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
-                            major = (info.dwFileVersionMS >> 16) & 0xFFFF
-                            minor = info.dwFileVersionMS & 0xFFFF
-                            build = (info.dwFileVersionLS >> 16) & 0xFFFF
-                            revision = info.dwFileVersionLS & 0xFFFF
-                            return f"{major}.{minor}.{build}.{revision}"
-                
-                return "Unknown (DLL found)"
+                # Library found but version not extractable (macOS/Linux)
+                return "Installed"
             else:
                 return "Not installed"
                 
         except Exception as e:
             return f"Error: {str(e)[:20]}"
+    
+    def _get_windows_dll_version(self, dll_path: str) -> str:
+        """Get version info from a Windows DLL (Windows only)"""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            
+            version_dll = ctypes.windll.version
+            size = version_dll.GetFileVersionInfoSizeW(dll_path, None)
+            
+            if size:
+                data = ctypes.create_string_buffer(size)
+                if version_dll.GetFileVersionInfoW(dll_path, 0, size, data):
+                    p_buffer = ctypes.c_void_p()
+                    length = wintypes.UINT()
+                    if version_dll.VerQueryValueW(data, "\\\\", ctypes.byref(p_buffer), ctypes.byref(length)):
+                        class VS_FIXEDFILEINFO(ctypes.Structure):
+                            _fields_ = [
+                                ("dwSignature", wintypes.DWORD),
+                                ("dwStrucVersion", wintypes.DWORD),
+                                ("dwFileVersionMS", wintypes.DWORD),
+                                ("dwFileVersionLS", wintypes.DWORD),
+                                ("dwProductVersionMS", wintypes.DWORD),
+                                ("dwProductVersionLS", wintypes.DWORD),
+                                ("dwFileFlagsMask", wintypes.DWORD),
+                                ("dwFileFlags", wintypes.DWORD),
+                                ("dwFileOS", wintypes.DWORD),
+                                ("dwFileType", wintypes.DWORD),
+                                ("dwFileSubtype", wintypes.DWORD),
+                                ("dwFileDateMS", wintypes.DWORD),
+                                ("dwFileDateLS", wintypes.DWORD),
+                            ]
+                        
+                        info = ctypes.cast(p_buffer, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+                        major = (info.dwFileVersionMS >> 16) & 0xFFFF
+                        minor = info.dwFileVersionMS & 0xFFFF
+                        build = (info.dwFileVersionLS >> 16) & 0xFFFF
+                        revision = info.dwFileVersionLS & 0xFFFF
+                        return f"{major}.{minor}.{build}.{revision}"
+            return None
+        except Exception:
+            return None
     
     def _get_ascom_version(self) -> str:
         """Get the ASCOM/Alpaca library version"""

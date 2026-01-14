@@ -3,11 +3,35 @@ Camera connection management for ZWO ASI cameras
 
 Handles SDK initialization, camera detection, connection/reconnection, and configuration.
 This module is used internally by ZWOCamera - do not import directly.
+
+Cross-platform support:
+- Windows: ASICamera2.dll
+- macOS: libASICamera2.dylib
+- Linux: libASICamera2.so
 """
 import os
+import sys
 import time
 import threading
 from typing import Optional, List, Dict, Callable, Any
+
+# Import cross-platform SDK utilities
+try:
+    from app_config import get_zwo_sdk_name
+except ImportError:
+    def get_zwo_sdk_name():
+        if sys.platform == 'win32':
+            return "ASICamera2.dll"
+        elif sys.platform == 'darwin':
+            return "libASICamera2.dylib"
+        else:
+            return "libASICamera2.so"
+
+try:
+    from services.platform import find_zwo_sdk, get_zwo_sdk_search_paths
+    _HAS_PLATFORM_MODULE = True
+except ImportError:
+    _HAS_PLATFORM_MODULE = False
 
 
 class CameraConnection:
@@ -68,36 +92,87 @@ class CameraConnection:
     # SDK Initialization
     # =========================================================================
     
+    def _find_sdk_library(self) -> Optional[str]:
+        """
+        Find the ZWO ASI SDK library on the system.
+        
+        Cross-platform search:
+        - Windows: ASICamera2.dll
+        - macOS: libASICamera2.dylib
+        - Linux: libASICamera2.so
+        
+        Returns:
+            Path to SDK library if found, None otherwise
+        """
+        sdk_name = get_zwo_sdk_name()
+        
+        # First check configured path
+        if self.sdk_path and os.path.exists(self.sdk_path):
+            return self.sdk_path
+        
+        # Check application directory
+        if os.path.exists(sdk_name):
+            return sdk_name
+        
+        # Use platform module for comprehensive search
+        if _HAS_PLATFORM_MODULE:
+            found_sdk = find_zwo_sdk()
+            if found_sdk:
+                return found_sdk
+        else:
+            # Basic fallback search
+            search_paths = [sdk_name]
+            if sys.platform == 'darwin':
+                search_paths.extend([
+                    f'/usr/local/lib/{sdk_name}',
+                    f'/opt/homebrew/lib/{sdk_name}',
+                ])
+            elif sys.platform != 'win32':  # Linux
+                search_paths.extend([
+                    f'/usr/lib/{sdk_name}',
+                    f'/usr/local/lib/{sdk_name}',
+                ])
+            
+            for path in search_paths:
+                if os.path.exists(path):
+                    return path
+        
+        return None
+    
     def initialize_sdk(self) -> bool:
         """
         Initialize the ZWO ASI SDK.
+        
+        Cross-platform support for Windows/macOS/Linux.
         
         Returns:
             True if successful, False otherwise
         """
         self.log("=== Initializing ZWO ASI SDK ===")
+        sdk_name = get_zwo_sdk_name()
+        self.log(f"Platform SDK library: {sdk_name}")
+        
         try:
             import zwoasi as asi
             self.asi = asi
             self.log("zwoasi module imported successfully")
             
-            if self.sdk_path and os.path.exists(self.sdk_path):
-                self.log(f"Attempting SDK init with configured path: {self.sdk_path}")
-                asi.init(self.sdk_path)
-                self.log(f"✓ ZWO SDK initialized successfully from: {self.sdk_path}")
-            else:
-                # Try default locations
-                self.log("SDK path not configured or not found, trying default location")
-                if os.path.exists('ASICamera2.dll'):
-                    self.log("Found ASICamera2.dll in application directory")
-                    asi.init('ASICamera2.dll')
-                    self.log("✓ ZWO SDK initialized from: ASICamera2.dll")
-                else:
-                    self.log("ERROR: ASICamera2.dll not found in application directory")
-                    self.log("Please configure SDK path in Capture tab settings")
-                    return False
+            # Find SDK library using cross-platform search
+            sdk_path = self._find_sdk_library()
             
-            return True
+            if sdk_path:
+                self.log(f"Attempting SDK init with: {sdk_path}")
+                asi.init(sdk_path)
+                self.log(f"✓ ZWO SDK initialized successfully from: {sdk_path}")
+                return True
+            else:
+                self.log(f"ERROR: {sdk_name} not found")
+                self.log("Please configure SDK path in Capture tab settings")
+                if sys.platform == 'darwin':
+                    self.log("macOS: Install via 'brew install zwo-sdk' or download from ZWO website")
+                elif sys.platform != 'win32':
+                    self.log("Linux: Install ZWO SDK to /usr/local/lib/ or configure path manually")
+                return False
         
         except ImportError as e:
             self.log(f"ERROR: zwoasi library not installed: {e}")

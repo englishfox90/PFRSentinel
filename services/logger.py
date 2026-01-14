@@ -1,5 +1,10 @@
 """
 Thread-safe logging module for GUI with 7-day rotating file logs
+
+Cross-platform support:
+- Windows: %APPDATA%/PFRSentinel/logs
+- macOS: ~/Library/Logs/PFRSentinel
+- Linux: ~/.local/share/PFRSentinel/logs
 """
 import queue
 import logging
@@ -9,6 +14,13 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from app_config import APP_NAME, APP_DATA_FOLDER, LOG_FILE
+
+# Import platform utilities for cross-platform log directory
+try:
+    from .platform import get_user_log_dir, is_windows, is_macos
+    _HAS_PLATFORM_MODULE = True
+except ImportError:
+    _HAS_PLATFORM_MODULE = False
 
 
 class AppLogger:
@@ -25,20 +37,36 @@ class AppLogger:
         self._cleanup_old_logs()
     
     def _get_log_directory(self):
-        """Get the log directory path (APPDATA or fallback)"""
-        # Try %APPDATA%\{APP_DATA_FOLDER}\logs first
-        appdata = os.getenv('APPDATA')
-        if appdata:
-            log_dir = Path(appdata) / APP_DATA_FOLDER / 'logs'
-        else:
-            # Fallback: ./logs relative to executable or script
-            if getattr(sys, 'frozen', False):
-                # Running as PyInstaller executable
-                base_dir = Path(sys.executable).parent
+        """Get the log directory path - cross-platform aware
+        
+        Windows: %APPDATA%/PFRSentinel/logs
+        macOS: ~/Library/Logs/PFRSentinel
+        Linux: ~/.local/share/PFRSentinel/logs
+        """
+        # Use platform module if available
+        if _HAS_PLATFORM_MODULE:
+            log_dir = get_user_log_dir(APP_DATA_FOLDER)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return log_dir
+        
+        # Fallback: platform-specific paths
+        if sys.platform == 'win32':
+            # Windows: %APPDATA%\PFRSentinel\logs
+            appdata = os.getenv('APPDATA')
+            if appdata:
+                log_dir = Path(appdata) / APP_DATA_FOLDER / 'logs'
             else:
-                # Running from source
-                base_dir = Path(__file__).parent.parent
-            log_dir = base_dir / 'logs'
+                log_dir = Path.home() / APP_DATA_FOLDER / 'logs'
+        elif sys.platform == 'darwin':
+            # macOS: ~/Library/Logs/PFRSentinel
+            log_dir = Path.home() / 'Library' / 'Logs' / APP_DATA_FOLDER
+        else:
+            # Linux/Unix: ~/.local/share/PFRSentinel/logs
+            xdg_data = os.environ.get('XDG_DATA_HOME')
+            if xdg_data:
+                log_dir = Path(xdg_data) / APP_DATA_FOLDER / 'logs'
+            else:
+                log_dir = Path.home() / '.local' / 'share' / APP_DATA_FOLDER / 'logs'
         
         # Create directory if it doesn't exist
         log_dir.mkdir(parents=True, exist_ok=True)
