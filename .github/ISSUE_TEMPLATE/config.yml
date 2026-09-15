@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation and setup guides
+    url: https://github.com/englishfox90/PFRSentinel/wiki
+    about: Check the wiki first for setup, overlays, all-sky calibration, and NINA integration.
