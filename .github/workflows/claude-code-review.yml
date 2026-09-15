@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history: the plugin's git-blame/history reviewer has nothing
           # to read on a single-commit clone.
