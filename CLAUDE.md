@@ -160,6 +160,14 @@ pinned in `requirements-dev.txt`.
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
+Other Claude workflows: `claude-code-review.yml` reviews every non-draft PR
+(Dependabot PRs excluded); `claude-dependabot-assess.yml` reads the upstream
+changelog for each Dependabot bump and leaves a SAFE / CHECK / HOLD comment;
+`claude-release-notes.yml` drafts the GitHub release for a pushed `v*` tag in
+the house style (never publishes); `claude-issue-triage.yml` labels and
+acknowledges new issues. `.claude/` (rules, hooks, commands, agents, skills) is
+tracked so these runs read the same conventions a local session does.
+
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |

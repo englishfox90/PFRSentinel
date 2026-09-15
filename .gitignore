@@ -23,7 +23,6 @@ ENV/
 # IDEs
 .vscode/
 .idea/
-.claude/
 *.swp
 *.swo
 *~
@@ -81,7 +80,11 @@ wiki/
 *.tmp
 *.temp
 ~*
+# Claude Code: rules, hooks, commands and agents are tracked; per-user state is not
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.claude/**/__pycache__/
 # Added by code-review-graph
 .code-review-graph/
 .kiro/

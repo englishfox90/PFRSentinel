@@ -1,0 +1,113 @@
+name: Claude Release Notes
+
+# Drafts the GitHub release for a freshly pushed version tag, in the style of
+# the previous releases. It only ever creates or updates a DRAFT: attaching the
+# installer and publishing stay manual, and the Discord announcement fires on
+# publish. Run it by hand from the Actions tab to redo a draft.
+
+on:
+  workflow_run:
+    workflows: ["Tag Pushed"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to draft notes for (default: latest v* tag)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+  id-token: write
+
+jobs:
+  draft:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the tag and its predecessor
+        id: tags
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-}"
+          if [ -z "$TAG" ] && [ -n "${RUN_SHA:-}" ]; then
+            TAG=$(git tag --points-at "$RUN_SHA" | grep -E '^v[0-9]' | sort -V | tail -1 || true)
+          fi
+          if [ -z "$TAG" ]; then
+            TAG=$(git tag -l 'v*' | sort -V | tail -1)
+          fi
+          git rev-parse -q --verify "refs/tags/$TAG" > /dev/null || { echo "Tag $TAG not found"; exit 1; }
+          # Predecessor = the tag just before this one in version order; fall back
+          # to git ancestry if the tag is not in the sorted list for some reason.
+          PREV=$(git tag -l 'v*' | sort -V | grep -B1 -x "$TAG" | head -1)
+          if [ -z "$PREV" ] || [ "$PREV" = "$TAG" ]; then
+            PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          fi
+          git checkout -q "$TAG"
+          STATE=$(gh release view "$TAG" --json isDraft --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null || echo "none")
+          {
+            echo "tag=$TAG"
+            echo "prev=$PREV"
+            echo "release=$STATE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag $TAG, previous $PREV, existing release: $STATE"
+
+      - name: Draft the release notes
+        if: steps.tags.outputs.release != 'published'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Draft the GitHub release notes for PFR Sentinel ${{ steps.tags.outputs.tag }}
+            in ${{ github.repository }}. The checkout is at that tag. The previous
+            release tag is ${{ steps.tags.outputs.prev }}. Existing release for this
+            tag: ${{ steps.tags.outputs.release }} (if "draft", replace its notes; if
+            "none", create it as a draft).
+
+            PFR Sentinel is a Windows astrophotography monitoring app used by
+            observatory owners. The notes are for those users, not for developers.
+
+            Steps:
+            1. Learn the house style from the last two releases:
+               `gh release view ${{ steps.tags.outputs.prev }} --json body` and the one
+               before it (`gh release list`). Match their structure: bold feature-area
+               headings, short bullets that say what changed for the user and why it
+               matters, issue references like (issue #10) where a bullet resolves one.
+            2. Gather what changed:
+               `git log --no-merges --format='%h %s%n%b' ${{ steps.tags.outputs.prev }}..${{ steps.tags.outputs.tag }}`
+               Use `git show` on commits whose subject is not self-explanatory, and
+               `gh pr view` / `gh issue view` for referenced numbers. Confirm the
+               version in version.py matches the tag and say so in your final message
+               if it does not.
+            3. Write the notes. Rules:
+               - Group by user-facing area (capture, all-sky, meteor, timelapse, NINA,
+                 output and notifications, image library, settings, fixes).
+               - Leave out pure refactors, CI, test, and docs-only changes unless they
+                 change behaviour a user can see. Fold many small fixes into one
+                 "Fixes" section.
+               - No commit hashes, no file paths, no emojis. Plain Markdown.
+               - If an upgrade needs an action from the user (reinstall a plugin,
+                 recalibrate, re-enter a setting), put that in its own short
+                 paragraph at the top.
+            4. Save the notes to /tmp/release-notes.md, then either
+               `gh release create ${{ steps.tags.outputs.tag }} --draft --title ${{ steps.tags.outputs.tag }} --notes-file /tmp/release-notes.md`
+               or, if a draft already exists,
+               `gh release edit ${{ steps.tags.outputs.tag }} --draft --notes-file /tmp/release-notes.md`
+
+            Never publish the release, never attach or remove assets, and never edit a
+            release that is already published.
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,LS,Write,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git tag:*),Bash(git describe:*),Bash(gh release:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh api:*)"
