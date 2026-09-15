@@ -162,8 +162,14 @@ def request_shutdown(name: str = _SERVER_NAME, timeout_ms: int = 1500) -> bool:
     if not sock.waitForConnected(timeout_ms):
         return False  # nothing listening — no running instance
     sock.write(b"quit")
-    sock.flush()
-    sock.waitForBytesWritten(timeout_ms)
-    # Give the server a moment to read the command before the pipe tears down.
-    sock.waitForDisconnected(timeout_ms)
+    # Wait for the *server* to close the pipe: it does that once it has read
+    # the command, so this is the real acknowledgement. Do not gate on
+    # waitForBytesWritten() here. On PySide6 6.11 (Windows) it never returned
+    # true from a thread without an event loop, and calling it left the peer
+    # unaware of the payload until this socket was destroyed.
+    if not sock.waitForDisconnected(timeout_ms):
+        app_logger.warning(
+            "Single-instance: running instance did not acknowledge the quit "
+            f"command within {timeout_ms} ms; it will still see it when this socket closes."
+        )
     return True

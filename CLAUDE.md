@@ -2,7 +2,7 @@
 
 PFR Sentinel is a dual-mode astrophotography monitoring app built for 24/7 unattended observatory use. It either (1) watches a directory for new images written by another capture program (e.g. NINA), or (2) captures directly from a ZWO ASI camera. Either way, it adds configurable metadata + weather overlays and pushes the result to multiple output sinks simultaneously (file, web, Discord).
 
-Stack: Python 3.13, PySide6 6.8.1 + qfluentwidgets 1.10.5 (Windows 11 Fluent Design), Pillow, OpenCV, watchdog, ONNX runtime for ML inference. Packaged as a Windows installer via PyInstaller + Inno Setup.
+Stack: Python 3.13, PySide6 6.10.2 (pinned) + qfluentwidgets 1.11.1 (Windows 11 Fluent Design), Pillow, OpenCV, watchdog, ONNX runtime for ML inference. Packaged as a Windows installer via PyInstaller + Inno Setup.
 
 ## Capture modes
 
@@ -184,8 +184,8 @@ Standalone (not in pytest suite):
 
 | Package | Purpose |
 |---------|---------|
-| PySide6 6.8.1 | Qt6 bindings |
-| qfluentwidgets 1.10.5 | Fluent Design components |
+| PySide6 6.10.2 (pinned in requirements.txt) | Qt6 bindings |
+| qfluentwidgets 1.11.1 | Fluent Design components |
 | opencv-python | Bayer debayering |
 | Pillow | Image processing |
 | watchdog | Directory monitoring |
