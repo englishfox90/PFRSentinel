@@ -25,7 +25,14 @@ def _qapp():
 
 @pytest.fixture
 def worker(_qapp):
-    return ImageProcessorWorker()
+    w = ImageProcessorWorker()
+    yield w
+    # Never .start()ed here (tests call _process_task directly), so this is
+    # just deterministic disposal of the QThread-derived QObject itself.
+    from PySide6.QtCore import QEvent
+    w.deleteLater()
+    _qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    _qapp.processEvents()
 
 
 class _NotifierStub:

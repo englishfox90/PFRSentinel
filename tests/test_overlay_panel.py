@@ -1,5 +1,7 @@
 """Tests for the overlay settings panel split (fixes 1-5)."""
 import os
+import time
+
 import pytest
 
 
@@ -113,6 +115,25 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
+def _dispose(widget, app):
+    """Deterministic teardown for a top-level widget.
+
+    OverlayPreviewCard.resizeEvent schedules QTimer.singleShot(100, ...)
+    bound to the instance. If the widget is deleted before that fires, the
+    timer later calls into a dead C++ object from inside an unrelated
+    test's event loop pump — the exact "node down" crash pattern this repo
+    hit under xdist. Pump events past the 100ms window before closing.
+    """
+    from PySide6.QtCore import QEvent
+    deadline = time.monotonic() + 0.2
+    while time.monotonic() < deadline:
+        app.processEvents()
+    widget.close()
+    widget.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
 def _make_panel(qt_app):
     from ui.panels.overlay_settings import OverlaySettingsPanel
     panel = OverlaySettingsPanel()
@@ -131,13 +152,27 @@ def _make_panel(qt_app):
     return panel
 
 
+@pytest.fixture
+def panel(qt_app):
+    p = _make_panel(qt_app)
+    yield p
+    _dispose(p, qt_app)
+
+
+@pytest.fixture
+def preview_card(qt_app):
+    from ui.panels.overlay_preview import OverlayPreviewCard
+    card = OverlayPreviewCard()
+    yield card
+    _dispose(card, qt_app)
+
+
 # ---------------------------------------------------------------------------
 # Fix 4: name / text edits update only the relevant row, not the whole table
 # ---------------------------------------------------------------------------
 
 class TestTargetedListUpdate:
-    def test_name_change_updates_only_changed_row(self, qt_app):
-        panel = _make_panel(qt_app)
+    def test_name_change_updates_only_changed_row(self, panel):
         panel.overlay_table.selectRow(0)
         panel.overlay_table.blockSignals(False)
         row_count_before = panel.overlay_table.rowCount()
@@ -149,8 +184,7 @@ class TestTargetedListUpdate:
         assert panel.overlay_table.item(0, 0).text() == "Renamed"
         assert panel.overlay_table.item(1, 0).text() == "Beta"
 
-    def test_text_change_updates_summary_cell(self, qt_app):
-        panel = _make_panel(qt_app)
+    def test_text_change_updates_summary_cell(self, panel):
         panel.overlay_table.selectRow(1)
         panel._overlays[1]["text"] = "changed text"
         panel._update_list_row(1)
@@ -158,8 +192,7 @@ class TestTargetedListUpdate:
         assert panel.overlay_table.item(1, 2).text() == "changed text"
         assert panel.overlay_table.item(0, 2).text() == "hello"
 
-    def test_out_of_range_index_is_a_no_op(self, qt_app):
-        panel = _make_panel(qt_app)
+    def test_out_of_range_index_is_a_no_op(self, panel):
         panel._update_list_row(-1)
         panel._update_list_row(999)
 
@@ -169,9 +202,8 @@ class TestTargetedListUpdate:
 # ---------------------------------------------------------------------------
 
 class TestStarfieldCache:
-    def test_background_cached_on_same_size(self, qt_app):
-        from ui.panels.overlay_preview import OverlayPreviewCard
-        card = OverlayPreviewCard()
+    def test_background_cached_on_same_size(self, preview_card):
+        card = preview_card
         card.resize(300, 200)
         card._update_preview()
         first_bg = card._background_pixmap
@@ -179,9 +211,8 @@ class TestStarfieldCache:
         card._update_preview()
         assert card._background_pixmap is first_bg
 
-    def test_background_regenerated_on_size_change(self, qt_app):
-        from ui.panels.overlay_preview import OverlayPreviewCard
-        card = OverlayPreviewCard()
+    def test_background_regenerated_on_size_change(self, preview_card):
+        card = preview_card
         card.resize(300, 200)
         card._update_preview()
         first_bg = card._background_pixmap

@@ -162,12 +162,14 @@ def test_find_index_continues_past_a_timed_out_open(monkeypatch):
 def test_find_index_closes_handle_from_abandoned_open(monkeypatch):
     # The open that timed out still completes later in its daemon worker; the
     # handle it creates must be closed or the ASI device hangs until reboot.
+    # Slow-open duration kept short (but still > open_timeout_sec, so the
+    # probe genuinely times out) to avoid a real multi-hundred-ms sleep here.
     cams = [{"index": 0, "name": "ZWO ASI676MC"},
             {"index": 1, "name": "ZWO ASI676MC"}]
-    conn = _SlowConn(cams, {0: "aaaa", 1: "bbbb"}, slow={0})
+    conn = _SlowConn(cams, {0: "aaaa", 1: "bbbb"}, slow={0}, sleep=0.15)
     monkeypatch.setattr(ci, "read_serial", lambda h: h._serial)
     ci.find_index_by_serial(conn, "bbbb", "ZWO ASI676MC", open_timeout_sec=0.1)
-    time.sleep(0.7)  # let the abandoned index-0 open finish and self-close
+    time.sleep(0.25)  # let the abandoned index-0 open finish and self-close
     assert conn.handles[0].closed is True
 
 
@@ -220,6 +222,13 @@ def test_connect_refuses_camera_with_wrong_serial(monkeypatch):
 
 
 def test_connect_learns_serial_on_first_clean_connect(monkeypatch):
+    from services.camera import camera_connection, camera_config
+    # connect() sleeps 0.5s for SDK cleanup, then wait_for_controls_ready()
+    # polls get_controls() (a bare MagicMock, len()==0) to a stable count
+    # via two more 0.5s poll_interval sleeps — 1.5s of real delay for
+    # nothing this test cares about. Neutralise both modules' time.sleep.
+    monkeypatch.setattr(camera_connection.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(camera_config.time, "sleep", lambda *_: None)
     conn = _make_conn()
     cam = MagicMock()
     cam.get_camera_property.return_value = {

@@ -159,22 +159,30 @@ def test_panel_disarms_a_running_server_when_the_api_is_switched_off(qapp):
     control API off must push an empty token itself — otherwise
     POST /capture/start stays fully live until the app restarts.
     """
+    from PySide6.QtCore import QEvent
     from ui.panels.output_settings import OutputSettingsPanel
 
     server = _FakeServer()
     cfg = enabled_config(api_token="live-token")
     win = _qt_window_cls()(cfg, web_server=server)
-    panel = OutputSettingsPanel(win)
-    panel.load_from_config(cfg)
+    try:
+        panel = OutputSettingsPanel(win)
+        panel.load_from_config(cfg)
 
-    assert panel.control_token_input.text() == "live-token"
+        assert panel.control_token_input.text() == "live-token"
 
-    panel.control_enabled_switch.set_checked(False)
-    panel._on_control_enabled_changed(False)
+        panel.control_enabled_switch.set_checked(False)
+        panel._on_control_enabled_changed(False)
 
-    assert cfg.data["output"]["webserver_control_enabled"] is False
-    assert server.tokens[-1] == "", "running server still armed after disable"
-    assert panel.control_token_input.text() == ""
+        assert cfg.data["output"]["webserver_control_enabled"] is False
+        assert server.tokens[-1] == "", "running server still armed after disable"
+        assert panel.control_token_input.text() == ""
+    finally:
+        # panel is parented to win, so closing/deleting win tears down both.
+        win.close()
+        win.deleteLater()
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
 
 
 def test_no_server_is_not_an_error():

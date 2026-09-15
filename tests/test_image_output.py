@@ -356,6 +356,16 @@ class TestAllSkyOutputCleanliness:
 
         assert results, "processing_complete did not fire"
         preview_img, output_img, output_path, dispatch_img = results[0]
+
+        # Never .start()ed (tests drive _process_task directly) — just
+        # deterministic disposal of the QThread-derived QObject.
+        from PySide6.QtCore import QEvent
+        app = QApplication.instance()
+        worker.deleteLater()
+        if app is not None:
+            app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()
+
         return preview_img, output_img, output_path, dispatch_img
 
     @staticmethod

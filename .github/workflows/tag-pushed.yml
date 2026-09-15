@@ -1,0 +1,17 @@
+name: Tag Pushed
+
+# Does nothing itself. claude-release-notes.yml chains off this run via
+# `workflow_run`, because claude-code-action rejects `push` events.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Tag ${GITHUB_REF_NAME} at ${GITHUB_SHA}"

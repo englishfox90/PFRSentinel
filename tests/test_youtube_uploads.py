@@ -111,6 +111,25 @@ def make_youtube_card(tmp_path, *, enabled=False, client_json="", has_token=Fals
     return card, controller
 
 
+def _dispose_widget(widget):
+    """Deterministic teardown for a top-level widget with no Qt parent.
+
+    YouTubeUploadCard takes its "parent" as a plain business reference
+    (stored on self._timelapse_panel), never passed to QWidget.__init__, so
+    it is a real top-level widget that nothing else owns. Left to Python GC
+    under xdist's long-lived per-worker QApplication, it can outlive the
+    test that created it.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    widget.close()
+    widget.deleteLater()
+    app = QApplication.instance()
+    if app is not None:
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
 def test_youtube_config_normalizes_flat_values():
     cfg = normalize_youtube_config({
         "enabled": 1,
@@ -441,6 +460,7 @@ def test_youtube_card_guides_setup_steps(tmp_path):
         assert card.upload_latest_btn.isEnabled() is False
         assert card._advanced_widget.isVisible() is False
     finally:
+        _dispose_widget(card)
         controller.shutdown()
 
 
@@ -460,6 +480,7 @@ def test_youtube_card_unlocks_auth_then_upload(tmp_path):
         assert card.auth_btn.isEnabled() is True
         assert card.upload_latest_btn.isEnabled() is True
     finally:
+        _dispose_widget(card)
         controller.shutdown()
 
 
@@ -476,8 +497,12 @@ def test_youtube_setup_dialog_can_open(tmp_path):
 
     try:
         dialog = YouTubeSetupGuideDialog(card)
-        assert dialog.windowTitle() == "YouTube setup"
-        browser = dialog.findChildren(QTextBrowser)[0]
-        assert "Choose the Google file" in browser.toPlainText()
+        try:
+            assert dialog.windowTitle() == "YouTube setup"
+            browser = dialog.findChildren(QTextBrowser)[0]
+            assert "Choose the Google file" in browser.toPlainText()
+        finally:
+            _dispose_widget(dialog)
     finally:
+        _dispose_widget(card)
         controller.shutdown()
