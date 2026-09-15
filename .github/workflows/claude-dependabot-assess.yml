@@ -23,10 +23,14 @@ jobs:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Bot-triggered runs cannot exchange the OIDC token for a Claude GitHub App
+    # token ("Invalid OIDC token"), so the action runs on the job's own
+    # GITHUB_TOKEN instead. It needs write on pull requests and issues to post
+    # the sticky comment; that token is scoped to this job and expires with it.
     permissions:
       contents: read
-      pull-requests: read
-      id-token: write
+      pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout base branch
@@ -38,6 +42,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "dependabot[bot]"
           use_sticky_comment: true
           prompt: |
