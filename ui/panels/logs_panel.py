@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel,
-    PushButton, ComboBox, LineEdit, SwitchButton
+    PushButton, ComboBox, LineEdit, SwitchButton,
+    InfoBar, InfoBarPosition
 )
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
@@ -25,8 +26,11 @@ class LogsPanel(QScrollArea):
     - Search
     - Auto-scroll toggle
     - Clear button
+    - Export Diagnostics (bundle built by DiagnosticsController)
     """
-    
+
+    export_diagnostics_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.main_window = parent
@@ -98,8 +102,23 @@ class LogsPanel(QScrollArea):
         self.open_folder_btn.setIcon(mdi('folder-outline'))
         self.open_folder_btn.clicked.connect(self._open_log_folder)
         controls_layout.addWidget(self.open_folder_btn)
-        
+
+        self.export_diag_btn = PushButton("Export Diagnostics")
+        self.export_diag_btn.setIcon(mdi('folder-zip-outline'))
+        self.export_diag_btn.setToolTip(
+            "Zip recent logs, a redacted config, the all-sky calibration and a raw "
+            "frame (captured fresh when the camera is running) to attach to a bug report"
+        )
+        self.export_diag_btn.clicked.connect(self._on_export_diagnostics)
+        controls_layout.addWidget(self.export_diag_btn)
+
         layout.addWidget(controls_card)
+
+        self.diag_status = CaptionLabel("")
+        self.diag_status.setStyleSheet(f"color: {Colors.text_muted};")
+        self.diag_status.setWordWrap(True)
+        self.diag_status.hide()
+        layout.addWidget(self.diag_status)
         
         # === LOG TEXT AREA ===
         log_card = CardWidget()
@@ -183,6 +202,41 @@ class LogsPanel(QScrollArea):
         else:
             subprocess.run(['xdg-open', log_dir])
     
+    # === DIAGNOSTICS EXPORT ===
+
+    def _on_export_diagnostics(self):
+        self.export_diag_btn.setEnabled(False)
+        self.export_diag_btn.setText("Exporting…")
+        self.diag_status.setText("Preparing diagnostics bundle…")
+        self.diag_status.show()
+        self.export_diagnostics_requested.emit()
+
+    def on_diagnostics_progress(self, message: str):
+        self.diag_status.setText(message)
+        self.diag_status.show()
+
+    def on_diagnostics_ready(self, path: str):
+        self._reset_export_button()
+        self.diag_status.setText(f"Diagnostics bundle saved: {path}")
+        self._info_bar(InfoBar.success, "Diagnostics bundle ready",
+                       "Secrets, location and URLs are redacted; file paths are not. "
+                       "Check the ZIP, then attach it to your GitHub issue.")
+
+    def on_diagnostics_failed(self, message: str):
+        self._reset_export_button()
+        self.diag_status.setText(f"Diagnostics export failed: {message}")
+        self._info_bar(InfoBar.error, "Diagnostics export failed", message)
+
+    def _reset_export_button(self):
+        self.export_diag_btn.setEnabled(True)
+        self.export_diag_btn.setText("Export Diagnostics")
+
+    def _info_bar(self, factory, title, content):
+        parent = getattr(self.main_window, 'content_area', self.main_window) if self.main_window else self
+        bar = factory(title=title, content=content, parent=parent,
+                      position=InfoBarPosition.TOP, duration=6000)
+        bar.raise_()
+
     def _scroll_to_bottom(self):
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())

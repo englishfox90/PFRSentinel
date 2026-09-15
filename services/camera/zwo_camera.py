@@ -76,6 +76,9 @@ class ZWOCamera:
         self.offset = offset
         self.bayer_pattern = bayer_pattern  # RGGB, BGGR, GRBG, GBRG
         self.use_raw16 = False  # Use RAW16 mode for full bit depth (set by dev mode)
+        # One-shot "capture now": the worker's inter-frame wait polls it so a
+        # diagnostics export need not sit out a long capture interval.
+        self._capture_now = threading.Event()
         
         # Scheduled capture settings
         # mode: "always" | "gated" | "variable" — see services/config.py for semantics.
@@ -200,6 +203,17 @@ class ZWOCamera:
             self.scheduled_start_time,
             self.scheduled_end_time
         )
+
+    def request_immediate_capture(self):
+        """Ask the capture loop to skip the rest of the current inter-frame wait."""
+        self._capture_now.set()
+
+    def consume_immediate_capture(self) -> bool:
+        """True once per request_immediate_capture(); clears the flag."""
+        if self._capture_now.is_set():
+            self._capture_now.clear()
+            return True
+        return False
 
     @property
     def effective_capture_interval(self):
@@ -442,6 +456,9 @@ class ZWOCamera:
         if self.is_capturing:
             self.log("Capture already running")
             return False
+        # A wake left over from a previous session must not skip this one's
+        # first inter-frame wait.
+        self._capture_now.clear()
         
         if not self.camera:
             self.log("ERROR: Camera not connected")

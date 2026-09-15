@@ -15,6 +15,7 @@ Developer-facing technical reference. End-user content lives on the project wiki
 | [posthog.md](posthog.md) | Analytics event names + helpers (referenced from `.claude/rules/python-general.md`) |
 | [CAMERA_USB_RESET.md](CAMERA_USB_RESET.md) | Windows `CM_Reenumerate_DevNode` USB reset implementation |
 | [CAMERA_LOGGING_REFERENCE.md](CAMERA_LOGGING_REFERENCE.md) | Log-search cheat sheet for diagnosing camera issues |
+| [DIAGNOSTICS_BUNDLE.md](DIAGNOSTICS_BUNDLE.md) | Logs → Export Diagnostics: bundle contents, redaction, fresh raw-frame capture |
 
 ## Build & release tooling
 

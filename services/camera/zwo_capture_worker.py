@@ -527,6 +527,8 @@ def capture_loop(camera: "ZWOCamera"):
                 if camera.is_capturing:
                     wait_end = time.time() + camera.effective_capture_interval
                     while camera.is_capturing and time.time() < wait_end:
+                        if camera.consume_immediate_capture():
+                            break
                         time.sleep(0.2)
 
             except Exception as e:
