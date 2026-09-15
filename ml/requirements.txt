@@ -8,7 +8,7 @@
 # Training will fall back to CPU automatically if no GPU is detected.
 
 # Core ML (install via CUDA index above, not from here, for GPU support)
-torch>=2.0.0
+torch>=2.14.0
 torchvision>=0.15.0
 
 # Inference (lightweight alternative to full PyTorch)
