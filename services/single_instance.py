@@ -10,9 +10,7 @@ connects to the running instance to ask it to surface its window, then exits.
 
 Requires a QCoreApplication/QApplication instance to already exist.
 """
-import time
-
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from services.logger import app_logger
@@ -89,34 +87,61 @@ class SingleInstanceGuard(QObject):
         return False
 
     def _on_new_connection(self):
-        conn = self._server.nextPendingConnection() if self._server else None
-        if conn is None:
-            return
-        # Read the small command payload. "quit" asks for a clean shutdown
-        # (installer upgrade path); anything else (or nothing) means "surface
-        # the window" — the behaviour a second app launch relies on.
-        #
-        # Wait up to _READ_TIMEOUT_MS across repeated slices rather than a single
-        # 200ms one. The sender allows 1500ms, and a GUI thread busy with a frame
-        # or ML inference can easily take longer than 200ms to reach this handler.
-        # Losing that race silently downgraded a "quit" into an "activate", so an
-        # installer upgrade would proceed while the app still held its files and
-        # the camera — and it surfaced as an intermittent test failure.
-        command = b""
-        deadline = time.monotonic() + _READ_TIMEOUT_MS / 1000.0
-        while True:
-            remaining_ms = int((deadline - time.monotonic()) * 1000)
-            if remaining_ms <= 0:
-                break
-            if conn.waitForReadyRead(remaining_ms):
-                command = bytes(conn.readAll())
-                break
-            # waitForReadyRead normally blocks the whole budget, but it can
-            # return early. Keep waiting unless the peer has actually gone,
-            # which also stops this spinning on a dead socket.
-            if conn.state() != QLocalSocket.LocalSocketState.ConnectedState:
-                break
-        conn.disconnectFromServer()
+        while self._server is not None and self._server.hasPendingConnections():
+            conn = self._server.nextPendingConnection()
+            if conn is None:
+                return
+            self._read_command(conn)
+
+    def _read_command(self, conn: QLocalSocket):
+        """Read the small command payload without blocking the GUI thread.
+
+        "quit" asks for a clean shutdown (installer upgrade path); anything
+        else, or nothing within _READ_TIMEOUT_MS, means "surface the window",
+        which is what a second app launch relies on.
+
+        This is event-driven on purpose. The previous version blocked in
+        waitForReadyRead() inside this slot, and on Windows named pipes that
+        call would sometimes sit out its whole budget while the client's bytes
+        had already been sent and acknowledged. The payload was then read as
+        empty, a "quit" was downgraded to an "activate", and an installer
+        upgrade could proceed while the app still held its files and the
+        camera. Letting the event loop drive the pipe reader is the path Qt
+        exercises everywhere else, and it has not shown that failure.
+        """
+        conn.setParent(self)
+        buf = bytearray()
+        timer = QTimer(conn)
+        timer.setSingleShot(True)
+        timer.setInterval(_READ_TIMEOUT_MS)
+        settled = False
+
+        def finish():
+            nonlocal settled
+            if settled:
+                return
+            settled = True
+            timer.stop()
+            # Bytes can arrive together with the peer's close; drain them.
+            buf.extend(bytes(conn.readAll()))
+            conn.disconnectFromServer()
+            conn.deleteLater()
+            self._dispatch(bytes(buf))
+
+        def on_ready_read():
+            buf.extend(bytes(conn.readAll()))
+            if buf.strip():
+                finish()
+
+        conn.readyRead.connect(on_ready_read)
+        conn.disconnected.connect(finish)
+        timer.timeout.connect(finish)
+        timer.start()
+        # The payload may already be buffered before the slots were connected.
+        if conn.bytesAvailable() > 0:
+            on_ready_read()
+
+    def _dispatch(self, command: bytes):
         if command.strip().lower().startswith(b"quit"):
             app_logger.info("Single-instance: received quit command — shutting down")
             self.quit_requested.emit()
@@ -137,8 +162,14 @@ def request_shutdown(name: str = _SERVER_NAME, timeout_ms: int = 1500) -> bool:
     if not sock.waitForConnected(timeout_ms):
         return False  # nothing listening — no running instance
     sock.write(b"quit")
-    sock.flush()
-    sock.waitForBytesWritten(timeout_ms)
-    # Give the server a moment to read the command before the pipe tears down.
-    sock.waitForDisconnected(timeout_ms)
+    # Wait for the *server* to close the pipe: it does that once it has read
+    # the command, so this is the real acknowledgement. Do not gate on
+    # waitForBytesWritten() here. On PySide6 6.11 (Windows) it never returned
+    # true from a thread without an event loop, and calling it left the peer
+    # unaware of the payload until this socket was destroyed.
+    if not sock.waitForDisconnected(timeout_ms):
+        app_logger.warning(
+            "Single-instance: running instance did not acknowledge the quit "
+            f"command within {timeout_ms} ms; it will still see it when this socket closes."
+        )
     return True

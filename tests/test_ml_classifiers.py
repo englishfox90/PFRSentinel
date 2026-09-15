@@ -104,6 +104,10 @@ class TestProductionPredictionAPI:
 
     @pytest.fixture(autouse=True)
     def _enable_dev_mode(self, monkeypatch):
+        # This dev-mode path loads the .pth checkpoint ahead of the ONNX export,
+        # so it needs PyTorch, which is a dev-only dependency (see .claude/rules/ml.md).
+        # The ONNX classes above cover the shipped inference path without it.
+        pytest.importorskip("torch", reason="ml_prediction dev path needs PyTorch")
         # The ml_prediction module checks dev mode at runtime — flip it on for tests.
         import services.dev_mode_config as dev_cfg
         monkeypatch.setattr(dev_cfg, "DEV_MODE_AVAILABLE", True)

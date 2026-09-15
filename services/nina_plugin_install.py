@@ -435,7 +435,7 @@ def install_plugin(plugins_root: str | None = None,
 # --------------------------------------------------------------------------
 
 def _is_two_levels_under(path: str, root: str) -> bool:
-    """True when ``path`` resolves to exactly ``<root>\\<x>\\<y>``.
+    r"""True when ``path`` resolves to exactly ``<root>\<x>\<y>``.
 
     Resolved on both sides, so a junctioned version folder pointing outside the
     plugins root fails. Counting components rather than calling ``dirname``

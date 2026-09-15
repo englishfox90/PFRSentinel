@@ -16,6 +16,9 @@ on:
         description: Release URL to link in Discord
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   github-releases-to-discord:
     runs-on: ubuntu-latest
