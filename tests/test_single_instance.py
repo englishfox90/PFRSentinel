@@ -3,12 +3,23 @@
 Covers the quit/activate protocol the installer relies on: --shutdown sends
 "quit" (clean teardown before an upgrade), while a second app launch sends
 anything else and just surfaces the running window.
+
+Clients here never run in a Python *thread*. PySide6's blocking waitFor*()
+calls hold the GIL, so a thread-based client sitting in waitForDisconnected()
+starves the main thread of the Python slots that accept the connection and
+read the payload; Qt's local pipes have a zero-length buffer, so the write
+cannot complete until that read happens, and both sides stall until the client
+times out. That is exactly how it failed on the CI runner. Production is
+cross-process, so the quit test drives the real request_shutdown() from a
+subprocess, and the other clients live on the main thread inside the event loop.
 """
+import os
+import subprocess
 import sys
-import threading
-import time
 
 import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture
@@ -22,68 +33,84 @@ def qt_app():
 
 
 def _pump_until_quit(app, timeout_sec=5.0):
-    """Run the event loop until something calls app.quit() or the timeout."""
+    """Run the event loop until something calls app.quit() or the timeout.
+
+    The timeout timer is owned and stopped here. A fire-and-forget singleShot
+    outlives a fast test and quits the *next* test's loop early.
+    """
     from PySide6.QtCore import QTimer
-    QTimer.singleShot(int(timeout_sec * 1000), app.quit)
-    app.exec()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(app.quit)
+    timer.start(int(timeout_sec * 1000))
+    try:
+        app.exec()
+    finally:
+        timer.stop()
 
 
-def test_quit_command_emits_quit_requested(qt_app):
-    from services.single_instance import SingleInstanceGuard, request_shutdown
-    name = "PFRSentinel-test-quit"
+def _make_guard(qt_app, name, quit_ends_loop=True, activate_ends_loop=True):
+    from services.single_instance import SingleInstanceGuard
     guard = SingleInstanceGuard(name)
     seen = {"quit": 0, "activate": 0}
     guard.quit_requested.connect(lambda: seen.__setitem__("quit", seen["quit"] + 1))
     guard.activate_requested.connect(lambda: seen.__setitem__("activate", seen["activate"] + 1))
-    guard.quit_requested.connect(qt_app.quit)
+    if quit_ends_loop:
+        guard.quit_requested.connect(qt_app.quit)
+    if activate_ends_loop:
+        guard.activate_requested.connect(qt_app.quit)
+    return guard, seen
 
+
+def _spawn_shutdown_client(name):
+    """Run request_shutdown() in a separate process, as the installer does."""
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]);"
+        "from PySide6.QtCore import QCoreApplication;"
+        "app = QCoreApplication([]);"
+        "from services.single_instance import request_shutdown;"
+        "print('RESULT', request_shutdown(sys.argv[2], timeout_ms=5000))"
+    )
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    return subprocess.Popen(
+        [sys.executable, "-c", code, _REPO_ROOT, name],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+    )
+
+
+def test_quit_command_emits_quit_requested(qt_app):
+    name = "PFRSentinel-test-quit"
+    guard, seen = _make_guard(qt_app, name)
     try:
         assert guard.already_running() is False  # this process owns the lock
+        proc = _spawn_shutdown_client(name)
+        # Generous: the child has to import PySide6 before it can connect.
+        _pump_until_quit(qt_app, timeout_sec=30.0)
+        out, err = proc.communicate(timeout=30)
 
-        result = {}
-
-        def client():
-            time.sleep(0.2)  # let the server's event loop start
-            result["ok"] = request_shutdown(name, timeout_ms=2000)
-
-        threading.Thread(target=client, daemon=True).start()
-        _pump_until_quit(qt_app)
-
-        assert result.get("ok") is True
-        assert seen["quit"] == 1
-        assert seen["activate"] == 0
+        assert proc.returncode == 0, err
+        assert "RESULT True" in out, (out, err)
+        assert seen == {"quit": 1, "activate": 0}
     finally:
         guard.deleteLater()
 
 
 def test_non_quit_payload_emits_activate(qt_app):
     from PySide6.QtNetwork import QLocalSocket
-    from services.single_instance import SingleInstanceGuard
     name = "PFRSentinel-test-activate"
-    guard = SingleInstanceGuard(name)
-    seen = {"quit": 0, "activate": 0}
-    guard.quit_requested.connect(lambda: seen.__setitem__("quit", seen["quit"] + 1))
-    guard.activate_requested.connect(lambda: seen.__setitem__("activate", seen["activate"] + 1))
-    guard.activate_requested.connect(qt_app.quit)
-
+    guard, seen = _make_guard(qt_app, name)
     try:
         assert guard.already_running() is False
+        sock = QLocalSocket()
 
-        def client():
-            time.sleep(0.2)
-            sock = QLocalSocket()
-            sock.connectToServer(name)
-            if sock.waitForConnected(2000):
-                sock.write(b"activate")  # what a second app launch sends
-                sock.flush()
-                sock.waitForBytesWritten(2000)
-                sock.disconnectFromServer()
+        def on_connected():
+            sock.write(b"activate")  # what a second app launch sends
+            sock.disconnectFromServer()
 
-        threading.Thread(target=client, daemon=True).start()
+        sock.connected.connect(on_connected)
+        sock.connectToServer(name)
         _pump_until_quit(qt_app)
-
-        assert seen["activate"] == 1
-        assert seen["quit"] == 0
+        assert seen == {"quit": 0, "activate": 1}
     finally:
         guard.deleteLater()
 
@@ -109,43 +136,45 @@ def test_receiver_waits_as_long_as_the_sender():
     assert single_instance._READ_TIMEOUT_MS >= sender_ms
 
 
-def test_receiver_retries_instead_of_giving_up_after_one_slice():
-    """A single waitForReadyRead that returns False must not end the read."""
+def test_late_payload_is_still_honoured(qt_app):
+    """The bytes may arrive well after the connection is accepted.
+
+    The reader must stay armed until the payload, the peer's close, or the
+    timeout — whichever comes first — rather than deciding at connect time.
+    """
+    from PySide6.QtCore import QTimer
+    from PySide6.QtNetwork import QLocalSocket
+    name = "PFRSentinel-test-late"
+    guard, seen = _make_guard(qt_app, name)
+    try:
+        assert guard.already_running() is False
+        sock = QLocalSocket()
+        sock.connectToServer(name)
+        assert sock.waitForConnected(2000)
+
+        def write_late():
+            sock.write(b"quit")
+            sock.flush()
+
+        QTimer.singleShot(400, write_late)   # well after newConnection fired
+        _pump_until_quit(qt_app)
+        assert seen == {"quit": 1, "activate": 0}
+    finally:
+        guard.deleteLater()
+
+
+def test_silent_connection_falls_back_to_activate(qt_app):
+    """A client that connects and sends nothing must not wedge the reader."""
+    from PySide6.QtNetwork import QLocalSocket
     from services import single_instance
-
-    class _Conn:
-        def __init__(self):
-            self.calls = 0
-
-        def waitForReadyRead(self, ms):
-            self.calls += 1
-            return self.calls >= 3          # payload arrives on the third look
-
-        def readAll(self):
-            return b"quit\n"
-
-        def state(self):
-            from PySide6.QtNetwork import QLocalSocket
-            return QLocalSocket.LocalSocketState.ConnectedState
-
-        def disconnectFromServer(self):
-            pass
-
-    class _Server:
-        def __init__(self, conn):
-            self._conn = conn
-
-        def nextPendingConnection(self):
-            return self._conn
-
-    guard = single_instance.SingleInstanceGuard.__new__(single_instance.SingleInstanceGuard)
-    conn = _Conn()
-    guard._server = _Server(conn)
-    fired = []
-    guard.quit_requested = type("S", (), {"emit": lambda self: fired.append("quit")})()
-    guard.activate_requested = type("S", (), {"emit": lambda self: fired.append("activate")})()
-
-    single_instance.SingleInstanceGuard._on_new_connection(guard)
-
-    assert conn.calls >= 3, "gave up after the first slice"
-    assert fired == ["quit"], f"expected quit, got {fired}"
+    name = "PFRSentinel-test-silent"
+    guard, seen = _make_guard(qt_app, name)
+    try:
+        assert guard.already_running() is False
+        sock = QLocalSocket()
+        sock.connectToServer(name)
+        assert sock.waitForConnected(2000)
+        _pump_until_quit(qt_app, timeout_sec=single_instance._READ_TIMEOUT_MS / 1000.0 + 3.0)
+        assert seen == {"quit": 0, "activate": 1}
+    finally:
+        guard.deleteLater()

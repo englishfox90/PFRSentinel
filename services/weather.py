@@ -52,7 +52,7 @@ class WeatherService:
                 if -90 <= lat_float <= 90 and -180 <= lon_float <= 180:
                     self.lat = lat_float
                     self.lon = lon_float
-                    app_logger.info(f"Weather using direct coordinates: ({self.lat}, {self.lon})")
+                    app_logger.info("Weather using direct coordinates from config")
             except (ValueError, TypeError):
                 pass  # Invalid coordinates, will fall back to location lookup
         
@@ -94,7 +94,7 @@ class WeatherService:
             self.lat = data['coord']['lat']
             self.lon = data['coord']['lon']
             
-            app_logger.info(f"Weather location resolved: {self.location} -> ({self.lat}, {self.lon})")
+            app_logger.info(f"Weather location resolved: {self.location}")
             return True
             
         except requests.RequestException as e:

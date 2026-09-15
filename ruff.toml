@@ -1,0 +1,9 @@
+# Bug-class checks only: syntax errors, undefined names, redefinitions.
+# Unused imports (F401) are deliberately excluded. This codebase re-exports
+# moved symbols from their original modules for backwards compatibility, and an
+# automatic F401 fix would silently break those callers.
+target-version = "py313"
+extend-exclude = ["archive", "build", "dist", "installer", "nina-plugin"]
+
+[lint]
+select = ["E9", "F63", "F7", "F82", "F811"]
