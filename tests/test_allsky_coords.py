@@ -178,7 +178,7 @@ class TestAltAzRoundTrip:
     def test_zenith_is_90(self):
         """A star at the zenith should have alt = 90° (ignoring refraction)."""
         # The LST at this moment gives the zenith RA
-        from services.allsky.coords import julian_date, lst_degrees
+        from services.allsky.coords import julian_date
         jd = julian_date(self.DT)
         ra_zenith = lst_degrees(jd, self.LON)
         dec_zenith = self.LAT
