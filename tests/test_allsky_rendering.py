@@ -14,7 +14,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from services.allsky.fisheye import FisheyeModel
-from services.allsky.label_collision import LabelGrid, estimate_text_size
+from services.allsky.label_collision import LabelGrid, default_gap, estimate_text_size
 
 
 # ===================================================================
@@ -68,15 +68,64 @@ class TestLabelGrid:
         assert 0 <= pos[0] < 1920
         assert 0 <= pos[1] < 1080
 
-    def test_try_place_collision_resolved(self):
-        """When preferred positions are blocked, try_place picks another."""
-        grid = LabelGrid(1920, 1080, cell_size=12)
-        # Block all 4 candidate positions manually
-        for dx, dy in [(6, 0), (0, 6), (-6, 0), (0, -6)]:
-            grid.occupy(500.0 + dx, 500.0 + dy - 7.0, 60.0, 14.0)
-        # try_place may return None (no free slot) — that is acceptable
+    def test_try_place_none_when_surrounded(self):
+        """Every slot blocked -> None, never a label on top of something."""
+        grid = LabelGrid(1920, 1080)
+        grid.occupy(300.0, 300.0, 400.0, 400.0)
+        assert grid.try_place(500.0, 500.0, 60.0, 14.0) is None
+
+    def test_right_slot_clears_marker_by_gap(self):
+        grid = LabelGrid(1920, 1080)
+        gap = default_gap(14.0)
         pos = grid.try_place(500.0, 500.0, 60.0, 14.0)
-        # We do not assert non-None — the grid may run out of slots
+        assert pos == (500.0 + gap, 500.0 - 7.0)
+        assert pos[0] - 500.0 >= 8.0  # visibly separated at the 750 px base size
+
+    def test_left_slot_ends_before_marker(self):
+        """Text in the left slot must end short of the star, not run across it."""
+        grid = LabelGrid(1920, 1080)
+        gap = default_gap(14.0)
+        grid.occupy(500.0 + gap, 480.0, 60.0, 40.0)  # block the right slot
+        pos = grid.try_place(500.0, 500.0, 60.0, 14.0)
+        assert pos is not None
+        assert pos[0] + 60.0 == 500.0 - gap
+        assert pos[1] == 493.0
+
+    def test_below_slot_is_centred_and_clear_of_marker(self):
+        grid = LabelGrid(1920, 1080)
+        gap = default_gap(14.0)
+        grid.occupy(530.0, 470.0, 30.0, 20.0)  # clips the right slot
+        grid.occupy(420.0, 470.0, 40.0, 20.0)  # clips the left slot
+        pos = grid.try_place(500.0, 500.0, 60.0, 14.0)
+        assert pos is not None
+        assert pos[0] == 500.0 - 30.0
+        assert pos[1] == 500.0 + gap  # text top sits below the star
+
+    def test_gap_scales_with_label_height(self):
+        assert default_gap(28.0) > default_gap(14.0)
+        assert default_gap(1.0) >= 4.0
+
+    def test_reserved_marker_blocks_label(self):
+        """A label may not be placed over another star's position."""
+        grid = LabelGrid(1920, 1080)
+        gap = default_gap(14.0)
+        grid.reserve_marker(500.0 + gap + 20.0, 500.0, 5.0)  # star inside the right slot
+        pos = grid.try_place(500.0, 500.0, 60.0, 14.0)
+        assert pos is not None
+        assert pos[0] + 60.0 <= 500.0 - gap  # fell through to the left slot
+
+    def test_own_marker_does_not_block_label(self):
+        grid = LabelGrid(1920, 1080)
+        gap = default_gap(14.0)
+        grid.reserve_marker(500.0, 500.0, gap * 0.75)
+        pos = grid.try_place(500.0, 500.0, 60.0, 14.0)
+        assert pos == (500.0 + gap, 493.0)
+
+    def test_labels_keep_clearance(self):
+        grid = LabelGrid(1920, 1080, cell_size=12)
+        grid.occupy(100.0, 100.0, 80.0, 20.0)
+        assert not grid.is_free(184.0, 100.0, 80.0, 20.0)  # 4 px apart: too close
+        assert grid.is_free(200.0, 100.0, 80.0, 20.0)      # 20 px apart: fine
 
     def test_estimate_text_size(self):
         w, h = estimate_text_size("M42", 12)

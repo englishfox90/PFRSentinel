@@ -14,7 +14,7 @@ from typing import Optional, Set
 from .fisheye import FisheyeModel
 from .catalogs import get_bright_stars
 from .coords import radec_to_altaz
-from .label_collision import LabelGrid, estimate_text_size
+from .label_collision import LabelGrid, default_gap, estimate_text_size
 from .render_objects import _parse_color, _load_font, _is_sky_visible
 
 
@@ -69,6 +69,7 @@ def render_bright_stars(
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
+    visible = []
     for star in get_bright_stars(max_mag=max_mag):
         display = star_display_name(star, use_bayer)
         if not display:
@@ -90,9 +91,18 @@ def render_bright_stars(
         x, y = int(xy[0]), int(xy[1])
         if not _is_sky_visible(gray, x, y):
             continue
+        visible.append((display, float(x), float(y)))
 
+    # Reserve every star before placing any label, so an early label cannot
+    # land on a star whose own label comes later. The radius stays under the
+    # placement gap, so a star never blocks its own label.
+    marker_r = default_gap(label_size * 1.2) * 0.75
+    for _, x, y in visible:
+        label_grid.reserve_marker(x, y, marker_r)
+
+    for display, x, y in visible:
         tw, th = estimate_text_size(display, label_size)
-        pos = label_grid.try_place(float(x), float(y), tw, th)
+        pos = label_grid.try_place(x, y, tw, th)
         if pos is not None:
             draw.text(pos, display, fill=label_color, font=font)
 

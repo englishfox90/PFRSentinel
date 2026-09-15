@@ -15,7 +15,7 @@ services/allsky/
 ├── fisheye.py             FisheyeModel dataclass — projection + JSON persistence
 ├── calibration.py         Grid-search initial match → scipy.optimize.least_squares fit
 ├── star_centroid.py       OpenCV blob detection + weighted-moment sub-pixel centroids
-├── label_collision.py     Grid-based label placement (no overlaps)
+├── label_collision.py     Edge-anchored label placement (no overlaps, off the stars)
 ├── render_grid.py         AltAz grid, horizon circle, cardinal labels
 ├── render_constellations.py  IAU/Dien constellation lines + abbreviation labels
 ├── render_objects.py      Planet circles, Messier diamonds, NGC crosses
