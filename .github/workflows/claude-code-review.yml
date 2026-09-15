@@ -10,13 +10,19 @@ on:
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
 
+# A new push to the same PR cancels the review still running on the old head.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Drafts are not ready for review. Dependabot PRs get their own assessment
+    # workflow (claude-dependabot-assess.yml); repo secrets are not exposed to
+    # Dependabot-authored pull_request runs anyway, so this job would only fail.
+    if: |
+      !github.event.pull_request.draft &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
     permissions:
