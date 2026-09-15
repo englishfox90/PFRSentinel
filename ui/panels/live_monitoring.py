@@ -92,7 +92,6 @@ class HistogramWidget(QFrame):
         # Apply smoothing to histogram data for better visual appearance
         def smooth_histogram(hist_array, window=5):
             """Apply simple moving average smoothing"""
-            import numpy as np
             smoothed = np.copy(hist_array).astype(float)
             for i in range(len(hist_array)):
                 start = max(0, i - window // 2)

@@ -24,7 +24,6 @@ def _parse_color(hex_str: str, opacity: int) -> Tuple[int, int, int, int]:
 def _load_font(size: int):
     """Load Space Grotesk if available, fall back to Arial / DejaVu / default."""
     import os
-    from PIL import ImageFont
     user_fonts = os.path.join(
         os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'Windows', 'Fonts'
     )

@@ -2,7 +2,7 @@
 
 PFR Sentinel is a dual-mode astrophotography monitoring app built for 24/7 unattended observatory use. It either (1) watches a directory for new images written by another capture program (e.g. NINA), or (2) captures directly from a ZWO ASI camera. Either way, it adds configurable metadata + weather overlays and pushes the result to multiple output sinks simultaneously (file, web, Discord).
 
-Stack: Python 3.13, PySide6 6.8.1 + qfluentwidgets 1.10.5 (Windows 11 Fluent Design), Pillow, OpenCV, watchdog, ONNX runtime for ML inference. Packaged as a Windows installer via PyInstaller + Inno Setup.
+Stack: Python 3.13, PySide6 6.10.2 (pinned) + qfluentwidgets 1.11.1 (Windows 11 Fluent Design), Pillow, OpenCV, watchdog, ONNX runtime for ML inference. Packaged as a Windows installer via PyInstaller + Inno Setup.
 
 ## Capture modes
 
@@ -149,6 +149,16 @@ pytest -m "not requires_camera and not requires_network and not requires_ml_mode
 pytest
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+ruff (syntax errors, undefined names, redefinitions — see `ruff.toml`), the
+file-size audit (`scripts/ci/check_file_sizes.py`; caps and frozen exceptions
+live in `scripts/ci/size_policy.py`, shared with the local size hook), `pip-audit` against the installed packages, and the default pytest
+run on a Windows runner. Dev tooling is pinned in `requirements-dev.txt`.
+When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
+against that branch. CodeQL and Dependabot are enabled at the repo level.
+
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
@@ -174,8 +184,8 @@ Standalone (not in pytest suite):
 
 | Package | Purpose |
 |---------|---------|
-| PySide6 6.8.1 | Qt6 bindings |
-| qfluentwidgets 1.10.5 | Fluent Design components |
+| PySide6 6.10.2 (pinned in requirements.txt) | Qt6 bindings |
+| qfluentwidgets 1.11.1 | Fluent Design components |
 | opencv-python | Bayer debayering |
 | Pillow | Image processing |
 | watchdog | Directory monitoring |
