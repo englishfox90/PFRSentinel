@@ -149,6 +149,16 @@ pytest -m "not requires_camera and not requires_network and not requires_ml_mode
 pytest
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+ruff (syntax errors, undefined names, redefinitions — see `ruff.toml`), the
+file-size audit (`scripts/ci/check_file_sizes.py`; caps and frozen exceptions
+live in `scripts/ci/size_policy.py`, shared with the local size hook), `pip-audit` against the installed packages, and the default pytest
+run on a Windows runner. Dev tooling is pinned in `requirements-dev.txt`.
+When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
+against that branch. CodeQL and Dependabot are enabled at the repo level.
+
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |

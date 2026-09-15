@@ -1,0 +1,127 @@
+name: Claude CI Auto-Fix
+
+# Runs when the CI workflow fails on a pull request from a branch in this repo.
+# Claude reproduces the failure, fixes it on a new branch, and opens a PR
+# targeting the failing PR's branch for the author to review and merge.
+#
+# Security: this checks out the PR branch and runs its code with permission to
+# push and open PRs. It is limited to same-repo PRs (fork PRs are excluded),
+# so only people who can already push here can influence what runs.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write
+
+jobs:
+  auto-fix:
+    if: |
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0] &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      !startsWith(github.event.workflow_run.head_branch, 'claude-auto-fix-ci-') &&
+      !startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies so Claude can run the checks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libglib2.0-0 > /dev/null
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r requirements.txt -r requirements-dev.txt
+
+      - name: Create fix branch
+        id: branch
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          git config user.email "claude[bot]@users.noreply.github.com"
+          git config user.name "claude[bot]"
+          SAFE=$(printf '%s' "$HEAD_BRANCH" | tr -cd 'a-zA-Z0-9/_.-')
+          NAME="claude-auto-fix-ci-${SAFE}-${RUN_ID}"
+          git checkout -b "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Collect failed job logs
+        id: failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run_id = ${{ github.event.workflow_run.id }};
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner, repo: context.repo.repo, run_id, per_page: 50 });
+            const failed = jobs.data.jobs.filter(j => j.conclusion === 'failure');
+            let text = '';
+            for (const job of failed) {
+              const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                owner: context.repo.owner, repo: context.repo.repo, job_id: job.id });
+              const body = String(logs.data);
+              // Keep the tail: that is where pytest/ruff summaries live.
+              text += `\n\n===== JOB: ${job.name} =====\n` + body.slice(-12000);
+            }
+            require('fs').writeFileSync('/tmp/ci-failure.log', text);
+            core.setOutput('jobs', failed.map(j => j.name).join(', '));
+
+      - name: Fix with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            CI failed on pull request #${{ github.event.workflow_run.pull_requests[0].number }}
+            in ${{ github.repository }}.
+            Failed jobs: ${{ steps.failure.outputs.jobs }}
+            Run: ${{ github.event.workflow_run.html_url }}
+            You are on branch ${{ steps.branch.outputs.name }}, checked out from the PR
+            branch ${{ github.event.workflow_run.head_branch }}. Dependencies are installed.
+
+            The tail of each failed job log is in /tmp/ci-failure.log. Read it first.
+
+            Your job is to make CI pass with the smallest correct change:
+            1. Reproduce locally where you can. The checks CI runs are:
+               - ruff check .
+               - python scripts/ci/check_file_sizes.py
+               - python -m pytest -m "not requires_camera and not requires_network" --timeout=300
+               For pytest, run only the failing test files first; run the full suite
+               once you believe it is fixed. Set QT_QPA_PLATFORM=offscreen.
+            2. Fix the underlying problem in the code under test when the code is
+               wrong. Fix the test only when the test itself is wrong. Never delete,
+               skip, or loosen an assertion to make a failure disappear.
+            3. For a size-cap failure, split the file by responsibility as
+               .claude/rules/python-general.md describes. Do not edit the caps.
+            4. For a pip-audit finding, bump the affected package in requirements.txt
+               to the fixed version and say which advisory it addresses.
+            5. Read CLAUDE.md and the matching .claude/rules/ file before editing.
+            6. Commit with a clear message, push the branch, and open a pull request
+               with `gh pr create --base ${{ github.event.workflow_run.head_branch }}`.
+               In the body, explain the root cause and what you changed, and link
+               the failed run. Then leave one comment on the original PR linking
+               your fix PR.
+
+            If you cannot find a correct fix, do not push anything. Instead leave one
+            comment on the original PR explaining what you found and what you tried.
+          claude_args: |
+            --max-turns 60
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(ruff:*),Bash(pytest:*),Bash(cat:*),Bash(ls:*)"
