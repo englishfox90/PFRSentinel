@@ -44,6 +44,7 @@ from ..controllers.timelapse_controller import TimelapseController
 from ..controllers.allsky_controller import AllSkyController
 from ..controllers.meteor_controller import MeteorController
 from ..controllers.library_controller import LibraryController
+from ..controllers.diagnostics_controller import DiagnosticsController
 
 from .capture import _MainWindowCaptureMixin
 from .output import _MainWindowOutputMixin
@@ -274,6 +275,12 @@ class MainWindow(
 
         self.meteor_controller = MeteorController(self)
         self.meteor_controller.status_updated.connect(self.meteor_panel.update_status)
+
+        self.diagnostics_controller = DiagnosticsController(self)
+        self.logs_panel.export_diagnostics_requested.connect(self.diagnostics_controller.export_bundle)
+        self.diagnostics_controller.progress.connect(self.logs_panel.on_diagnostics_progress)
+        self.diagnostics_controller.bundle_ready.connect(self.logs_panel.on_diagnostics_ready)
+        self.diagnostics_controller.bundle_failed.connect(self.logs_panel.on_diagnostics_failed)
 
         self.inspector_stack.addWidget(self.capture_panel)       # Index 0
         self.inspector_stack.addWidget(self.output_panel)        # Index 1

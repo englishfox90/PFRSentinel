@@ -49,6 +49,8 @@ PFRSentinel/
 │   ├── pe_version.py           # Windows PE FileVersion reader
 │   ├── timelapse_writer.py     # ffmpeg stdin pipe, time-gated capture
 │   ├── ffmpeg_utils.py         # Shared ffmpeg detection
+│   ├── diagnostics_bundle.py   # Support ZIP: logs + redacted config + frames (pure)
+│   ├── raw_frame_export.py     # Cached frame → Bayer FITS + unprocessed PNG + JSON
 │   └── allsky/                 # All-sky fisheye calibration + overlay
 ├── ml/                         # Scene classifiers (roof, sky conditions, stars, moon) — ONNX inference
 ├── tests/                      # pytest suite — see "Testing" below
@@ -160,6 +162,9 @@ pytest
 | `test_api_control.py` | 51 | `api_control` — command validation, idempotency, `wait` semantics, OpenAPI catalog |
 | `test_web_control.py` | 33 | `web_control` — control routes, auth matrix, no-CORS regression guard |
 | `test_capture_command_bridge.py` | 11 | `CaptureCommandBridge` + headless handler — GUI-thread marshalling |
+| `test_diagnostics_bundle.py` | 9 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary |
+| `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
+| `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.

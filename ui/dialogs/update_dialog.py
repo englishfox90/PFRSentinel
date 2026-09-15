@@ -84,8 +84,10 @@ class UpdateDialog(MessageBoxBase):
         notes_browser.setMarkdown(notes)
         notes_browser.setOpenExternalLinks(True)
         notes_browser.setReadOnly(True)
-        notes_browser.setMinimumHeight(120)
-        notes_browser.setMaximumHeight(200)
+        # Size the notes area from the host window rather than a fixed cap, so
+        # long release notes get the room the screen actually has. The dialog is
+        # an overlay on its parent, so it can never grow past that window.
+        notes_browser.setFixedHeight(self._notes_height())
         notes_browser.setStyleSheet(f"""
             QTextBrowser {{
                 color: {Colors.text_secondary};
@@ -152,8 +154,35 @@ class UpdateDialog(MessageBoxBase):
         self.buttonLayout.addWidget(self.view_btn)
         self.buttonLayout.addWidget(self.skip_btn)
 
-        # Set minimum width
-        self.widget.setMinimumWidth(480)
+        self.widget.setMinimumWidth(self._dialog_width())
+
+    # Fraction of the parent window the notes area may occupy; leaves room for
+    # the title, version line, file info, progress bar and button row.
+    _NOTES_HEIGHT_FRACTION = 0.55
+    _NOTES_MIN_HEIGHT = 200
+    _NOTES_MAX_HEIGHT = 640
+    _DIALOG_MIN_WIDTH = 480
+    _DIALOG_MAX_WIDTH = 760
+
+    def _parent_size(self):
+        parent = self.parent()
+        if parent is not None and parent.height() > 0 and parent.width() > 0:
+            return parent.width(), parent.height()
+        return None
+
+    def _notes_height(self):
+        size = self._parent_size()
+        if size is None:
+            return self._NOTES_MIN_HEIGHT
+        available = int(size[1] * self._NOTES_HEIGHT_FRACTION)
+        return max(self._NOTES_MIN_HEIGHT, min(self._NOTES_MAX_HEIGHT, available))
+
+    def _dialog_width(self):
+        size = self._parent_size()
+        if size is None:
+            return self._DIALOG_MIN_WIDTH
+        available = int(size[0] * 0.7)
+        return max(self._DIALOG_MIN_WIDTH, min(self._DIALOG_MAX_WIDTH, available))
 
     def _on_download(self):
         """Start download in background thread."""

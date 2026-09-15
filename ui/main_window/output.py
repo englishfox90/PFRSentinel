@@ -133,7 +133,6 @@ class _MainWindowOutputMixin:
         # and the uint16 array kept ~125 MB resident forever. The queued task is
         # then the only holder of this frame's arrays, so they free the moment
         # processing finishes, and nothing can overwrite them mid-stretch.
-        self._cached_raw_time = datetime.now(timezone.utc)
         if frame_builder.is_rebuildable(metadata):
             self._cached_raw_image = None
             self._cached_raw_metadata = frame_builder.cache_metadata(metadata)
@@ -143,6 +142,9 @@ class _MainWindowOutputMixin:
         else:
             self._cached_raw_image = pil_image.copy()
             self._cached_raw_metadata = metadata.copy()
+        # Time goes last: the diagnostics export polls it from a worker thread
+        # as "a new frame is fully cached", so it must never lead the frame.
+        self._cached_raw_time = datetime.now(timezone.utc)
 
         auto_stretch_enabled = self.config.get('auto_stretch', {}).get('enabled', False)
         if auto_stretch_enabled:
@@ -165,6 +167,15 @@ class _MainWindowOutputMixin:
         if self._cached_raw_image is None:
             return None, None
         return self._cached_raw_image, self._cached_raw_metadata
+
+    def cached_raw_snapshot(self):
+        """(pil_image_or_None, metadata, captured_at) of the last frame, without rebuilding.
+
+        Camera mode returns image None with the Bayer-carrying metadata;
+        watch mode returns the cached PIL image. Safe to read from a worker
+        thread: every field is replaced by reference, never mutated.
+        """
+        return self._cached_raw_image, self._cached_raw_metadata, self._cached_raw_time
 
     def has_cached_frame(self) -> bool:
         """True if a frame exists to reprocess/calibrate, without rebuilding it."""
@@ -225,8 +236,8 @@ class _MainWindowOutputMixin:
             # on_image_captured — don't clobber it with the overlaid output.
             if self.config.get('capture_mode', 'camera') == 'watch':
                 self._cached_raw_image = output_image.copy()
-                self._cached_raw_time = datetime.now(timezone.utc)
                 self._cached_raw_metadata = metadata
+                self._cached_raw_time = datetime.now(timezone.utc)
 
             # preview_image may carry the all-sky overlay (GUI only).
             # output_image is always clean — the watch-mode cache above and any
