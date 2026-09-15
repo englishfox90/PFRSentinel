@@ -100,7 +100,14 @@ class _FakeConfig:
 def _build_panel(parent=None):
     from PySide6.QtWidgets import QWidget
     from ui.panels.output_settings import OutputSettingsPanel
-    return OutputSettingsPanel(parent if parent is not None else QWidget())
+    if parent is None:
+        parent = QWidget()
+    panel = OutputSettingsPanel(parent)
+    # The C++ parent owns the panel. Keep the Python side of the parent alive
+    # for as long as the panel is, or it is deleted the moment this returns
+    # and takes the panel's C++ half with it.
+    panel._test_parent = parent
+    return panel
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +127,16 @@ def host(qapp):
 
     win = _QtWindowImpl()
     win.output_panel = _build_panel(win)
-    return win
+    yield win
+    # Tear the widget tree down here, deterministically, while the
+    # QApplication is idle. Left to garbage collection it was deleted
+    # mid-way through a later, unrelated test module on the same xdist
+    # worker, which took the whole worker process down.
+    from PySide6.QtCore import QEvent
+    win.close()
+    win.deleteLater()
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
 
 
 @pytest.fixture

@@ -155,7 +155,8 @@ pytest
 ruff (syntax errors, undefined names, redefinitions — see `ruff.toml`), the
 file-size audit (`scripts/ci/check_file_sizes.py`; caps and frozen exceptions
 live in `scripts/ci/size_policy.py`, shared with the local size hook), `pip-audit` against the installed packages, and the default pytest
-run on a Windows runner. Dev tooling is pinned in `requirements-dev.txt`.
+run on a Windows runner with one pytest-xdist worker per core. Dev tooling is
+pinned in `requirements-dev.txt`.
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 

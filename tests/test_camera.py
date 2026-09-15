@@ -280,9 +280,10 @@ class TestWaitForCaptureThreadExit:
         cam = self._make_camera()
         cam.is_capturing = True
 
-        # Thread that ignores the stop flag — simulates a thread wedged in SDK.
+        # Ignores the stop flag (simulates an SDK-wedged thread); must outlast
+        # the 0.1s join timeout below since the trailing t.join() eats it whole.
         def stuck():
-            time.sleep(1.5)
+            time.sleep(0.15)
 
         t = threading.Thread(target=stuck, daemon=True)
         cam.capture_thread = t
@@ -595,10 +596,14 @@ class TestConfigureRaw16Fallback:
         assert set_roi_calls[0].kwargs['image_type'] == asi.ASI_IMG_RAW16
         assert set_roi_calls[1].kwargs['image_type'] == asi.ASI_IMG_RAW8
 
-    def test_raw8_failure_raises(self):
+    def test_raw8_failure_raises(self, monkeypatch):
         """When RAW8 itself fails, propagate — there's no further fallback
         and the caller must fail the connection."""
+        from services.camera import camera_config
         from services.camera.camera_config import configure_camera
+        # Neutralise _set_roi_with_retry's real 1s inter-attempt delay only —
+        # the retry-then-raise behaviour still runs at full attempt count.
+        monkeypatch.setattr(camera_config.time, "sleep", lambda *_: None)
         asi = self._asi_module_mock()
         camera = self._camera_mock()
         camera.set_roi.side_effect = Exception("Invalid size")
@@ -631,7 +636,11 @@ class TestConfigureErrorPropagation:
         conn.supports_raw16 = True
         return conn
 
-    def test_configure_propagates_set_roi_failure(self):
+    def test_configure_propagates_set_roi_failure(self, monkeypatch):
+        from services.camera import camera_config
+        # Same 5-attempt/1s-delay retry as TestConfigureRaw16Fallback — kill
+        # only the delay, keep the retry-then-raise behaviour under test.
+        monkeypatch.setattr(camera_config.time, "sleep", lambda *_: None)
         conn = self._conn()
         # Both RAW16 and RAW8 set_roi fail — configure must raise, not return.
         conn.camera.set_roi.side_effect = Exception("Invalid size")

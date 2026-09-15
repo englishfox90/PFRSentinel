@@ -39,6 +39,39 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture
+def make_widget(qt_app):
+    """Construct a widget and guarantee deterministic teardown.
+
+    LibraryPanel starts a real (non-parented-away) QTimer as soon as a frame
+    is archived (see _live_timer in ui/panels/library_panel.py); tests that
+    exercise that path leave it *active* on an unmanaged local instance. A
+    connected bound-method slot keeps the widget alive past normal
+    refcounting until the next cycle-collector pass, so the timer can fire
+    into a stale widget from an unrelated later test under xdist. Stop any
+    known timer attribute before close()/deleteLater().
+    """
+    created = []
+
+    def _make(ctor):
+        widget = ctor()
+        created.append(widget)
+        return widget
+
+    yield _make
+
+    from PySide6.QtCore import QEvent
+    for widget in created:
+        for attr in ("_live_timer", "_timer"):
+            timer = getattr(widget, attr, None)
+            if timer is not None:
+                timer.stop()
+        widget.close()
+        widget.deleteLater()
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qt_app.processEvents()
+
+
 def _jpeg_bytes(w=64, h=48, color=(10, 20, 30)):
     buf = BytesIO()
     Image.new("RGB", (w, h), color).save(buf, format="JPEG")
@@ -64,9 +97,9 @@ def _session(key=None, **kw):
 # ---------------------------------------------------------------------------
 
 class TestScrubberPreScale:
-    def test_set_data_prescales_to_strip_height(self, qt_app):
+    def test_set_data_prescales_to_strip_height(self, qt_app, make_widget):
         from ui.panels.library_scrubber import Scrubber, _STRIP_H
-        scrubber = Scrubber()
+        scrubber = make_widget(Scrubber)
         scrubber.set_data(
             [_frame(1, 1000), _frame(2, 1010)],
             [(0, _jpeg_bytes(200, 150)), (1, _jpeg_bytes(80, 80))],
@@ -79,17 +112,17 @@ class TestScrubberPreScale:
             # is the pre-scaled on-screen size, not the source resolution.
             assert pix.width() <= 200
 
-    def test_add_live_thumb_prescales_to_strip_height(self, qt_app):
+    def test_add_live_thumb_prescales_to_strip_height(self, qt_app, make_widget):
         from ui.panels.library_scrubber import Scrubber, _STRIP_H
-        scrubber = Scrubber()
+        scrubber = make_widget(Scrubber)
         scrubber.add_live_thumb(0, _jpeg_bytes(300, 300))
         assert len(scrubber._film) == 1
         _idx, pix = scrubber._film[0]
         assert pix.height() == _STRIP_H
 
-    def test_add_live_thumb_ignores_undecodable_bytes(self, qt_app):
+    def test_add_live_thumb_ignores_undecodable_bytes(self, qt_app, make_widget):
         from ui.panels.library_scrubber import Scrubber
-        scrubber = Scrubber()
+        scrubber = make_widget(Scrubber)
         scrubber.add_live_thumb(0, b"not a jpeg")
         assert scrubber._film == []
 
@@ -99,7 +132,7 @@ class TestScrubberPreScale:
 # ---------------------------------------------------------------------------
 
 class TestLiveSessionRefreshThrottle:
-    def test_burst_of_frames_arms_the_timer_once(self, qt_app, monkeypatch):
+    def test_burst_of_frames_arms_the_timer_once(self, qt_app, monkeypatch, make_widget):
         from PySide6.QtCore import QTimer
         from ui.panels.library_panel import LibraryPanel
 
@@ -112,7 +145,7 @@ class TestLiveSessionRefreshThrottle:
 
         monkeypatch.setattr(QTimer, "start", counting_start)
 
-        panel = LibraryPanel()
+        panel = make_widget(LibraryPanel)
         panel.on_frame_archived({"id": 1, "captured_at": 1000})
         panel.on_frame_archived({"id": 2, "captured_at": 1001})
         panel.on_frame_archived({"id": 3, "captured_at": 1002})
@@ -122,11 +155,11 @@ class TestLiveSessionRefreshThrottle:
         assert len(starts) == 1
         assert panel._live_timer.isActive()
 
-    def test_new_burst_after_timer_fires_arms_again(self, qt_app, monkeypatch):
+    def test_new_burst_after_timer_fires_arms_again(self, qt_app, monkeypatch, make_widget):
         from PySide6.QtCore import QTimer
         from ui.panels.library_panel import LibraryPanel
 
-        panel = LibraryPanel()
+        panel = make_widget(LibraryPanel)
         panel.on_frame_archived({"id": 1, "captured_at": 1000})
         assert panel._live_timer.isActive()
 
@@ -153,10 +186,10 @@ class TestLiveSessionRefreshThrottle:
 # ---------------------------------------------------------------------------
 
 class TestNightViewMidLoadBuffering:
-    def test_frame_archived_during_load_is_not_dropped(self, qt_app):
+    def test_frame_archived_during_load_is_not_dropped(self, qt_app, make_widget):
         from ui.panels.library_night_view import NightView
 
-        view = NightView()
+        view = make_widget(NightView)
         session = _session()
         view.begin_load(session)
         assert view._loading is True
@@ -182,10 +215,10 @@ class TestNightViewMidLoadBuffering:
         assert len(view._frames) == 3
         assert view._pending_live == {}
 
-    def test_replay_dedupes_against_frames_the_load_already_picked_up(self, qt_app):
+    def test_replay_dedupes_against_frames_the_load_already_picked_up(self, qt_app, make_widget):
         from ui.panels.library_night_view import NightView
 
-        view = NightView()
+        view = make_widget(NightView)
         session = _session()
         view.begin_load(session)
 
@@ -207,10 +240,10 @@ class TestNightViewMidLoadBuffering:
         assert ids.count(2) == 1
         assert 6 in ids
 
-    def test_frame_for_a_different_night_is_dropped_not_buffered(self, qt_app):
+    def test_frame_for_a_different_night_is_dropped_not_buffered(self, qt_app, make_widget):
         from ui.panels.library_night_view import NightView
 
-        view = NightView()
+        view = make_widget(NightView)
         session = _session()
         view.begin_load(session)
 
@@ -225,10 +258,10 @@ class TestNightViewMidLoadBuffering:
 # ---------------------------------------------------------------------------
 
 class TestNightViewEmptyNightClearing:
-    def test_empty_load_clears_scrubber_and_event_list(self, qt_app):
+    def test_empty_load_clears_scrubber_and_event_list(self, qt_app, make_widget):
         from ui.panels.library_night_view import NightView
 
-        view = NightView()
+        view = make_widget(NightView)
         first = _session(key="2026-07-01")
         view.begin_load(first)
         view.set_frames({
