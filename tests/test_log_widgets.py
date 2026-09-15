@@ -23,12 +23,20 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
+def _dispose(widget, app):
+    from PySide6.QtCore import QEvent
+    widget.close()
+    widget.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+
 @pytest.fixture
 def logs_panel(qt_app):
     from ui.panels.logs_panel import LogsPanel
     panel = LogsPanel()
     yield panel
-    panel.deleteLater()
+    _dispose(panel, qt_app)
 
 
 @pytest.fixture
@@ -36,7 +44,7 @@ def activity_log(qt_app):
     from ui.panels.live_monitoring import ActivityLog
     widget = ActivityLog()
     yield widget
-    widget.deleteLater()
+    _dispose(widget, qt_app)
 
 
 def _lines(level, count, start=0):

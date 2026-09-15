@@ -24,6 +24,19 @@ def qapp():
     yield app
 
 
+@pytest.fixture
+def fake_window(qapp):
+    from PySide6.QtCore import QEvent
+    win = _FakeWindow()
+    yield win
+    # CaptureCommandBridge is parented to win, so closing/deleting the
+    # window tears down both.
+    win.close()
+    win.deleteLater()
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
 class _FakeWindow(QWidget):
     """A real QObject parent so the bridge has genuine thread affinity."""
 
@@ -54,9 +67,9 @@ def _drain():
 
 # --- GUI bridge -----------------------------------------------------------
 
-def test_command_is_queued_not_executed_inline(qapp):
+def test_command_is_queued_not_executed_inline(qapp, fake_window):
     """The whole point: calling the bridge must not run capture immediately."""
-    win = _FakeWindow()
+    win = fake_window
     bridge = CaptureCommandBridge(win)
 
     bridge("start")
@@ -66,9 +79,9 @@ def test_command_is_queued_not_executed_inline(qapp):
     assert [c[0] for c in win.calls] == ["start"]
 
 
-def test_command_executes_on_the_gui_thread(qapp):
+def test_command_executes_on_the_gui_thread(qapp, fake_window):
     """A call from a worker thread must still run start_capture on the GUI thread."""
-    win = _FakeWindow()
+    win = fake_window
     bridge = CaptureCommandBridge(win)
     gui_thread_id = threading.get_ident()
     worker_thread_id = {}
@@ -90,17 +103,17 @@ def test_command_executes_on_the_gui_thread(qapp):
     assert ran_on != worker_thread_id["id"]
 
 
-def test_status_is_pushed_after_the_command(qapp):
+def test_status_is_pushed_after_the_command(qapp, fake_window):
     """A waiting HTTP client polls the snapshot — publish it without delay."""
-    win = _FakeWindow()
+    win = fake_window
     bridge = CaptureCommandBridge(win)
     bridge("start")
     _drain()
     assert win.pushes == 1
 
 
-def test_capture_exception_does_not_escape_the_event_loop(qapp):
-    win = _FakeWindow()
+def test_capture_exception_does_not_escape_the_event_loop(qapp, fake_window):
+    win = fake_window
     win.raise_on = "start"
     bridge = CaptureCommandBridge(win)
     bridge("start")
@@ -108,8 +121,8 @@ def test_capture_exception_does_not_escape_the_event_loop(qapp):
     assert win.pushes == 1  # status still published
 
 
-def test_unknown_command_raises_before_queueing(qapp):
-    win = _FakeWindow()
+def test_unknown_command_raises_before_queueing(qapp, fake_window):
+    win = fake_window
     bridge = CaptureCommandBridge(win)
     with pytest.raises(ValueError):
         bridge("restart")
@@ -117,8 +130,8 @@ def test_unknown_command_raises_before_queueing(qapp):
     assert win.calls == []
 
 
-def test_bridge_lives_on_the_gui_thread(qapp):
-    win = _FakeWindow()
+def test_bridge_lives_on_the_gui_thread(qapp, fake_window):
+    win = fake_window
     bridge = CaptureCommandBridge(win)
     assert bridge.thread() is QThread.currentThread()
 
