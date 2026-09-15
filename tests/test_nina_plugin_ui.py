@@ -160,6 +160,27 @@ def panel(window):
     return window.output_panel
 
 
+@pytest.fixture
+def detached_panel(qapp):
+    """A panel on a bare QWidget parent (not a MainWindow).
+
+    Disposed through Qt, not garbage collection: deleting the parent via
+    deleteLater() while both Python wrappers are still alive lets shiboken
+    invalidate the child cleanly. Leaving the pair to the collector deleted
+    the parent (and with it the child's C++ half) while the child's wrapper
+    was being torn down in the same pass, which corrupted the heap.
+    """
+    from PySide6.QtCore import QEvent
+    fresh = _build_panel()
+    yield fresh
+    parent = fresh._test_parent
+    fresh.close()
+    parent.deleteLater()
+    for _ in range(3):
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+
+
 # --- controller -----------------------------------------------------------
 
 def test_refresh_emits_the_services_status(qapp):
@@ -247,10 +268,9 @@ def test_unknown_action_is_rejected(qapp):
 
 # --- panel: status -> buttons --------------------------------------------
 
-def test_buttons_start_disabled_before_any_status(qapp):
-    fresh = _build_panel()
-    assert fresh.nina_install_btn.isEnabled() is False
-    assert fresh.nina_remove_btn.isEnabled() is False
+def test_buttons_start_disabled_before_any_status(detached_panel):
+    assert detached_panel.nina_install_btn.isEnabled() is False
+    assert detached_panel.nina_remove_btn.isEnabled() is False
 
 
 def test_installed_status_offers_reinstall_and_remove(panel):
@@ -361,10 +381,9 @@ def test_refresh_on_startup_populates_the_card(window, monkeypatch):
     assert window.output_panel.nina_status_label.text() == "Installed in NINA 3.0.0."
 
 
-def test_a_panel_without_a_window_does_not_crash(qapp):
-    fresh = _build_panel()  # parent is a bare QWidget, not a MainWindow
-    fresh.set_nina_plugin_status(status(STATUS_INSTALLED))
-    fresh.nina_install_btn.click()
+def test_a_panel_without_a_window_does_not_crash(detached_panel):
+    detached_panel.set_nina_plugin_status(status(STATUS_INSTALLED))
+    detached_panel.nina_install_btn.click()
 
 
 # --- the startup nudge ----------------------------------------------------
