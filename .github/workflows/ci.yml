@@ -45,7 +45,18 @@ jobs:
           python-version: "3.13"
       # Cache the installed packages, not just pip's wheel cache: unpacking
       # PySide6, OpenCV and SciPy was ~80 s of the job. Keyed on the exact
-      # interpreter path (includes the patch version) and both requirement files.
+      # interpreter path (includes the patch version), both requirement files,
+      # and the ISO week. Most requirements are floors, so without the week
+      # stamp a hit would freeze whatever versions were resolved first, and a
+      # later advisory against one of them would fail pip-audit on every run
+      # with nothing in the repo to change. Rotating weekly bounds that to
+      # seven days at the cost of one full install per week. No restore-keys
+      # on purpose: a partial restore plus a non-upgrading install would keep
+      # the stale versions anyway.
+      - name: Cache key week stamp
+        id: week
+        shell: bash
+        run: echo "iso=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - name: Restore installed packages
         id: site
         uses: actions/cache@v4
@@ -53,7 +64,7 @@ jobs:
           path: |
             ${{ env.pythonLocation }}\Lib\site-packages
             ${{ env.pythonLocation }}\Scripts
-          key: site-packages-${{ runner.os }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          key: site-packages-${{ runner.os }}-${{ env.pythonLocation }}-${{ steps.week.outputs.iso }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
       - name: Install dependencies
         if: steps.site.outputs.cache-hit != 'true'
         run: |
