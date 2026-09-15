@@ -40,7 +40,12 @@ class TestDiscordConfiguration:
 
 class TestDiscordAlerts:
     """Test DiscordAlerts class"""
-    
+
+    @pytest.fixture(autouse=True)
+    def _no_backoff_sleep(self):
+        with patch('services.discord_alerts.time.sleep'):  # exhausting BACKOFF_DELAYS is ~5 s per test
+            yield
+
     @pytest.fixture
     def discord_config(self):
         """Sample Discord config"""
