@@ -201,7 +201,14 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None):
                     ml_img = Image.open(load_src) if isinstance(load_src, str) else load_src
                     ml_tokens = analyze_image_for_tokens(np.array(ml_img.convert('RGB')), config=ml_config)
                     metadata.update(ml_tokens)
-                    app_logger.debug(f"ML tokens: {ml_tokens}")
+                    # Log the classifier results, never the overlay-token dict:
+                    # a "*token*" name reads as a credential to CodeQL's
+                    # clear-text-logging rule (py/clear-text-logging-sensitive-data).
+                    ml_results = ml_service.get_last_results()
+                    app_logger.debug(
+                        f"ML predictions: roof={ml_results.get('roof_status')}, "
+                        f"sky={ml_results.get('sky_condition')}"
+                    )
             except Exception as e:
                 app_logger.debug(f"ML prediction skipped: {e}")
 

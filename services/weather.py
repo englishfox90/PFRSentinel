@@ -2,10 +2,29 @@
 Weather service - OpenWeatherMap API integration
 Fetches current weather data with caching to avoid excessive API calls
 """
+import re
 import requests
 import time
 from datetime import datetime, timedelta
 from services.logger import app_logger
+
+
+# OpenWeatherMap takes its credential as the `appid` query parameter, and
+# `requests` puts the whole request URL into its exception messages — so a bare
+# str(e) writes the operator's API key into the log file (and on to PostHog over
+# OTLP). Strip the value before the shared redactor runs.
+_APPID_RE = re.compile(r"(appid=)[^&\s)]+", re.I)
+
+
+def redact_weather_error(exc) -> str:
+    """Return a log-safe ``"ExcType: message"`` string for an OpenWeatherMap error.
+
+    Mirrors ``discord_alerts.redact_discord_error`` — the exception type is
+    included so callers don't re-prepend it (and re-invoke the redactor).
+    """
+    from .youtube_upload import sanitize_exception
+    redacted = sanitize_exception(_APPID_RE.sub(r"\1[REDACTED]", str(exc)))
+    return f"{type(exc).__name__}: {redacted}"
 
 
 class WeatherService:
@@ -98,7 +117,10 @@ class WeatherService:
             return True
             
         except requests.RequestException as e:
-            app_logger.error(f"Failed to resolve weather location '{self.location}': {e}")
+            app_logger.error(
+                f"Failed to resolve weather location '{self.location}': "
+                f"{redact_weather_error(e)}"
+            )
             return False
         except KeyError as e:
             app_logger.error(f"Unexpected weather API response format: {e}")
@@ -166,7 +188,7 @@ class WeatherService:
             return weather_data
             
         except requests.RequestException as e:
-            app_logger.error(f"Failed to fetch weather data: {e}")
+            app_logger.error(f"Failed to fetch weather data: {redact_weather_error(e)}")
             return None
         except (KeyError, ValueError) as e:
             app_logger.error(f"Error parsing weather data: {e}")

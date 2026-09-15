@@ -358,7 +358,10 @@ class ImageProcessorWorker(QThread):
                         if self._main_window:
                             self._main_window.last_ml_results = ml_results
 
-                        app_logger.debug(f"ML predictions: roof={ml_tokens.get('ROOF_STATUS')}, sky={ml_tokens.get('SKY_CONDITION')}")
+                        # Read ml_results, never ml_tokens: a "*token*" name is a
+                        # credential to py/clear-text-logging-sensitive-data.
+                        app_logger.debug(f"ML predictions: roof={ml_results.get('roof_status')}, "
+                                         f"sky={ml_results.get('sky_condition')}")
                 except Exception as e:
                     app_logger.debug(f"ML prediction skipped: {e}")
 
