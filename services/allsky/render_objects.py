@@ -126,7 +126,7 @@ def render_planets(
         text_color = _parse_color(hex_color, opacity)
 
         tw, th = estimate_text_size(name, label_size)
-        pos = label_grid.try_place(float(x), float(y), tw, th)
+        pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
             draw.text(pos, name, fill=text_color, font=font)
 
@@ -190,7 +190,7 @@ def render_messier(
         common = (obj.get('name') or '').strip()
         display = f"{common} ({label})" if common else label
         tw, th = estimate_text_size(display, label_size)
-        pos = label_grid.try_place(float(x), float(y), tw, th)
+        pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
             draw.text(pos, display, fill=label_color, font=font)
 
@@ -258,7 +258,7 @@ def render_ngc(
         common = (obj.get('name') or '').strip()
         display = f"{common} ({oid})" if common else oid
         tw, th = estimate_text_size(display, label_size)
-        pos = label_grid.try_place(float(x), float(y), tw, th)
+        pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
             draw.text(pos, display, fill=label_color, font=font)
 

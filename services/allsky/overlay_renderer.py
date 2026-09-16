@@ -26,6 +26,7 @@ except Exception as _e:
 
 from .fisheye import FisheyeModel
 from .label_collision import LabelGrid
+from .label_stability import get_label_stabilizer
 from .render_grid import render_grid
 from .render_constellations import render_constellations
 from .render_objects import render_messier, render_ngc, render_planets, _is_sky_visible
@@ -36,7 +37,7 @@ from .star_centroid import detect_stars, estimate_sky_circle
 # rather than on every rendered frame (Phase 3.1).
 _last_scale_logged: Optional[float] = None
 
-def _build_detection_mask(img: Image.Image) -> np.ndarray:
+def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
     """Build a sky visibility mask from actual star detections.
 
     Each detected star claims a circular region whose radius is based on
@@ -46,8 +47,9 @@ def _build_detection_mask(img: Image.Image) -> np.ndarray:
     onto obstructed areas.
 
     Returns a uint8 array (0 = obstructed, 255 = open sky) that is a
-    drop-in replacement for the grayscale image in ``_is_sky_visible()``.
-    Falls back to image grayscale if < 10 stars detected.
+    drop-in replacement for the grayscale image in ``_is_sky_visible()``,
+    or None when the frame yields no usable mask (< 10 stars detected,
+    detection error). The caller decides how to fall back.
     """
     try:
         sky_cx, sky_cy, sky_r = estimate_sky_circle(img)
@@ -56,17 +58,17 @@ def _build_detection_mask(img: Image.Image) -> np.ndarray:
             sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
         )
     except Exception:
-        return np.array(img.convert('L'))
+        return None
 
     if len(detections) < 10:
-        return np.array(img.convert('L'))
+        return None
 
     w, h = img.size
     det_xy = np.array([(x, y) for x, y, _ in detections])
 
     # 2nd nearest neighbour distance (more robust than 1st to outliers)
     if _cdist is None:
-        return np.array(img.convert('L'))
+        return None
     dists = _cdist(det_xy, det_xy)
     np.fill_diagonal(dists, 1e9)
     nn2_dist = np.sort(dists, axis=1)[:, 1]
@@ -181,14 +183,19 @@ def render_allsky_overlay(
         img = img.convert('RGBA')
 
     w, h = img.size
-    grid_cfg = LabelGrid(w, h)
+    stabilizer = get_label_stabilizer()
+    grid_cfg = LabelGrid(w, h, slot_memory=stabilizer.slot_memory)
 
     # Build a sky visibility mask from star detections.  Pixels near
     # detected stars are 255 (open sky); all others are 0 (obstructed).
     # This replaces the old brightness-threshold approach which was
     # fragile across different FITS stretches and scattered light levels.
-    # Falls back to image grayscale when <10 stars are detected.
-    gray = _build_detection_mask(img)
+    # The stabilizer votes the mask over recent frames and holds the last
+    # vote through a short run of frames with too few detections; only a
+    # sustained failure falls back to the raw grayscale (issues #31, #13).
+    gray = stabilizer.smooth_mask(_detect_sky_mask(img))
+    if gray is None:
+        gray = np.array(img.convert('L'))
 
     # Layer order: grid first (background), then constellations, then objects
     try:
@@ -293,6 +300,8 @@ def _compute_allowed_ids(
 
     Objects projected onto dark equipment areas (checked via gray pixel
     brightness) are excluded from ranking so they don't consume the budget.
+    The pick is sticky across frames (see label_stability): an object on
+    screen keeps its slot until a newcomer out-ranks it by a clear margin.
 
     UIDs are prefixed by type to avoid collisions:
         'planet:Jupiter', 'messier:M45', 'ngc:NGC 2244'
@@ -388,7 +397,7 @@ def _compute_allowed_ids(
                 candidates.append((mag, f'ngc:{oid}'))
 
     candidates.sort(key=lambda c: c[0])  # brightest first
-    return {uid for _, uid in candidates[:top_n]}
+    return get_label_stabilizer().select([uid for _, uid in candidates], top_n)
 
 
 _model_cache: dict = {'path': '', 'mtime': 0.0, 'model': None}
