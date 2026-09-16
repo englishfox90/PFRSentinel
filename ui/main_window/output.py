@@ -509,23 +509,7 @@ class _MainWindowOutputMixin:
         # Camera mode
         zwo = cc.zwo_camera if cc else None
         running = bool(cc and cc.is_capturing)
-        sched_mode = self.config.get('scheduled_capture_mode', 'always')
-        in_window = True
-        if zwo is not None and sched_mode != 'always':
-            try:
-                in_window = zwo.is_in_time_window()
-            except Exception:
-                in_window = True
-        schedule = {
-            "mode": sched_mode,
-            "start_time": self.config.get('scheduled_start_time', '17:00'),
-            "end_time": self.config.get('scheduled_end_time', '09:00'),
-            "in_window": in_window,
-            "window_interval_seconds": (
-                self.config.get('scheduled_window_interval', 5.0)
-                if sched_mode == 'variable' else None
-            ),
-        }
+        schedule = api_status.build_schedule(self.config, zwo)
         interval = self.config.get('zwo_interval', 5.0)
         effective_interval = interval
         if zwo is not None:
@@ -540,7 +524,7 @@ class _MainWindowOutputMixin:
             state = "recovering"
         elif not running:
             state = "stopped"
-        elif sched_mode == 'gated' and not in_window:
+        elif schedule['mode'] == 'gated' and not schedule['in_window']:
             state = "outside_window"
         else:
             state = "capturing"

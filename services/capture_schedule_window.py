@@ -174,6 +174,10 @@ class CaptureWindowGate:
             app_logger.debug(f"Capture schedule: window check error ({e}), allowing capture")
             return True
 
+    def active_window(self, now: Optional[datetime] = None) -> Window:
+        """The window in force at `now`, as naive local datetimes (None = always on)."""
+        return self._active_window(now or datetime.now())
+
     def _active_window(self, now: datetime) -> Window:
         """The window containing `now`, else today's."""
         today = self.window_for_day(now.date())
@@ -208,6 +212,17 @@ class CaptureWindowGate:
         if margin:
             return f"timelapse window ±{margin} min ({span})"
         return f"timelapse window ({span})"
+
+
+def gate_for_config(config) -> Optional[CaptureWindowGate]:
+    """A gate for the camera, or None when the fixed HH:MM schedule applies.
+
+    None is not "no schedule": the fixed source deliberately keeps the legacy
+    ``camera_utils`` check, which is battle-tested and end-exclusive.
+    """
+    if config.get('scheduled_window_source', SOURCE_FIXED) != SOURCE_TIMELAPSE:
+        return None
+    return CaptureWindowGate(config)
 
 
 def describe_capture_window(config, now: Optional[datetime] = None) -> str:
