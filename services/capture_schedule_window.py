@@ -159,17 +159,28 @@ class CaptureWindowGate:
             self._cache[key] = window
         return window
 
+    def _containing_window(self, now: datetime) -> Tuple[bool, Window]:
+        """(found, window): the window containing `now`, else today's.
+
+        Overnight windows cross midnight, so yesterday's anchor may still
+        apply; and the margin can pull a window that starts just after
+        midnight back into the previous evening, so tomorrow's anchor is
+        probed too — otherwise the camera would wake at 00:00 with no
+        settle time and the API would publish the previous night's span.
+        """
+        today = self.window_for_day(now.date())
+        if today is None:
+            return True, None
+        for offset in (0, -1, 1):
+            window = today if offset == 0 else self.window_for_day(now.date() + timedelta(days=offset))
+            if window and window[0] <= now <= window[1]:
+                return True, window
+        return False, today
+
     def __call__(self, now: Optional[datetime] = None) -> bool:
         now = now or datetime.now()
         try:
-            today = self.window_for_day(now.date())
-            if today is None:
-                return True
-            if today[0] <= now <= today[1]:
-                return True
-            # Overnight windows cross midnight, so yesterday's may still apply.
-            yesterday = self.window_for_day(now.date() - timedelta(days=1))
-            return bool(yesterday and yesterday[0] <= now <= yesterday[1])
+            return self._containing_window(now)[0]
         except Exception as e:
             app_logger.debug(f"Capture schedule: window check error ({e}), allowing capture")
             return True
@@ -179,14 +190,7 @@ class CaptureWindowGate:
         return self._active_window(now or datetime.now())
 
     def _active_window(self, now: datetime) -> Window:
-        """The window containing `now`, else today's."""
-        today = self.window_for_day(now.date())
-        if today is None or today[0] <= now <= today[1]:
-            return today
-        yesterday = self.window_for_day(now.date() - timedelta(days=1))
-        if yesterday and yesterday[0] <= now <= yesterday[1]:
-            return yesterday
-        return today
+        return self._containing_window(now)[1]
 
     def describe(self, now: Optional[datetime] = None) -> str:
         """Human-readable label of the window in force at `now`, for logs/UI."""

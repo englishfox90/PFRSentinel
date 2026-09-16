@@ -107,8 +107,9 @@ def sun_window(config: dict, day: date, tzinfo=None) -> Tuple[datetime, datetime
             start = dusk(loc.observer, date=day, depression=depression, tzinfo=tz)
             end = dawn(loc.observer, date=tomorrow, depression=depression, tzinfo=tz)
 
-        # Clamp with the fixed offset in effect now, but convert with the real
-        # zone (None) so a DST change on the night itself lands on the right hour.
+        # In production tzinfo is None: the clamp above used the fixed offset in
+        # effect now, while astimezone(None) converts with the real zone, so a
+        # DST change on the night itself still lands on the right hour.
         return to_local_naive(start, tzinfo), to_local_naive(end, tzinfo)
 
     except ImportError:
