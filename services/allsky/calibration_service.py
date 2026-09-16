@@ -497,8 +497,12 @@ class CalibrationService(QObject):
     def _retire_worker(self, worker) -> None:
         """Free a finished worker and everything it pinned.
 
-        Connected to QThread.finished, so it runs on this object's thread
-        after run() has returned - safe to delete the QThread. The worker is
+        Connected to QThread.finished from this object's (main) thread, so
+        the slot's receiver takes that thread's affinity and the call is
+        queued here after run() has returned - safe to delete the QThread.
+        That is what makes the connect site matter: a partial connected from
+        a worker thread would be bound to a thread with no event loop and the
+        retirement would silently never run. The worker is
         bound at connect time rather than read from sender(): a None sender
         would leave the slot occupied forever and silently stop all further
         refinement on a 24/7 process.
