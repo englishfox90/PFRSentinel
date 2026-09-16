@@ -39,6 +39,7 @@ PFRSentinel/
 │   ├── camera_calibration.py   # Auto-exposure algorithms
 │   ├── camera_utils.py         # Shared camera utilities
 │   ├── cleanup.py              # Disk space management (files only, never folders)
+│   ├── gc_scheduler.py         # GUI-thread cyclic GC (automatic GC off, QTimer-driven)
 │   ├── discord_alerts.py       # Discord webhook client
 │   ├── weather.py              # OpenWeatherMap API, 10-min cache
 │   ├── web_output.py           # HTTP server
@@ -184,6 +185,7 @@ tracked so these runs read the same conventions a local session does.
 | `test_diagnostics_bundle.py` | 9 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary |
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
+| `test_gc_scheduler.py` | 11 | `gc_scheduler` — automatic GC disabled on install/restored on uninstall, worker-thread cycles finalized on the GUI thread, `request_full_collect()`, no-QApplication fallback |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.

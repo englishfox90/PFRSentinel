@@ -178,6 +178,12 @@ def main():
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
 
+    # Cyclic collection moves to this thread before any Qt object is built:
+    # a background thread finalizing a Qt wrapper runs its C++ destructor on
+    # the wrong thread, which crashed the observatory box overnight (issue #31).
+    from services import gc_scheduler
+    gc_scheduler.install()
+
     # Enforce single instance before any heavy startup work. A second launch
     # (easy to do when we're sitting in the tray) signals the running instance
     # to surface its window, then exits here. GUI-mode only — headless,
