@@ -206,6 +206,36 @@ def test_gate_spans_two_days_for_overnight_windows(moment, expected):
     assert gate(moment) is expected
 
 
+@pytest.mark.parametrize('moment, expected', [
+    (datetime(2026, 3, 11, 23, 44), False),
+    (datetime(2026, 3, 11, 23, 46), True),     # tomorrow's window, pulled back by the margin
+    (datetime(2026, 3, 12, 0, 5), True),
+    (datetime(2026, 3, 12, 6, 14), True),
+    (datetime(2026, 3, 12, 6, 16), False),
+])
+def test_gate_finds_a_window_whose_margin_crosses_back_over_midnight(moment, expected):
+    """A timelapse window starting at 00:00 with a 15 min margin opens at
+    23:45 the previous evening, anchored on TOMORROW's day — the camera must
+    reconnect then, not at midnight with no settle time."""
+    cfg = _config()
+    cfg['timelapse']['fixed_start'] = '00:00'
+    cfg['timelapse']['fixed_end'] = '06:00'
+    gate = csw.CaptureWindowGate(cfg)
+
+    assert gate(moment) is expected
+
+
+def test_active_window_reports_the_margin_pulled_window_before_midnight():
+    cfg = _config()
+    cfg['timelapse']['fixed_start'] = '00:00'
+    cfg['timelapse']['fixed_end'] = '06:00'
+    gate = csw.CaptureWindowGate(cfg)
+
+    assert gate.active_window(datetime(2026, 3, 11, 23, 50)) == (
+        datetime(2026, 3, 11, 23, 45), datetime(2026, 3, 12, 6, 15)
+    )
+
+
 def test_gate_recomputes_when_the_timelapse_window_changes():
     cfg = _config()
     gate = csw.CaptureWindowGate(cfg)
