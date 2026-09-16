@@ -102,18 +102,18 @@ class GcScheduler:
     def uninstall(self) -> None:
         """Stop the timer and hand cyclic collection back to the interpreter."""
         timer, self._timer = self._timer, None
-        if timer is not None:
-            try:
-                timer.stop()
-                timer.timeout.disconnect(self._tick)
-            except (RuntimeError, TypeError):
-                pass
-            app_logger.debug("GC scheduler uninstalled")
-
-        if self._was_enabled is None or self._was_enabled:
+        if timer is None:
+            return
+        try:
+            timer.stop()
+            timer.timeout.disconnect(self._tick)
+        except (RuntimeError, TypeError):
+            pass
+        if self._was_enabled:
             gc.enable()
         self._was_enabled = None
         self._full_requested.clear()
+        app_logger.debug("GC scheduler uninstalled")
 
     def request_full_collect(self) -> None:
         """Ask for a full ``gc.collect()`` on the next tick. Safe from any thread.
