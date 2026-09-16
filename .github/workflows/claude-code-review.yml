@@ -41,7 +41,12 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@v1
+        # Pinned to v1.0.225 (Claude Code 2.1.272). v1.0.226 bumped Claude Code
+        # to 2.1.273 and every review since then exited after a few turns
+        # without posting anything (PRs #30, #32, #35) while still reporting
+        # success. Dependabot proposes the next release; try it on one PR and
+        # check the guard step below before taking it.
+        uses: anthropics/claude-code-action@bf38e86e58df9ebf3420326d019f955bb3be64dd # v1.0.225
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
@@ -53,4 +58,30 @@ jobs:
           claude_args: '--allowedTools "Agent,Read,Grep,Glob,LS,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(gh api:*),Bash(git log:*),Bash(git blame:*),Bash(git show:*),Bash(git diff:*),mcp__github_inline_comment__create_inline_comment"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+
+      # The plugin exits 0 whether it reviewed the PR or gave up on the first
+      # step, so a broken review looks identical to a clean one. Fail loudly
+      # when claude[bot] has never posted on this PR: neither an issue comment
+      # ("No issues found"), an inline review comment, nor a review. "Ever" on
+      # the PR rather than "in this run" because the plugin deliberately skips
+      # PRs it has already commented on.
+      - name: Fail if the review posted nothing
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          count_by_claude() {
+            gh api "$1" --paginate --jq '.[] | select(.user.login == "claude[bot]") | .id' | wc -l
+          }
+          issue_comments=$(count_by_claude "repos/$REPO/issues/$PR/comments")
+          review_comments=$(count_by_claude "repos/$REPO/pulls/$PR/comments")
+          reviews=$(count_by_claude "repos/$REPO/pulls/$PR/reviews")
+          echo "claude[bot] on PR #$PR: $issue_comments issue comment(s), $review_comments inline comment(s), $reviews review(s)"
+          if [ "$((issue_comments + review_comments + reviews))" -eq 0 ]; then
+            echo "::error::Claude Code Review finished without posting anything on PR #$PR. The review step exited early; see its log (turn count and permission denials) and the pin comment on the 'uses:' line."
+            exit 1
+          fi
 

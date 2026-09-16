@@ -162,7 +162,9 @@ When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
 Other Claude workflows: `claude-code-review.yml` reviews every non-draft PR
-(Dependabot PRs excluded); `claude-dependabot-assess.yml` reads the upstream
+(Dependabot PRs excluded) and fails the job if `claude[bot]` has never posted
+on the PR, since the plugin exits 0 even when it gives up before reviewing;
+the action is pinned by SHA for the same reason (see the `uses:` comment); `claude-dependabot-assess.yml` reads the upstream
 changelog for each Dependabot bump and leaves a SAFE / CHECK / HOLD comment;
 `claude-release-notes.yml` drafts the GitHub release for a pushed `v*` tag in
 the house style (never publishes); `claude-issue-triage.yml` labels and
