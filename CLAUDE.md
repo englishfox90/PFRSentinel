@@ -156,10 +156,30 @@ pytest
 ruff (syntax errors, undefined names, redefinitions — see `ruff.toml`), the
 file-size audit (`scripts/ci/check_file_sizes.py`; caps and frozen exceptions
 live in `scripts/ci/size_policy.py`, shared with the local size hook), `pip-audit` against the installed packages, and the default pytest
-run on a Windows runner with one pytest-xdist worker per core. Dev tooling is
-pinned in `requirements-dev.txt`.
+run with one pytest-xdist worker per core. The test job is a matrix over
+`windows-latest`, `macos-latest` and `ubuntu-latest` (issue #38) — Windows is
+still the shipping platform, the other two prove the port stays honest. Tests
+that only make sense on Windows carry `@pytest.mark.requires_windows` and are
+skipped elsewhere by `tests/conftest.py`, so the pytest command is identical on
+every runner. `pip-audit` runs on the Windows job alone; the dependency set is
+the same everywhere. Dev tooling is pinned in `requirements-dev.txt`.
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
+
+`.github/workflows/build.yml` packages the app on `v*` tags, on every pull
+request, and on manual dispatch. The Windows job builds the NINA plugin with
+`dotnet` (its only automated check — there is no C# test suite), freezes the
+app with PyInstaller from `PFRSentinel.spec`, checks the exe's FileVersion
+against `version.py`, and uploads the bundle; tag and dispatch runs also
+compile the Inno Setup installer. **Nothing CI produces is code-signed** — the
+Certum SimplySign flow in `build_sentinel.bat` needs a human to approve each
+request from a phone, so real releases are still cut locally with
+`build_sentinel_installer.bat`. macOS and Linux get `scripts/ci/check_spec_parses.py`
+instead of a build: it executes the spec with the PyInstaller classes stubbed,
+which catches a Windows-only import or a one-OS `datas` entry in seconds.
+Actual mac/Linux packaging is issue #41. PyInstaller is pinned in
+`requirements-build.txt`, kept apart from `requirements-dev.txt` so the test
+matrix doesn't install it three times.
 
 Other Claude workflows: `claude-code-review.yml` reviews every non-draft PR
 (Dependabot PRs excluded); `claude-dependabot-assess.yml` reads the upstream
