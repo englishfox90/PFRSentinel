@@ -132,13 +132,14 @@ def discussion_intro(version: str) -> str:
     ])
 
 
-def build_comment(version: str, sha: str, ref: str, pr: str | None, run_url: str,
-                  delta: str, changelog: str) -> str:
-    return "\n".join([
-        f"**New dev build: {version}.** {_source_line(sha, ref, pr)}.",
-        "",
-        f"[Download]({ASSET_URL}) · [Release notes]({RELEASE_URL}) · [Build log]({run_url})",
-        "",
+def _changes_section(delta: str, changelog: str) -> list[str]:
+    # With no previous dev build to measure from (the first build of a cycle,
+    # or after a failed publish lost the tag) the delta is the whole list, and
+    # printing it twice buries the comment. The changelog carries a lead-in
+    # line before the same list, so compare by suffix.
+    if changelog.rstrip().endswith(delta.strip()):
+        return ["**Everything since the last release**", "", changelog.rstrip()]
+    return [
         "**New since the previous dev build**",
         "",
         delta.rstrip(),
@@ -148,6 +149,17 @@ def build_comment(version: str, sha: str, ref: str, pr: str | None, run_url: str
         changelog.rstrip(),
         "",
         "</details>",
+    ]
+
+
+def build_comment(version: str, sha: str, ref: str, pr: str | None, run_url: str,
+                  delta: str, changelog: str) -> str:
+    return "\n".join([
+        f"**New dev build: {version}.** {_source_line(sha, ref, pr)}.",
+        "",
+        f"[Download]({ASSET_URL}) · [Release notes]({RELEASE_URL}) · [Build log]({run_url})",
+        "",
+        *_changes_section(delta, changelog),
         "",
         "Reply to this comment with what you found in this build. The download link "
         "serves the newest build, so after the next one is published it no longer "
