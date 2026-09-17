@@ -31,19 +31,28 @@ jobs:
         run: python scripts/ci/check_file_sizes.py
 
   test:
-    name: Tests (${{ matrix.name }})
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
+        # Job names are spelled out per entry rather than built from a suffix,
+        # because main's branch protection requires the Windows one by its exact
+        # string. Renaming it to match the others left that required check
+        # "Expected — waiting for status to be reported" forever, which blocks
+        # every merge. Don't regularise these names without updating branch
+        # protection in the same change.
+        #
+        # The asymmetry is honest rather than merely historical: pip-audit runs
+        # on the Windows job alone, so it is the only one auditing dependencies.
         include:
           - os: windows-latest
-            name: Windows
+            name: Tests and dependency audit (Windows)
           - os: macos-latest
-            name: macOS
+            name: Tests (macOS)
           - os: ubuntu-latest
-            name: Linux
+            name: Tests (Linux)
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"

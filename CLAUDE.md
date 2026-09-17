@@ -163,6 +163,14 @@ that only make sense on Windows carry `@pytest.mark.requires_windows` and are
 skipped elsewhere by `tests/conftest.py`, so the pytest command is identical on
 every runner. `pip-audit` runs on the Windows job alone; the dependency set is
 the same everywhere. Dev tooling is pinned in `requirements-dev.txt`.
+
+The Windows test job is named **`Tests and dependency audit (Windows)`** while
+the other two are `Tests (macOS)` / `Tests (Linux)`. That asymmetry is load-bearing:
+`main`'s branch protection requires the Windows job by that exact string, and
+renaming it leaves the required check stuck on "Expected — waiting for status to
+be reported", blocking every merge. **Don't regularise the names without changing
+branch protection in the same PR.** macOS and Linux are not required checks, so
+they report without gating merges — deliberate while the port in #1 is in flight.
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
