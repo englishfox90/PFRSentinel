@@ -119,7 +119,7 @@ def test_comment_lists_the_changes_once_when_there_is_no_previous_build():
     notes = load_notes()
     full = f"Pull requests merged since v3.7.6, newest first.\n\n{CHANGELOG}"
     body = notes.build_comment("3.7.7-dev.1", SHA, "main", "61", "https://run.invalid",
-                               CHANGELOG, full)
+                               "", full)
     assert body.count("keep overlay labels stable (#35)") == 1
     assert "**Everything since the last release**\n\nPull requests merged since v3.7.6" in body
     assert "New since the previous dev build" not in body
@@ -134,3 +134,14 @@ def test_comment_keeps_both_lists_when_the_delta_is_a_subset():
     body = notes.build_comment("3.7.7-dev.2", SHA, "main", "62", "https://run.invalid", delta, full)
     assert "**New since the previous dev build**\n\n**Changes**\n\n- feat: newest (#62)" in body
     assert "<details><summary>Everything since the last release</summary>" in body
+
+
+def test_comment_keeps_both_lists_when_the_delta_is_the_tail_of_the_full_list():
+    notes = load_notes()
+    tooling = ("<details><summary>CI, tests and tooling (1)</summary>\n\n"
+               "- ci(dev-builds): list once (#62)\n\n</details>\n")
+    full = ("Pull requests merged since v3.7.6, newest first.\n\n**Changes**\n\n"
+            f"- fix(camera): reconnect (#51)\n\n{tooling}")
+    body = notes.build_comment("3.7.7-dev.3", SHA, "main", "62", "https://run.invalid",
+                               tooling, full)
+    assert "**New since the previous dev build**\n\n<details><summary>CI, tests" in body

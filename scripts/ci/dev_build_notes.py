@@ -133,11 +133,10 @@ def discussion_intro(version: str) -> str:
 
 
 def _changes_section(delta: str, changelog: str) -> list[str]:
-    # With no previous dev build to measure from (the first build of a cycle,
-    # or after a failed publish lost the tag) the delta is the whole list, and
-    # printing it twice buries the comment. The changelog carries a lead-in
-    # line before the same list, so compare by suffix.
-    if changelog.rstrip().endswith(delta.strip()):
+    # dev_build_changelog.py leaves the delta empty when it would be the whole
+    # list (the first build of a cycle, or after a failed publish lost the tag);
+    # printing it twice buries the comment.
+    if not delta.strip():
         return ["**Everything since the last release**", "", changelog.rstrip()]
     return [
         "**New since the previous dev build**",

@@ -7,7 +7,9 @@ Writes two Markdown fragments for build.yml's publish-dev job:
   both of which are rewritten on each publish.
 - ``--delta``: only the PRs since the previous dev build, for the per-build
   discussion comment, so subscribers see what is new rather than the whole
-  list again.
+  list again. Left empty when it would be the full list (no previous dev
+  build, or nothing had merged at that build), which tells the comment to
+  print the list once.
 
 PRs are found through the commits in the range, not by merge date: a PR merged
 after the tag into a branch that never reached main must not appear, and a
@@ -133,7 +135,8 @@ def merged_prs(base: str, head: str, api: Api) -> list[dict]:
 
 
 def build_fragments(head: str, previous_dev_ref: str | None, api: Api) -> tuple[str, str, str]:
-    """(release tag, full fragment, delta fragment)."""
+    """(release tag, full fragment, delta fragment); the delta is empty when it
+    would repeat the full list."""
     tag = newest_release_tag(api(f"repos/{REPO}/tags?per_page=100", ".[].name"))
     if tag is None:
         raise RuntimeError("no vX.Y.Z release tag found")
@@ -148,6 +151,10 @@ def build_fragments(head: str, previous_dev_ref: str | None, api: Api) -> tuple[
         delta_prs = []
     else:
         delta_prs = merged_prs(previous, head, api)
+    # Decided on PR numbers, never on rendered text: a delta that is only the
+    # last group of the full list renders as that list's exact suffix.
+    if {pr["number"] for pr in delta_prs} == {pr["number"] for pr in full_prs}:
+        return tag, full, ""
     delta = render(delta_prs) or "_No new pull requests since the previous dev build._\n"
     return tag, full, delta
 
@@ -166,7 +173,7 @@ def main(argv: list[str] | None = None, api: Api = gh_api) -> int:
         full = f"Pull requests merged since {tag}, newest first.\n\n{full}"
     except (subprocess.CalledProcessError, RuntimeError, json.JSONDecodeError, KeyError) as exc:
         print(f"::warning::Could not collect the dev build change list: {exc}")
-        full = delta = UNAVAILABLE
+        full, delta = UNAVAILABLE, ""
 
     args.full.write_text(full, encoding="utf-8")
     args.delta.write_text(delta, encoding="utf-8")
