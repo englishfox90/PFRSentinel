@@ -25,6 +25,7 @@ Worker ownership:
   477 MB after ten refinements, ~2.2 GB over a night on the reference rig.
 """
 import functools
+import math
 import os
 import shutil
 import threading
@@ -119,8 +120,12 @@ class CalibrationService(QObject):
         self._model: Optional[FisheyeModel] = None
         self._quality = 'none'
         self._model_generation = 0  # incremented by set_model() to detect stale refinements
-        self._last_refine_time = 0.0
-        self._last_initial_attempt_time = 0.0
+        # -inf, not 0.0: time.monotonic() counts from boot, so on a machine
+        # that launched Sentinel within a cooldown of booting (CI runners,
+        # autostart on logon) 0.0 reads as "a refinement just ran" and the
+        # first attempt is held back for nothing.
+        self._last_refine_time = -math.inf
+        self._last_initial_attempt_time = -math.inf
         self._refine_worker: Optional[_RefineWorker] = None
         self._initial_worker: Optional[_InitialCalWorker] = None
         self._pending_initial = None   # (image, dt, lat, lon) awaiting cal
@@ -136,7 +141,7 @@ class CalibrationService(QObject):
         # replace the current model without the RMS-regression guard — but
         # only when it was admitted on evidence (model_replacement).
         self._consecutive_refine_failures = 0
-        self._last_escape_time = 0.0
+        self._last_escape_time = -math.inf
         self._escape_attempt = False
         # Back-off counter, separate from _consecutive_refine_failures: that
         # one drives basin escape and deliberately ignores cold-start and

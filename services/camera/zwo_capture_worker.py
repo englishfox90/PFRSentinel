@@ -253,8 +253,8 @@ def capture_loop(camera: "ZWOCamera"):
     mode = getattr(camera, 'scheduled_capture_mode', 'always')
     if mode == "gated":
         camera.log(
-            f"Scheduled capture (gated): {camera.scheduled_start_time} - "
-            f"{camera.scheduled_end_time} — paused outside window"
+            f"Scheduled capture (gated): {camera.scheduled_window_label()}"
+            " — paused outside window"
         )
         # Gated mode disconnects the camera during off-peak hours and reconnects
         # at the next window. If the camera comes back unopenable, recovery needs
@@ -276,8 +276,7 @@ def capture_loop(camera: "ZWOCamera"):
     elif mode == "variable":
         camera.log(
             f"Scheduled capture (variable rates): {camera.scheduled_window_interval}s inside "
-            f"{camera.scheduled_start_time}-{camera.scheduled_end_time}, "
-            f"{camera.capture_interval}s outside"
+            f"{camera.scheduled_window_label()}, {camera.capture_interval}s outside"
         )
     else:
         camera.log("Scheduled capture disabled: will run continuously")
@@ -345,7 +344,7 @@ def capture_loop(camera: "ZWOCamera"):
                     if last_schedule_log != current_status:
                         camera.log(
                             f"⏸ Outside scheduled capture window "
-                            f"({camera.scheduled_start_time} - {camera.scheduled_end_time})"
+                            f"({camera.scheduled_window_label()})"
                         )
                         camera.log(
                             "Entering off-peak mode: disconnecting camera to reduce hardware load..."
@@ -379,7 +378,8 @@ def capture_loop(camera: "ZWOCamera"):
 
                                 if camera.status_callback:
                                     camera.status_callback(
-                                        f"Idle (off-peak until {camera.scheduled_start_time})"
+                                        "Idle (off-peak, window "
+                                        f"{camera.scheduled_window_label()})"
                                     )
                             except Exception as e:
                                 camera.log(f"Error disconnecting camera: {e}")
@@ -396,7 +396,7 @@ def capture_loop(camera: "ZWOCamera"):
                     if last_schedule_log == "outside_window":
                         camera.log(
                             f"▶ Entered scheduled capture window "
-                            f"({camera.scheduled_start_time} - {camera.scheduled_end_time})"
+                            f"({camera.scheduled_window_label()})"
                         )
                         camera.log("Transitioning to active capture mode: reconnecting camera...")
                         last_schedule_log = "inside_window"

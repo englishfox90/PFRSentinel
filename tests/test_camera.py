@@ -280,17 +280,17 @@ class TestWaitForCaptureThreadExit:
         cam = self._make_camera()
         cam.is_capturing = True
 
-        # Ignores the stop flag (simulates an SDK-wedged thread); must outlast
-        # the 0.1s join timeout below since the trailing t.join() eats it whole.
+        # Wedged thread blocks on an event, not a 0.15s sleep: 50ms of slack
+        # against the 0.1s join flaked green on a loaded macOS runner.
+        release = threading.Event()
         def stuck():
-            time.sleep(0.15)
-
+            release.wait(5.0)
         t = threading.Thread(target=stuck, daemon=True)
         cam.capture_thread = t
         t.start()
         assert cam.wait_for_capture_thread_exit(timeout=0.1) is False
-        # capture_thread reference is kept so caller can re-inspect
-        assert cam.capture_thread is t
+        assert cam.capture_thread is t   # kept so the caller can re-inspect
+        release.set()
         t.join()
 
     def test_aborts_calibration_manager(self):

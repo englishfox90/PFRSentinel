@@ -1,6 +1,7 @@
 import threading
 
 from services.logger import app_logger
+from services.capture_schedule_window import gate_for_config
 from services.config import DEFAULT_CAMERA_PROFILE
 
 
@@ -91,6 +92,9 @@ def apply_camera_settings(zwo_camera, config):
     zwo_camera.scheduled_start_time = config.get('scheduled_start_time', '17:00')
     zwo_camera.scheduled_end_time = config.get('scheduled_end_time', '09:00')
     zwo_camera.scheduled_window_interval = config.get('scheduled_window_interval', 5.0)
+    # Re-read on every settings change so switching the window source — or
+    # editing the Timelapse window it follows — takes effect without a restart.
+    zwo_camera.schedule_gate = gate_for_config(config)
 
     wb_settings = config.get('white_balance', {})
     zwo_camera.wb_config = dict(wb_settings)
