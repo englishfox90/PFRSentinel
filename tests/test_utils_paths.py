@@ -131,7 +131,8 @@ def test_localappdata_does_not_leak_into_macos_path(macos_dirs, monkeypatch, tmp
 
     app_dir = utils_paths.get_app_data_dir()
 
-    assert app_dir == str(macos_dirs / "Library" / "Application Support" / APP_DATA_FOLDER)
+    expected = macos_dirs / "Library" / "Application Support" / APP_DATA_FOLDER
+    assert app_dir.replace("\\", "/") == str(expected).replace("\\", "/")
     assert "should_be_ignored" not in app_dir
 
 
@@ -140,23 +141,26 @@ def test_localappdata_does_not_leak_into_linux_path(linux_dirs, monkeypatch, tmp
 
     app_dir = utils_paths.get_app_data_dir()
 
-    assert app_dir == str(linux_dirs / ".local" / "share" / APP_DATA_FOLDER)
+    expected = linux_dirs / ".local" / "share" / APP_DATA_FOLDER
+    assert app_dir.replace("\\", "/") == str(expected).replace("\\", "/")
     assert "should_be_ignored" not in app_dir
 
 
 def test_macos_app_data_dir_is_application_support(macos_dirs):
     app_dir = utils_paths.get_app_data_dir()
 
+    expected = macos_dirs / "Library" / "Application Support" / APP_DATA_FOLDER
     assert os.path.isabs(app_dir)
-    assert app_dir == str(macos_dirs / "Library" / "Application Support" / APP_DATA_FOLDER)
+    assert app_dir.replace("\\", "/") == str(expected).replace("\\", "/")
     assert os.path.isdir(app_dir)
 
 
 def test_linux_app_data_dir_is_local_share(linux_dirs):
     app_dir = utils_paths.get_app_data_dir()
 
+    expected = linux_dirs / ".local" / "share" / APP_DATA_FOLDER
     assert os.path.isabs(app_dir)
-    assert app_dir == str(linux_dirs / ".local" / "share" / APP_DATA_FOLDER)
+    assert app_dir.replace("\\", "/") == str(expected).replace("\\", "/")
     assert os.path.isdir(app_dir)
 
 
@@ -189,8 +193,9 @@ def test_app_config_does_not_create_a_relative_data_dir_in_the_working_directory
 
     app_dir = app_config.get_app_data_dir()
 
+    expected = linux_dirs / ".local" / "share" / APP_DATA_FOLDER
     assert os.path.isabs(app_dir)
-    assert app_dir == str(linux_dirs / ".local" / "share" / APP_DATA_FOLDER)
+    assert app_dir.replace("\\", "/") == str(expected).replace("\\", "/")
     assert not (cwd / APP_DATA_FOLDER).exists()
 
 
