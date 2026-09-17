@@ -10,8 +10,13 @@ name: Claude Wiki Update
 # claude-code-action rejects `push` events, and a tag that disagrees with
 # version.py should not produce documentation either.
 #
-# The PR is opened with the Claude app token that claude-code-action exposes to
-# `gh`, not GITHUB_TOKEN, so CI runs on it and the required check can report.
+# Claude only edits files. Committing, pushing and opening the PR happen in a
+# script this workflow writes outside the checkout with the branch and base
+# baked in, and Claude may run only that script, with no arguments. A
+# `Bash(git push origin <branch>:*)` rule is a string-prefix match, so
+# `git push origin <branch>:main` would pass it; the script leaves nothing to
+# redirect. It runs inside the action, so `gh` uses the Claude app token rather
+# than GITHUB_TOKEN: CI runs on the PR and the required checks can report.
 
 on:
   workflow_run:
@@ -55,8 +60,13 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG=$(git tag -l 'v*' | sort -V | tail -1)
           fi
+          if ! [[ "$TAG" =~ ^v[0-9][0-9A-Za-z.-]*$ ]]; then
+            echo "::error::'$TAG' is not a version tag (v<digit>...)"; exit 1
+          fi
           git rev-parse -q --verify "refs/tags/$TAG" > /dev/null || { echo "Tag $TAG not found"; exit 1; }
-          PREV=$(git tag -l 'v*' | sort -V | grep -B1 -x "$TAG" | head -1)
+          # grep exits 1 on no match; under pipefail that would abort here
+          # instead of reaching the git describe fallback below.
+          PREV=$(git tag -l 'v*' | sort -V | grep -B1 -x "$TAG" | head -1 || true)
           if [ -z "$PREV" ] || [ "$PREV" = "$TAG" ]; then
             PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
           fi
@@ -67,10 +77,38 @@ jobs:
           # shipped, and main may already carry unreleased work.
           git checkout -q -b "$BRANCH" "$TAG"
           [ -d docs/wiki ] || { echo "::error::docs/wiki/ does not exist at $TAG"; exit 1; }
+          echo ".wiki-pr-body.md" >> .git/info/exclude
+
+          OPEN_PR="$RUNNER_TEMP/open-wiki-pr.sh"
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'TAG=%q\nBRANCH=%q\n' "$TAG" "$BRANCH"
+            cat <<'SCRIPT'
+          cd "$GITHUB_WORKSPACE"
+          body=.wiki-pr-body.md
+          [ -s "$body" ] || { echo "Write the pull request body to $body first."; exit 1; }
+          [ "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" ] || { echo "Not on $BRANCH."; exit 1; }
+          git add -- docs/wiki
+          if git diff --cached --quiet; then echo "No changes under docs/wiki/; nothing to open."; exit 1; fi
+          if git diff --cached --name-only | grep -qv '^docs/wiki/'; then
+            echo "Only docs/wiki/ may change."; exit 1
+          fi
+          git commit -q -m "docs(wiki): update for $TAG"
+          git push -q origin "HEAD:refs/heads/$BRANCH"
+          label=()
+          if gh label list --search documentation --json name --jq '.[].name' | grep -qx documentation; then
+            label=(--label documentation)
+          fi
+          gh pr create --base main --head "$BRANCH" --title "docs(wiki): update for $TAG" --body-file "$body" "${label[@]}"
+          SCRIPT
+          } > "$OPEN_PR"
+          chmod 500 "$OPEN_PR"
           {
             echo "tag=$TAG"
             echo "prev=$PREV"
             echo "branch=$BRANCH"
+            echo "open_pr=$OPEN_PR"
           } >> "$GITHUB_OUTPUT"
           echo "Tag $TAG, previous $PREV, branch $BRANCH"
 
@@ -120,19 +158,19 @@ jobs:
                features that are still unreleased.
             5. Keep the diff focused: do not rewrite pages whose subject did not
                change, and do not reformat untouched sections.
-            6. If nothing user-visible changed, make no commit and do not open a
-               pull request; say so in your final message.
-            7. Otherwise commit ("docs(wiki): update for ${{ steps.tags.outputs.tag }}"),
-               push the branch, and open a pull request against main with
-               `gh pr create --base main --label documentation`
-               (drop --label if the label does not exist). The body lists each page
-               changed and the release change that required it, any claim you left
-               out because you could not verify it, and any page whose screenshots
-               or examples may now be stale. Say in the body that merging publishes
-               the wiki, so it should be merged when the release is published.
+            6. If nothing user-visible changed, stop there and say so in your final
+               message. Do not write a pull request body.
+            7. Otherwise write the pull request body to `.wiki-pr-body.md` at the
+               repository root (it is not committed). List each page changed and the
+               release change that required it, any claim you left out because you
+               could not verify it, and any page whose screenshots or examples may now
+               be stale. Say that merging publishes the wiki, so it should be merged
+               when the release is published. Then run exactly
+               `${{ steps.tags.outputs.open_pr }}` with no arguments. It commits
+               docs/wiki/, pushes this branch and opens the pull request against main;
+               you cannot commit or push any other way.
 
-            Only edit files under docs/wiki/. Never push to the GitHub wiki repository
-            yourself, and never push to main.
+            Only edit files under docs/wiki/ (plus `.wiki-pr-body.md`).
           claude_args: |
             --max-turns 80
-            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git tag:*),Bash(git describe:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push origin ${{ steps.tags.outputs.branch }}:*),Bash(git push -u origin ${{ steps.tags.outputs.branch }}:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh label list:*)"
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git tag:*),Bash(git describe:*),Bash(git status:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(${{ steps.tags.outputs.open_pr }})"
