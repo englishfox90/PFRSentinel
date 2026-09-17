@@ -44,8 +44,8 @@ def test_release_body_states_the_risks_and_the_source():
     assert "not an upgrade path" in body
     assert "Not supported" in body
     assert SHA[:7] in body and "PR #48" in body
-    assert "https://discussion.invalid" in body
-    assert notes.ASSET_URL in body
+    assert f"[{notes.DISCUSSION_TITLE}](https://discussion.invalid)" in body
+    assert f"[{notes.ASSET_NAME}]({notes.ASSET_URL})" in body
 
 
 def test_ref_stands_in_when_no_pr():
