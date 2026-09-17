@@ -7,15 +7,24 @@ UnicodeEncodeError on a cp1252-redirected stdout for the arrows/warning
 signs/emoji used throughout log messages, and would also raise
 AttributeError when sys.stdout is None, as it is in a PyInstaller
 windowed build) and AppLogger.log()'s use of it.
+
+Also covers log retention (_cleanup_old_logs must match the sentinel.log
+file actually written, not the pre-rename watchdog.log name) and the
+resolution of the log directory to the single cross-platform app data root.
 """
 import io
 import logging
+import os
 import queue
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
-from services.logger import AppLogger, _safe_console_write
+from services import utils_paths
+from services.app_config import APP_DATA_FOLDER, LOG_FILE
+from services.logger import LOCATION_NOTICE_MARKER, AppLogger, _safe_console_write
 
 NON_ASCII_MESSAGE = "warning ⚠ threshold exceeded → check camera"
 
@@ -55,6 +64,23 @@ def _make_isolated_logger(tmp_path, logger_name, request):
     inst.file_logger = file_logger
     inst.file_handler = handler
     return inst, log_path
+
+
+def _isolate_app_data(tmp_path, monkeypatch):
+    """Point the app data root at tmp_path and return its logs child."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(utils_paths, 'get_app_data_dir', lambda: str(tmp_path))
+    return log_dir
+
+
+def _announce_twice(inst):
+    """Announce twice (the marker must suppress the second) and drain the queue."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sys, 'stdout', io.StringIO())
+        inst._announce_log_location()
+        inst._announce_log_location()
+    return inst.get_messages()
 
 
 class TestSafeConsoleWrite:
@@ -165,3 +191,137 @@ class TestAppLoggerLog:
             inst.log(NON_ASCII_MESSAGE, "DEBUG")  # must not raise
 
         assert NON_ASCII_MESSAGE in log_path.read_text(encoding='utf-8')
+
+
+class TestLogRetention:
+    """Retention must match the file name actually written (sentinel.log)."""
+
+    def test_cleanup_deletes_rotated_log_older_than_seven_days(self, tmp_path):
+        inst = AppLogger.__new__(AppLogger)
+        inst.log_dir = tmp_path
+
+        now = time.time()
+        stale = tmp_path / f"{LOG_FILE}.2020-01-01"
+        stale.write_text("old", encoding='utf-8')
+        os.utime(stale, (now - 30 * 86400, now - 30 * 86400))
+
+        recent = tmp_path / f"{LOG_FILE}.2026-09-16"
+        recent.write_text("recent", encoding='utf-8')
+        os.utime(recent, (now - 86400, now - 86400))
+
+        active = tmp_path / LOG_FILE
+        active.write_text("active", encoding='utf-8')
+
+        inst._cleanup_old_logs()
+
+        assert not stale.exists()
+        assert recent.exists()
+        assert active.exists()
+
+    def test_cleanup_ignores_unrelated_files(self, tmp_path):
+        inst = AppLogger.__new__(AppLogger)
+        inst.log_dir = tmp_path
+
+        old = time.time() - 30 * 86400
+        stranger = tmp_path / "config.json"
+        stranger.write_text("{}", encoding='utf-8')
+        os.utime(stranger, (old, old))
+
+        rotated = tmp_path / f"{LOG_FILE}.2020-01-01"
+        rotated.write_text("old", encoding='utf-8')
+        os.utime(rotated, (old, old))
+
+        inst._cleanup_old_logs()
+
+        assert stranger.exists()
+        assert not rotated.exists()
+
+    def test_cleanup_keeps_active_log_even_when_stale(self, tmp_path):
+        inst = AppLogger.__new__(AppLogger)
+        inst.log_dir = tmp_path
+
+        old = time.time() - 30 * 86400
+        active = tmp_path / LOG_FILE
+        active.write_text("still open by the handler", encoding='utf-8')
+        os.utime(active, (old, old))
+
+        inst._cleanup_old_logs()
+
+        assert active.exists()
+
+class TestLogDirectoryResolution:
+    """The log directory is one lowercase 'logs' folder in the app data root."""
+
+    def test_log_dir_is_lowercase_logs_under_app_data_root(self, tmp_path, monkeypatch):
+        for var in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
+                    'XDG_DATA_HOME', 'XDG_CONFIG_HOME'):
+            monkeypatch.setenv(var, str(tmp_path))
+
+        log_dir = Path(utils_paths.get_log_dir())
+
+        assert log_dir.name == 'logs'
+        assert log_dir.parent == Path(utils_paths.get_app_data_dir())
+        assert log_dir.is_dir()
+
+    def test_applogger_resolves_to_shared_log_dir(self, tmp_path, monkeypatch):
+        target = tmp_path / "app" / "logs"
+        target.mkdir(parents=True)
+        monkeypatch.setattr(utils_paths, 'get_log_dir', lambda: str(target))
+
+        resolved = AppLogger._get_log_directory(AppLogger.__new__(AppLogger))
+
+        assert resolved == target
+
+
+class TestLogLocationReporting:
+    """The displayed path and the first-run notice name the real file."""
+
+    def test_get_log_location_names_the_file_that_is_written(self, tmp_path, request):
+        inst, _ = _make_isolated_logger(tmp_path, "TestLoggerLocation", request)
+
+        assert inst.get_log_location() == str(tmp_path / LOG_FILE)
+
+    def test_location_notice_logged_once_with_marker_outside_log_dir(
+            self, tmp_path, request, monkeypatch):
+        log_dir = _isolate_app_data(tmp_path, monkeypatch)
+        monkeypatch.delenv('APPDATA', raising=False)
+        inst, _ = _make_isolated_logger(log_dir, "TestLoggerNotice", request)
+
+        messages = _announce_twice(inst)
+
+        assert len(messages) == 1
+        assert str(log_dir) in messages[0]
+
+        markers = [p.name for p in tmp_path.iterdir() if p.name.startswith('.')]
+        assert markers == [LOCATION_NOTICE_MARKER]
+        assert not any(p.name.startswith('.') for p in log_dir.iterdir())
+
+    def test_location_notice_names_legacy_appdata_dir_on_windows(
+            self, tmp_path, request, monkeypatch):
+        log_dir = _isolate_app_data(tmp_path, monkeypatch)
+        roaming = tmp_path / "Roaming"
+        monkeypatch.setenv('APPDATA', str(roaming))
+        inst, _ = _make_isolated_logger(log_dir, "TestLoggerNoticeLegacy", request)
+
+        messages = _announce_twice(inst)
+
+        legacy = roaming / APP_DATA_FOLDER / 'logs'
+        assert len(messages) == 1
+        assert str(log_dir) in messages[0]
+        assert f"previously {legacy}" in messages[0]
+        assert "left in place" in messages[0]
+
+        # Naming the old directory must never bring it into existence.
+        assert not legacy.exists()
+
+    def test_location_notice_omits_legacy_dir_without_appdata(
+            self, tmp_path, request, monkeypatch):
+        log_dir = _isolate_app_data(tmp_path, monkeypatch)
+        monkeypatch.delenv('APPDATA', raising=False)
+        inst, _ = _make_isolated_logger(log_dir, "TestLoggerNoticePosix", request)
+
+        messages = _announce_twice(inst)
+
+        assert len(messages) == 1
+        assert messages[0].endswith(f"Log files are now stored in: {log_dir}")
+        assert "previously" not in messages[0]

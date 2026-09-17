@@ -1,7 +1,7 @@
 """Per-file size policy: the caps, the frozen exceptions, and how lines are counted.
 
 Single source of truth for two consumers:
-- .claude/hooks/check_file_size.py (local PreToolUse hook; .claude/ is gitignored)
+- .claude/hooks/check_file_size.py (local Claude Code hook; tracked, so CI reads it too)
 - scripts/ci/check_file_sizes.py (CI audit of every tracked source file)
 """
 

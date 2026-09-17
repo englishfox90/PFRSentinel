@@ -1,9 +1,12 @@
 """
-Cleanup module for managing watch directory size
+Cleanup module for managing watch directory size.
+
+Files only: this module must never remove a directory. It runs unattended
+against the user's capture directory, so a wrongly-removed folder destroys
+images that cannot be recaptured. See .claude/rules/services.md.
 """
 import os
-import shutil
-from pathlib import Path
+
 from .logger import app_logger
 
 
@@ -63,32 +66,6 @@ def get_session_folders(directory):
     return folders
 
 
-def remove_empty_directories(directory):
-    """
-    Remove empty subdirectories, leaving only directories with files.
-    Returns number of directories removed.
-    """
-    deleted_count = 0
-    try:
-        for dirpath, dirnames, filenames in os.walk(directory, topdown=False):
-            # Skip the root directory
-            if dirpath == directory:
-                continue
-            
-            # Check if directory is empty
-            if not os.listdir(dirpath):
-                try:
-                    os.rmdir(dirpath)
-                    deleted_count += 1
-                    app_logger.debug(f"Removed empty directory: {dirpath}")
-                except Exception as e:
-                    app_logger.error(f"Error removing empty directory {dirpath}: {e}")
-    except Exception as e:
-        app_logger.error(f"Error scanning for empty directories: {e}")
-    
-    return deleted_count
-
-
 def delete_oldest_files(directory, max_size_bytes):
     """
     Delete oldest files until directory is under max_size_bytes.
@@ -110,6 +87,9 @@ def delete_oldest_files(directory, max_size_bytes):
             break
         
         try:
+            # Re-checked here: os.walk's file/dir split is a snapshot, not a guarantee.
+            if not os.path.isfile(filepath):
+                continue
             os.remove(filepath)
             current_size -= size
             deleted_count += 1
@@ -157,6 +137,9 @@ def delete_oldest_sessions(directory, max_size_bytes):
                     
                     filepath = os.path.join(root, filename)
                     try:
+                        # Re-checked here: os.walk's file/dir split is a snapshot, not a guarantee.
+                        if not os.path.isfile(filepath):
+                            continue
                         file_size = os.path.getsize(filepath)
                         os.remove(filepath)
                         current_size -= file_size

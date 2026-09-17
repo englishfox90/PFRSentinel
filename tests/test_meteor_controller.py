@@ -8,6 +8,7 @@ come from the frame the streak appeared in, not the empty one.
 """
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -259,3 +260,43 @@ class TestReleaseSequencing:
         ctrl._run_detection(_empty_transient(), hot, _full_res_empty(), CFG, 2)
 
         assert not reports, "Sky-spanning streak must be rejected as satellite/plane"
+
+
+class TestAppDataPaths:
+    """_appdata_dir() used to be os.getenv("LOCALAPPDATA", "") + APP_DATA_FOLDER.
+
+    Off Windows that is a relative path, so meteor thumbnails were written
+    into whatever directory the app happened to be launched from.
+    """
+
+    def _controller(self):
+        ctrl = MeteorController(None)
+        ctrl._status_timer.stop()
+        return ctrl
+
+    def test_appdata_dir_is_absolute_without_localappdata(
+        self, qapp, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        appdata = self._controller()._appdata_dir()
+
+        assert os.path.isabs(appdata)
+        assert tmp_path not in Path(appdata).parents
+
+    def test_thumb_dir_is_absolute_and_ignores_cwd(self, qapp, monkeypatch, tmp_path):
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+        ctrl = self._controller()
+        monkeypatch.chdir(tmp_path)
+        first = os.path.abspath(ctrl._resolve_thumb_dir())
+        nested = tmp_path / "elsewhere"
+        nested.mkdir()
+        monkeypatch.chdir(nested)
+        second = os.path.abspath(ctrl._resolve_thumb_dir())
+
+        assert os.path.isabs(first)
+        assert os.path.basename(first) == "meteor_thumbnails"
+        assert tmp_path not in Path(first).parents
+        assert first == second

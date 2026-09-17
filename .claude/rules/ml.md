@@ -10,7 +10,8 @@ The `ml/` module trains and runs scene classifiers (roof open/closed, sky condit
 ## Inference
 - All production inference uses **ONNX models loaded via `onnxruntime`**. No cloud APIs, no PyTorch at runtime.
 - Production interface: `ui/controllers/ml_prediction.py`. Don't add new inference entry points.
-- Model files resolved via `app_config.get_config_dir() / "models"`.
+- Model files live in the repo at `ml/models/` and are resolved **relative to the source tree**, not the app-data dir — `ui/controllers/ml_prediction.py` walks up from `__file__`. `PFRSentinel.spec` bundles the `.onnx` files to the same `ml/models` path.
+- The whole inference path is gated on `services.dev_mode_config.is_dev_mode_available()` — it is off in production builds.
 
 ## Training
 - Training scripts in `ml/` are dev-only — they may import `torch`, `torchvision`, etc. without affecting the shipped app.

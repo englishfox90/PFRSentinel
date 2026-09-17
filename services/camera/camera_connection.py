@@ -124,10 +124,12 @@ class CameraConnection:
 
     @staticmethod
     def _is_running_as_admin() -> bool:
-        """Check if the current process has Administrator privileges."""
+        """Elevated: Administrator on Windows, euid 0 on POSIX."""
         try:
-            import ctypes
-            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            if sys.platform == 'win32':
+                import ctypes
+                return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            return os.geteuid() == 0
         except Exception:
             return False
 

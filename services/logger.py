@@ -12,6 +12,9 @@ from pathlib import Path
 from .app_config import APP_NAME, APP_DATA_FOLDER, LOG_FILE
 
 
+LOCATION_NOTICE_MARKER = '.log_location_notice'
+
+
 class SafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
     """TimedRotatingFileHandler that tolerates the log file being locked.
 
@@ -69,6 +72,19 @@ def _safe_console_write(text):
         pass
 
 
+def _legacy_log_directory():
+    r"""The pre-move log directory, or None when there cannot have been one.
+
+    Logs used to live in %APPDATA%\<APP_DATA_FOLDER>\logs. APPDATA is unset on
+    every non-Windows platform, where no such directory was ever written, so
+    there is nothing to point a reader at.
+    """
+    appdata = os.getenv('APPDATA')
+    if not appdata:
+        return None
+    return Path(appdata) / APP_DATA_FOLDER / 'logs'
+
+
 class AppLogger:
     """Thread-safe logger with GUI queue and 7-day rotating file logs"""
     
@@ -81,26 +97,16 @@ class AppLogger:
         self.log_dir = self._get_log_directory()
         self._setup_file_logging()
         self._cleanup_old_logs()
+        self._announce_log_location()
     
     def _get_log_directory(self):
-        """Get the log directory path (APPDATA or fallback)"""
-        # Try %APPDATA%\{APP_DATA_FOLDER}\logs first
-        appdata = os.getenv('APPDATA')
-        if appdata:
-            log_dir = Path(appdata) / APP_DATA_FOLDER / 'logs'
-        else:
-            # Fallback: ./logs relative to executable or script
-            if getattr(sys, 'frozen', False):
-                # Running as PyInstaller executable
-                base_dir = Path(sys.executable).parent
-            else:
-                # Running from source
-                base_dir = Path(__file__).parent.parent
-            log_dir = base_dir / 'logs'
-        
-        # Create directory if it doesn't exist
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir
+        """Resolve the shared log directory under the app data root."""
+        # Imported inside the function: this module is constructed at import
+        # time by almost every other module, so keeping utils_paths (and the
+        # app_config/platformdirs chain behind it) out of logger's module-level
+        # imports leaves those modules free to log without a circular import.
+        from .utils_paths import get_log_dir
+        return Path(get_log_dir())
     
     def _setup_file_logging(self):
         """Set up rotating file handler for 7-day logs"""
@@ -148,7 +154,14 @@ class AppLogger:
             return
         
         cutoff = datetime.now() - timedelta(days=7)
-        for log_file in self.log_dir.glob('watchdog.log*'):
+        # Derived from LOG_FILE so it cannot drift from the file actually
+        # written; matches the active log and the date-suffixed rotations
+        # (sentinel.log.2026-09-04) SafeTimedRotatingFileHandler leaves behind.
+        for log_file in self.log_dir.glob(f'{LOG_FILE}*'):
+            # The active file is held open by the handler, and on an install
+            # idle for over a week its mtime is past the cutoff too.
+            if log_file.name == LOG_FILE:
+                continue
             try:
                 mtime = datetime.fromtimestamp(log_file.stat().st_mtime)
                 if mtime < cutoff:
@@ -157,6 +170,36 @@ class AppLogger:
             except Exception as e:
                 _safe_console_write(f"Error cleaning up old log: {e}")
     
+    def _announce_log_location(self):
+        """Log the log directory once, the first time it is written to.
+
+        The directory moved out of %APPDATA% into the single app data root;
+        older wiki pages and support threads still point at the previous path,
+        so leave a breadcrumb rather than migrating years of disposable logs.
+        """
+        from .utils_paths import get_app_data_dir
+
+        # The marker lives in the app data root, not the log directory:
+        # diagnostics_bundle sweeps every recent file out of the log directory
+        # into support ZIPs, and an unexplained dotfile there costs the reader
+        # time at exactly the wrong moment.
+        marker = Path(get_app_data_dir()) / LOCATION_NOTICE_MARKER
+        try:
+            if marker.exists():
+                return
+            marker.touch()
+        except OSError:
+            return
+
+        notice = f"Log files are now stored in: {self.log_dir}"
+        legacy = _legacy_log_directory()
+        # The old retention glob never matched, so whatever is in the old
+        # directory is still there — name it so a support thread can account
+        # for the missing history without guessing.
+        if legacy is not None and legacy != self.log_dir:
+            notice += f" (previously {legacy}; any logs there were left in place)"
+        self.info(notice)
+
     def get_log_dir(self):
         """Get the log directory path for UI display"""
         return str(self.log_dir)
@@ -216,7 +259,7 @@ class AppLogger:
     
     def get_log_location(self):
         """Get the log file location for display to users"""
-        return str(self.log_dir / 'watchdog.log')
+        return str(self.log_dir / LOG_FILE)
 
 
 # Singleton pattern to ensure only one logger instance

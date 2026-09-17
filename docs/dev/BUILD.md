@@ -149,7 +149,7 @@ Verify:
 2. **Verify Installation**:
    - Application runs from Start Menu
    - Desktop shortcut works (if created)
-   - Logs appear in `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
+   - Logs appear in `%LOCALAPPDATA%\PFRSentinel\logs\`
 
 3. **Test Upgrade**:
    - Build new version (update `version.py`)
@@ -161,7 +161,7 @@ Verify:
    - Uninstall via Control Panel or Start Menu
    - Verify Program Files directory removed
    - Verify Start Menu shortcuts removed
-   - Verify logs remain in `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
+   - Verify logs remain in `%LOCALAPPDATA%\PFRSentinel\logs\`
 
 ## Versioning
 
@@ -194,19 +194,19 @@ Verify:
 - **Libraries**: `_internal\` folder
 
 ### User Data (NOT removed on uninstall)
-- **Logs**: `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
-  - `watchdog.log` - Current log file
-  - `watchdog.log.YYYY-MM-DD` - Rotated logs (7 days kept)
+- **Logs**: `%LOCALAPPDATA%\PFRSentinel\logs\` (resolved via `services.utils_paths.get_log_dir()`)
+  - `sentinel.log` - Current log file
+  - `sentinel.log.YYYY-MM-DD` - Rotated logs (7 days kept)
   - Automatic daily rotation
   - Automatic cleanup of logs older than 7 days
 
-- **Config**: `config.json` (in application directory for now)
-  - **Note**: Could be moved to `%LOCALAPPDATA%\ASIOverlayWatchDog\` in future
+- **Config**: `%LOCALAPPDATA%\PFRSentinel\config.json`
+  - Resolved via `services.utils_paths.get_app_data_dir()` — the same root as the logs
 
 ## Logging System
 
 ### Log Behavior
-- **Location**: `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\watchdog.log`
+- **Location**: `%LOCALAPPDATA%\PFRSentinel\logs\sentinel.log`
 - **Rotation**: Daily at midnight
 - **Retention**: Last 7 days only
 - **Cleanup**: Automatic on app startup and via TimedRotatingFileHandler
@@ -223,7 +223,7 @@ Verify:
 ### Example Log Path
 On a typical Windows system for user "John":
 ```
-C:\Users\John\AppData\Local\ASIOverlayWatchDog\Logs\watchdog.log
+C:\Users\John\AppData\Local\PFRSentinel\logs\sentinel.log
 ```
 
 ## Distribution
@@ -244,26 +244,26 @@ C:\Users\John\AppData\Local\ASIOverlayWatchDog\Logs\watchdog.log
 
 ## Troubleshooting
 
-### Build Fails - "ModuleNotFoundError: No module named 'ttkbootstrap'"
+### Build Fails - "ModuleNotFoundError" for a project dependency
 
-**Cause**: Building from system Python instead of virtual environment.
+**Cause**: Building from system Python instead of the virtual environment.
 
 **Solution**:
 ```batch
 # ALWAYS activate venv before building
 .\venv\Scripts\Activate.ps1
 
-# Verify ttkbootstrap is installed
-pip show ttkbootstrap
+# Verify the missing package is installed (e.g. PySide6)
+pip show PySide6
 
 # If not installed:
 pip install -r requirements.txt
 
 # Then rebuild
-pyinstaller --clean ASIOverlayWatchDog.spec
+pyinstaller --clean PFRSentinel.spec
 ```
 
-The build scripts (`build_exe.bat` and `build_installer.bat`) automatically activate the venv, so use those instead of running PyInstaller directly.
+The build scripts (`build_sentinel.bat` and `build_sentinel_installer.bat`) automatically activate the venv, so use those instead of running PyInstaller directly.
 
 ### Build Fails - Missing Dependencies
 ```batch
@@ -288,7 +288,7 @@ pip install pyinstaller
   ```
 
 ### Logs Not Appearing
-- Check `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
+- Check `%LOCALAPPDATA%\PFRSentinel\logs\`
 - Verify write permissions
 - Check console output for logging initialization errors
 
@@ -301,10 +301,13 @@ pip install pyinstaller
 - **Bundled Files**:
   - `ASICamera2.dll` - ZWO SDK
   - `version.py` - Version info
-  - ttkbootstrap data files (themes)
+  - `assets/` - App icons
+  - `ml/models/*.onnx` - ONNX classifiers
+  - `star_data/` - All-sky catalogue data
+  - `scripts/nina/` - NINA helper scripts (shipped loose, not frozen)
 
 ### Customization
-Edit `ASIOverlayWatchDog.spec` to:
+Edit `PFRSentinel.spec` to:
 - Add icon: `icon='path/to/icon.ico'`
 - Include additional data files
 - Adjust hidden imports

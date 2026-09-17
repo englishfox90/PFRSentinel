@@ -8,7 +8,7 @@ description: All-sky fisheye calibration and overlay conventions
 The `services/allsky/` package handles fisheye lens calibration and star/constellation/meteor overlays for an all-sky camera. Active development area — see `docs/ALLSKY_CALIBRATION_PLAN.md` for the full plan before structural changes.
 
 ## Calibration data
-- Calibration JSON: `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.json` — user-generated at runtime, never bundled.
+- Calibration JSON: `allsky_calibration.json` in the app-data root — resolve it via `services.app_config.get_calibration_path()` (built on `utils_paths.get_app_data_dir()`), never a hardcoded platform path. Illustrative: `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.json` on Windows, `~/Library/Application Support/PFRSentinel/` on macOS, `~/.local/share/PFRSentinel/` on Linux. User-generated at runtime, never bundled.
 - Required fields: `rms_residual`, `n_matches`, `calibrated_at`. Plus the lens model parameters (`a1`, `cx`, `cy`, `sky_r`, etc.).
 - Calibration is **per physical installation** — depends on lens orientation. Never copy across machines.
 

@@ -5,7 +5,9 @@ Fetches current weather data with caching to avoid excessive API calls
 import requests
 import time
 from datetime import datetime, timedelta
-from services.logger import app_logger
+
+from .logger import app_logger
+from .utils_paths import get_app_data_dir
 
 
 class WeatherService:
@@ -307,12 +309,8 @@ class WeatherService:
         """
         try:
             import os
-            
-            # Get data directory (consistent with config.py pattern)
-            from services.app_config import APP_DATA_FOLDER
-            data_dir = os.path.join(os.getenv('LOCALAPPDATA'), APP_DATA_FOLDER)
-            
-            icon_dir = os.path.join(data_dir, "weather_icons")
+
+            icon_dir = os.path.join(get_app_data_dir(), "weather_icons")
             os.makedirs(icon_dir, exist_ok=True)
             
             # Fetch current weather to get icon code
