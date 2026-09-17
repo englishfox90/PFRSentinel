@@ -3,14 +3,23 @@ name: Build
 # Packaging, kept separate from ci.yml so a lint or test failure reports in
 # seconds rather than behind a PyInstaller freeze.
 #
+# Two channels, which is what this project already means by the words:
+#   dev        — DEV_MODE_AVAILABLE=True. Raw FITS/TIFF debug exports,
+#                calibration JSON dumps and the ML prediction integration are
+#                compiled in. What a pull request produces, so a reviewer can
+#                download the change and dig into what it actually did.
+#   production — DEV_MODE_AVAILABLE=False. What a v* tag produces.
+# Manual dispatch picks either, defaulting to dev.
+#
 # Windows is the only platform that produces a shippable artifact today. macOS
 # and Linux get a spec-parse smoke test instead: the packaging work for them
 # (BUNDLE/.icns/notarization, .deb, the udev rule, ARM wheels) is issue #41, and
 # uploading a half-built .app would look like a release that isn't one.
 #
-# Nothing here is code-signed. The signing flow in build_sentinel.bat drives a
-# Certum SimplySign token that needs a human to approve each request from a
-# phone, which no runner can do. Tag builds are for testing; cut real releases
+# Nothing here is code-signed, production channel included. The signing flow in
+# build_sentinel.bat drives a Certum SimplySign token that needs a human to
+# approve each request from a phone, which no runner can do. A tag build is a
+# verified, reproducible candidate — not a releasable binary. Cut the real one
 # locally with build_sentinel_installer.bat.
 
 on:
@@ -19,6 +28,11 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Build channel"
+        type: choice
+        options: [dev, production]
+        default: dev
       installer:
         description: "Also build the Inno Setup installer"
         type: boolean
@@ -44,6 +58,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # A tag is a production build, a pull request is a dev build, and a
+      # dispatch is whatever was asked for. Resolved once here so every step
+      # below reads one value rather than re-deriving the rule.
+      - name: Resolve the build channel
+        id: channel
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            channel="${{ inputs.channel }}"
+          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            channel="production"
+          else
+            channel="dev"
+          fi
+          echo "name=$channel" >> "$GITHUB_OUTPUT"
+          echo "Building the $channel channel"
+
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -52,10 +83,32 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      # An installer named 3.7.7 built from a tree that says 3.7.6 is the exact
+      # mistake build_sentinel_installer.bat already guards against downstream.
+      # Catch it before anything is built rather than after.
+      - name: Check version.py matches the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(python -c 'import version; print(version.__version__)')"
+          echo "tag=$tagged  version.py=$declared"
+          if [ "$tagged" != "$declared" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version.py ($declared)."
+            exit 1
+          fi
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-build.txt
+
+      # Writes DEV_MODE_AVAILABLE into the source. The PFRSENTINEL_DEV_MODE
+      # environment variable cannot stand in for this: it is read when the
+      # module is imported, which for a frozen app is on the user's machine at
+      # launch, so setting it here would change nothing about the artifact.
+      - name: Stamp the build channel
+        run: python scripts/ci/set_build_channel.py ${{ steps.channel.outputs.name }}
 
       # The plugin has no test suite and no linting of its own, so this build is
       # the only automated check that it still compiles. PFRSentinel.spec picks
@@ -82,30 +135,37 @@ jobs:
       - name: Build the executable
         run: python -m PyInstaller --noconfirm PFRSentinel.spec
 
-      # build_sentinel_installer.bat learned this the hard way: a stale exe left
-      # in dist/ satisfied an existence check and shipped 3.7.3 inside a 3.7.4
-      # installer. A clean runner cannot hit that, but asserting the version the
-      # binary actually carries costs nothing and catches a spec that silently
-      # stopped applying version_info.
       - name: Verify the built executable
+        env:
+          CHANNEL: ${{ steps.channel.outputs.name }}
         run: |
           $exe = "dist\PFRSentinel\PFRSentinel.exe"
           if (-not (Test-Path $exe)) { throw "PyInstaller produced no $exe" }
+
+          # Asserting the version the binary actually carries costs nothing and
+          # catches a spec that silently stopped applying version_info.
           $expected = (python -c "import version; print(version.__version__)").Trim()
           $actual = (Get-Item $exe).VersionInfo.FileVersion
           Write-Host "version.py=$expected  exe FileVersion=$actual"
           if (-not $actual.StartsWith($expected)) {
             throw "Version mismatch: version.py says $expected, exe reports $actual"
           }
-          if (-not (Test-Path "dist\PFRSentinel\_internal\nina_plugin\PFRSentinel.NINA.dll")) {
+
+          # A production build missing the plugin ships an install button that
+          # reports its own bundle as missing. Tolerable while iterating on a
+          # PR, not in a release candidate.
+          $plugin = "dist\PFRSentinel\_internal\nina_plugin\PFRSentinel.NINA.dll"
+          if (-not (Test-Path $plugin)) {
+            if ($env:CHANNEL -eq "production") { throw "NINA plugin DLL is not in the bundle" }
             Write-Warning "NINA plugin DLL is not in the bundle"
           }
 
       - name: Upload the app
         uses: actions/upload-artifact@v4
         with:
-          name: PFRSentinel-windows-unsigned
+          name: PFRSentinel-windows-${{ steps.channel.outputs.name }}-unsigned
           path: dist/PFRSentinel/
+          if-no-files-found: error
           # The bundle is several hundred MB. PR builds are a smoke test that
           # gets looked at the same day, if at all; tag builds are worth keeping.
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 7 }}
@@ -135,10 +195,24 @@ jobs:
           || (github.event_name == 'workflow_dispatch' && inputs.installer)
         uses: actions/upload-artifact@v4
         with:
-          name: PFRSentinel-installer-unsigned
+          name: PFRSentinel-installer-${{ steps.channel.outputs.name }}-unsigned
           path: installer/dist/*.exe
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 7 }}
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ${{ steps.channel.outputs.name }} build"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Channel | \`${{ steps.channel.outputs.name }}\` |"
+            echo "| Dev features | $([ '${{ steps.channel.outputs.name }}' = dev ] && echo 'compiled in' || echo 'stripped') |"
+            echo "| Code signing | none — sign locally before release |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   spec:
     name: Spec parses (${{ matrix.name }})

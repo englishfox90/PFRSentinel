@@ -167,19 +167,38 @@ When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
 `.github/workflows/build.yml` packages the app on `v*` tags, on every pull
-request, and on manual dispatch. The Windows job builds the NINA plugin with
-`dotnet` (its only automated check — there is no C# test suite), freezes the
-app with PyInstaller from `PFRSentinel.spec`, checks the exe's FileVersion
-against `version.py`, and uploads the bundle; tag and dispatch runs also
-compile the Inno Setup installer. **Nothing CI produces is code-signed** — the
-Certum SimplySign flow in `build_sentinel.bat` needs a human to approve each
-request from a phone, so real releases are still cut locally with
-`build_sentinel_installer.bat`. macOS and Linux get `scripts/ci/check_spec_parses.py`
-instead of a build: it executes the spec with the PyInstaller classes stubbed,
-which catches a Windows-only import or a one-OS `datas` entry in seconds.
-Actual mac/Linux packaging is issue #41. PyInstaller is pinned in
-`requirements-build.txt`, kept apart from `requirements-dev.txt` so the test
-matrix doesn't install it three times.
+request, and on manual dispatch, in one of two channels:
+
+| Trigger | Channel | `DEV_MODE_AVAILABLE` | Installer |
+|---|---|---|---|
+| Pull request | `dev` | `True` — raw FITS/TIFF exports, calibration JSON, ML prediction | no |
+| `v*` tag | `production` | `False` | yes |
+| Manual dispatch | your choice (default `dev`) | follows the choice | optional |
+
+`scripts/ci/set_build_channel.py` writes the flag into
+`services/dev_mode_config.py` before PyInstaller runs, replacing the manual
+checklist at the end of `build_sentinel.bat`. **The `PFRSENTINEL_DEV_MODE`
+environment variable cannot do this** — it is read when `dev_mode_config` is
+imported, which for a frozen app is on the user's machine at launch, so setting
+it in a CI job changes nothing about the artifact.
+
+The Windows job also builds the NINA plugin with `dotnet` (its only automated
+check — there is no C# test suite), asserts the exe's FileVersion matches
+`version.py`, and on a tag asserts `version.py` matches the tag itself before
+building anything. A missing NINA plugin DLL is a warning on `dev` and an error
+on `production`.
+
+**Nothing CI produces is code-signed, production included** — the Certum
+SimplySign flow in `build_sentinel.bat` needs a human to approve each request
+from a phone, so a tag build is a verified candidate, not a releasable binary.
+Cut the real one locally with `build_sentinel_installer.bat`.
+
+macOS and Linux get `scripts/ci/check_spec_parses.py` instead of a build: it
+executes the spec with the PyInstaller classes stubbed, which catches a
+Windows-only import or a one-OS `datas` entry in seconds. Actual mac/Linux
+packaging is issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
+apart from `requirements-dev.txt` so the test matrix doesn't install it three
+times.
 
 Other Claude workflows: `claude-code-review.yml` reviews every non-draft PR
 (Dependabot PRs excluded); `claude-dependabot-assess.yml` reads the upstream
