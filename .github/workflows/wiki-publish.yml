@@ -1,0 +1,81 @@
+name: Wiki Publish
+
+# Copies docs/wiki/ on main to the GitHub wiki. docs/wiki/ is the source of truth: the
+# GitHub wiki has no pull requests, so every change is reviewed here first and
+# this job only mirrors what was merged. claude-wiki-update.yml drafts those
+# changes for each release tag.
+#
+# GITHUB_TOKEN cannot push to a wiki repository, so this needs a WIKI_TOKEN
+# secret: a fine-grained personal access token for this repository with
+# "Contents: Read and write".
+#
+# Every commit this job makes starts with "Sync from". If the wiki's latest
+# commit does not, someone edited the wiki in the browser, and mirroring would
+# silently erase that edit — so the job stops and asks for the edit to be
+# copied into docs/wiki/ first. Run it by hand with "overwrite" to discard it.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/wiki/**"]
+  workflow_dispatch:
+    inputs:
+      overwrite:
+        description: "Overwrite edits made directly on the wiki since the last sync"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Clone the wiki
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WIKI_TOKEN}" ]; then
+            echo "::error::The WIKI_TOKEN secret is not set. Add a fine-grained token with Contents: Read and write for this repository."
+            exit 1
+          fi
+          git clone -q "https://x-access-token:${WIKI_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" "$RUNNER_TEMP/wiki"
+
+      - name: Refuse to overwrite direct wiki edits
+        if: ${{ !inputs.overwrite }}
+        working-directory: ${{ runner.temp }}/wiki
+        run: |
+          set -euo pipefail
+          subject="$(git log -1 --format=%s)"
+          if [[ "$subject" != "Sync from "* ]]; then
+            echo "::error::The wiki was edited directly since the last sync (latest commit: \"$subject\")."
+            echo "Commits not yet in docs/wiki/:"
+            git log --format='  %h %cs %an: %s' | awk '/Sync from /{exit} {print}'
+            echo "Copy those edits into docs/wiki/ on main, or re-run this workflow with overwrite enabled."
+            exit 1
+          fi
+
+      - name: Mirror docs/wiki/ and push
+        working-directory: ${{ runner.temp }}/wiki
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude .git "$GITHUB_WORKSPACE/docs/wiki/" ./
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already matches docs/wiki/ at ${GITHUB_SHA}."
+            exit 0
+          fi
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Sync from ${GITHUB_REPOSITORY}@${GITHUB_SHA::7}"
+          git push -q origin HEAD

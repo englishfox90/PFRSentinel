@@ -73,8 +73,9 @@ stacked_out/
 sample_images/
 issues/
 
-# Wiki (managed locally, pushed via scripts/wiki-push.sh)
-wiki/
+# Legacy local clone of the GitHub wiki (the old scripts/wiki-push.sh flow).
+# The wiki is now published from docs/wiki/ by wiki-publish.yml.
+/wiki/
 
 # Temporary Files
 *.tmp

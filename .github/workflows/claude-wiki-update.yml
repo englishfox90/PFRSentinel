@@ -1,0 +1,138 @@
+name: Claude Wiki Update
+
+# For a freshly pushed version tag, Claude reads what changed since the previous
+# tag and opens a pull request that brings docs/wiki/ up to date. It never touches
+# the live wiki: docs/wiki/ is the source of truth, and wiki-publish.yml copies it to
+# the GitHub wiki when that PR is merged. Merge the PR when you publish the
+# release, so users never read about a version they cannot download yet.
+#
+# Chains off Tag Pushed like claude-release-notes.yml, for the same reasons:
+# claude-code-action rejects `push` events, and a tag that disagrees with
+# version.py should not produce documentation either.
+#
+# The PR is opened with the Claude app token that claude-code-action exposes to
+# `gh`, not GITHUB_TOKEN, so CI runs on it and the required check can report.
+
+on:
+  workflow_run:
+    workflows: ["Tag Pushed"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to update the wiki for (default: latest v* tag)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  id-token: write
+
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the tag and its predecessor
+        id: tags
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-}"
+          if [ -z "$TAG" ] && [ -n "${RUN_SHA:-}" ]; then
+            TAG=$(git tag --points-at "$RUN_SHA" | grep -E '^v[0-9]' | sort -V | tail -1 || true)
+          fi
+          if [ -z "$TAG" ]; then
+            TAG=$(git tag -l 'v*' | sort -V | tail -1)
+          fi
+          git rev-parse -q --verify "refs/tags/$TAG" > /dev/null || { echo "Tag $TAG not found"; exit 1; }
+          PREV=$(git tag -l 'v*' | sort -V | grep -B1 -x "$TAG" | head -1)
+          if [ -z "$PREV" ] || [ "$PREV" = "$TAG" ]; then
+            PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          fi
+          BRANCH="claude-wiki-update-${TAG}-${GITHUB_RUN_ID}"
+          git config user.email "claude[bot]@users.noreply.github.com"
+          git config user.name "claude[bot]"
+          # Branch from the tag, not main: the pages must describe the code that
+          # shipped, and main may already carry unreleased work.
+          git checkout -q -b "$BRANCH" "$TAG"
+          [ -d docs/wiki ] || { echo "::error::docs/wiki/ does not exist at $TAG"; exit 1; }
+          {
+            echo "tag=$TAG"
+            echo "prev=$PREV"
+            echo "branch=$BRANCH"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag $TAG, previous $PREV, branch $BRANCH"
+
+      - name: Update the wiki with Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          # Background subagents die when the SDK session ends its turn, and
+          # the job still passes. Same trap as claude-code-review.yml.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Bring the PFR Sentinel user wiki up to date for ${{ steps.tags.outputs.tag }}
+            in ${{ github.repository }}. The previous release tag is
+            ${{ steps.tags.outputs.prev }}. You are on branch ${{ steps.tags.outputs.branch }},
+            created from that tag, so the working tree is the code that shipped.
+            The wiki pages live in docs/wiki/ (one Markdown file per page;
+            docs/wiki/_Sidebar.md is the navigation; links are written [Text](Page-Name)
+            without .md).
+
+            The wiki is for observatory owners using the app, not developers.
+
+            1. Find what changed for users:
+               `git log --no-merges --format='%h %s%n%b' ${{ steps.tags.outputs.prev }}..${{ steps.tags.outputs.tag }}`
+               and `git diff --stat ${{ steps.tags.outputs.prev }}..${{ steps.tags.outputs.tag }} -- ui services ml`.
+               Use `git show` and `gh pr view` / `gh issue view` where a subject is
+               not self-explanatory. Ignore CI, tests, refactors, and performance
+               work with no visible effect.
+            2. For each user-visible change, find the wiki pages that describe that
+               area (grep docs/wiki/ for the feature and its UI labels) and read them.
+               A new feature with no home gets a new page, added to docs/wiki/_Sidebar.md
+               and to the relevant table on docs/wiki/Home.md.
+            3. Edit the pages. Verify every default, range, option and UI label you
+               write against the working tree: services/config_defaults.py for
+               defaults, ui/panels/ for labels, ranges, tooltips and visibility,
+               ui/controllers/ and services/ for behaviour. Features only in dev
+               builds (services/dev_mode_config.py) are not user features. If you
+               cannot verify a claim, leave it out. Remove documentation for
+               anything that was removed. Match the style of the page you edit:
+               bold UI labels exactly as the widget spells them, settings tables,
+               `---` between sections. No emojis, no file paths, no class names.
+            4. Pages mark features that were on main but not yet released with the
+               line "> **New in the next release** — not available in version X or
+               earlier." For every such note whose feature is in this tag, remove the
+               note (or, where the version matters to readers, replace it with
+               "Added in version ${{ steps.tags.outputs.tag }}."). Leave notes for
+               features that are still unreleased.
+            5. Keep the diff focused: do not rewrite pages whose subject did not
+               change, and do not reformat untouched sections.
+            6. If nothing user-visible changed, make no commit and do not open a
+               pull request; say so in your final message.
+            7. Otherwise commit ("docs(wiki): update for ${{ steps.tags.outputs.tag }}"),
+               push the branch, and open a pull request against main with
+               `gh pr create --base main --label documentation`
+               (drop --label if the label does not exist). The body lists each page
+               changed and the release change that required it, any claim you left
+               out because you could not verify it, and any page whose screenshots
+               or examples may now be stale. Say in the body that merging publishes
+               the wiki, so it should be merged when the release is published.
+
+            Only edit files under docs/wiki/. Never push to the GitHub wiki repository
+            yourself, and never push to main.
+          claude_args: |
+            --max-turns 80
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git tag:*),Bash(git describe:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push origin ${{ steps.tags.outputs.branch }}:*),Bash(git push -u origin ${{ steps.tags.outputs.branch }}:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh label list:*)"
