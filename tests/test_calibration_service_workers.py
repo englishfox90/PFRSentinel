@@ -85,12 +85,26 @@ def fast_refine(monkeypatch):
     return seen
 
 
+# A _last_refine_time far enough in the past that _maybe_refine's cooldown is
+# always elapsed. NOT 0.0: time.monotonic() is seconds since boot, so on a host
+# up for less than REFINE_COOLDOWN_S (a fresh CI runner) 0.0 bypasses nothing
+# and no refinement ever starts.
+_COOLDOWN_ELAPSED = -float(cs.REFINE_COOLDOWN_MAX_S)
+
+
 def _service(frames=None, model=None):
     svc = cs.CalibrationService()
     svc._save_model = lambda m, **kw: None   # never touch the real cal file
     svc._model = model if model is not None else _model()
     svc._quality = cs.model_quality(svc._model, 20, 40.0)
     svc._frames.extend(frames if frames is not None else _frames())
+    # _maybe_refine gates on time.monotonic() - _last_refine_time, and the
+    # service starts that at 0.0. time.monotonic() is seconds since boot, so on
+    # a host up for less than REFINE_COOLDOWN_S no refinement ever starts and
+    # every test below fails with "refinement did not start" — which is exactly
+    # what a fresh CI runner is. Put the last attempt far enough in the past
+    # that the cooldown is elapsed regardless of the host's uptime.
+    svc._last_refine_time = _COOLDOWN_ELAPSED
     return svc
 
 
@@ -117,7 +131,7 @@ class TestWorkerLifetime:
         svc = _service()
         baseline = len(svc.children())
         for _ in range(5):
-            svc._last_refine_time = 0.0     # bypass the cooldown
+            svc._last_refine_time = _COOLDOWN_ELAPSED  # bypass the cooldown
             _run_one_refinement(svc)
             assert svc._refine_worker is None, "worker was not retired"
             assert len(svc.children()) == baseline
@@ -375,7 +389,7 @@ class TestIncumbentCorroboration:
         svc._save_model = lambda m, **kw: saved.append(kw)
         self._corroborating_pole(monkeypatch, svc._model)
         _run_one_refinement(svc)
-        svc._last_refine_time = 0.0
+        svc._last_refine_time = _COOLDOWN_ELAPSED
         _run_one_refinement(svc)
         assert sum(1 for kw in saved if kw.get('stamp_time') is False) == 1
 
