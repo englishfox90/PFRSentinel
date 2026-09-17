@@ -83,35 +83,11 @@ def sun_window(config: dict, day: date, tzinfo=None) -> Tuple[datetime, datetime
     """Calculate the night window for ``day`` using the astral library.
 
     ``day`` is a LOCAL calendar date and the returned datetimes are naive
-    wall-clock in ``tzinfo`` (the system zone when None).
+    wall-clock in ``tzinfo`` (the system zone when None). Falls back to the
+    fixed window when there is no location or the sun never reaches the depth.
     """
     try:
-        from astral import LocationInfo
-        from astral.sun import sunset, sunrise, dusk, dawn
-
-        lat = config.get('sun_latitude')
-        lon = config.get('sun_longitude')
-        if lat is None or lon is None:
-            raise ValueError("No coordinates configured for sun mode")
-
-        loc = LocationInfo(latitude=float(lat), longitude=float(lon))
-        tz = _local_tzinfo(tzinfo)
-        sun_mode = config.get('sun_mode', 'astronomical')
-        tomorrow = day + timedelta(days=1)
-
-        if sun_mode == 'sunset_sunrise':
-            start = sunset(loc.observer, date=day, tzinfo=tz)
-            end = sunrise(loc.observer, date=tomorrow, tzinfo=tz)
-        else:
-            depression = {'civil': 6, 'nautical': 12}.get(sun_mode, 18)
-            start = dusk(loc.observer, date=day, depression=depression, tzinfo=tz)
-            end = dawn(loc.observer, date=tomorrow, depression=depression, tzinfo=tz)
-
-        # In production tzinfo is None: the clamp above used the fixed offset in
-        # effect now, while astimezone(None) converts with the real zone, so a
-        # DST change on the night itself still lands on the right hour.
-        return to_local_naive(start, tzinfo), to_local_naive(end, tzinfo)
-
+        return strict_sun_window(config, day, tzinfo)
     except ImportError:
         app_logger.warning("Timelapse: astral not available, falling back to fixed window")
         return fixed_window(config, day)
@@ -120,6 +96,39 @@ def sun_window(config: dict, day: date, tzinfo=None) -> Tuple[datetime, datetime
         # (high-latitude summer) — a fixed window is better than no timelapse.
         app_logger.warning(f"Timelapse: sun window error ({e}), falling back to fixed window")
         return fixed_window(config, day)
+
+
+def strict_sun_window(config: dict, day: date, tzinfo=None) -> Tuple[datetime, datetime]:
+    """sun_window() without the fixed-window fallback: raises instead.
+
+    For callers that must tell the user *why* the fixed times are in force
+    (the Timelapse panel's window forecast) rather than log it.
+    """
+    from astral import LocationInfo
+    from astral.sun import sunset, sunrise, dusk, dawn
+
+    lat = config.get('sun_latitude')
+    lon = config.get('sun_longitude')
+    if lat is None or lon is None:
+        raise ValueError("No coordinates configured for sun mode")
+
+    loc = LocationInfo(latitude=float(lat), longitude=float(lon))
+    tz = _local_tzinfo(tzinfo)
+    sun_mode = config.get('sun_mode', 'astronomical')
+    tomorrow = day + timedelta(days=1)
+
+    if sun_mode == 'sunset_sunrise':
+        start = sunset(loc.observer, date=day, tzinfo=tz)
+        end = sunrise(loc.observer, date=tomorrow, tzinfo=tz)
+    else:
+        depression = {'civil': 6, 'nautical': 12}.get(sun_mode, 18)
+        start = dusk(loc.observer, date=day, depression=depression, tzinfo=tz)
+        end = dawn(loc.observer, date=tomorrow, depression=depression, tzinfo=tz)
+
+    # In production tzinfo is None: the clamp above used the fixed offset in
+    # effect now, while astimezone(None) converts with the real zone, so a
+    # DST change on the night itself still lands on the right hour.
+    return to_local_naive(start, tzinfo), to_local_naive(end, tzinfo)
 
 
 class WindowCache:

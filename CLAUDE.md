@@ -51,6 +51,7 @@ PFRSentinel/
 │   ├── pe_version.py           # Windows PE FileVersion reader
 │   ├── timelapse_writer.py     # ffmpeg stdin pipe, time-gated capture
 │   ├── timelapse_window.py     # Recording-window maths (sun/fixed/always), local-date aware
+│   ├── timelapse_window_forecast.py # Projected recording window for the Timelapse Status card
 │   ├── capture_schedule_window.py # Capture schedule that follows the timelapse window ± margin
 │   ├── ffmpeg_utils.py         # Shared ffmpeg detection
 │   ├── diagnostics_bundle.py   # Support ZIP: logs + redacted config + frames (pure)
@@ -273,6 +274,8 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_zwo_schedule_gate.py` | 16 | `zwo_camera` — schedule gate vs legacy HH:MM path, fail-open, `scheduled_window_label` |
 | `test_api_status_schedule.py` | 11 | `api_status.build_schedule` — status API schedule block for fixed and timelapse sources, with and without a camera |
 | `test_schedule_window_source_ui.py` | 5 | `_schedule_window_source` — window-source rows: load, visibility, signals (offscreen Qt) |
+| `test_timelapse_window_forecast.py` | 26 | `timelapse_window_forecast` — open/next window, inclusive edges, twilight depths on the local night, fixed-time fallback notes, clock-change durations, no log spam |
+| `test_timelapse_status_card.py` | 3 | `TimelapseStatusCard` — session line, projected window line, open-video button (offscreen Qt) |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
