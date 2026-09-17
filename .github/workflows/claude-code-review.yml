@@ -42,6 +42,12 @@ jobs:
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
+        env:
+          # The plugin launches its review agents in the background, then the
+          # main session ends its turn to "wait" for them — which, under the
+          # SDK, ends the run and kills them. The job still reported success
+          # and posted nothing. Foreground agents block until they finish.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
@@ -51,9 +57,9 @@ jobs:
           # and looks at blame/history. With only the inline-comment tool
           # allowed, every run died on the first denied call and posted nothing.
           claude_args: '--allowedTools "Agent,TodoWrite,Read,Grep,Glob,LS,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(gh api:*),Bash(git log:*),Bash(git blame:*),Bash(git show:*),Bash(git diff:*),mcp__github_inline_comment__create_inline_comment"'
-          # TEMPORARY diagnostic: every run reports success but posts nothing,
-          # and the transcript is hidden by default. Revert before merging —
-          # the repo is public, so this output is world-readable.
+          # TEMPORARY diagnostic: kept for one more run to confirm the
+          # foreground-agent fix, then reverted — the repo is public, so this
+          # output is world-readable.
           show_full_output: true
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
