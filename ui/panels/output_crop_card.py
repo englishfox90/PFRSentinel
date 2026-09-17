@@ -199,8 +199,9 @@ class OutputCropCard(CollapsibleCard):
     def _on_reset_clicked(self):
         if not self.editor.has_reference():
             return
-        ref_w, ref_h = self.editor.reference()
-        self._set_box(0, 0, ref_w, ref_h, save=True)
+        self.editor.set_full_frame()
+        self._sync_spins()
+        self._save()
 
     # ---- helpers ---------------------------------------------------------------
 
@@ -215,10 +216,16 @@ class OutputCropCard(CollapsibleCard):
         usable = self.editor.has_reference()
         for spin in (self.x_spin, self.y_spin, self.w_spin, self.h_spin):
             spin.setEnabled(usable)
-        self.x_spin.setRange(0, max(0, ref_w))
-        self.y_spin.setRange(0, max(0, ref_h))
-        self.w_spin.setRange(0, max(0, ref_w))
-        self.h_spin.setRange(0, max(0, ref_h))
+        # setRange() clamps an out-of-range value and emits valueChanged, which
+        # would re-enter _on_spin_changed with the ranges half updated.
+        was_loading, self._loading = self._loading, True
+        try:
+            self.x_spin.setRange(0, max(0, ref_w))
+            self.y_spin.setRange(0, max(0, ref_h))
+            self.w_spin.setRange(0, max(0, ref_w))
+            self.h_spin.setRange(0, max(0, ref_h))
+        finally:
+            self._loading = was_loading
 
     def _sync_spins(self):
         x, y, w, h = self.editor.box()

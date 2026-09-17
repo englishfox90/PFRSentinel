@@ -100,6 +100,16 @@ class CropBoxEditor(QWidget):
             self._box = (int(x), int(y), int(w), int(h))
         self.update()
 
+    def set_full_frame(self):
+        """Reset to the whole reference frame, ignoring the square lock.
+
+        Going through set_box() would collapse a 1920x1080 frame to its
+        top-left 1080 square — a crop, not a reset.
+        """
+        if self.has_reference():
+            self._box = (0, 0, self._ref_w, self._ref_h)
+        self.update()
+
     def set_keep_square(self, keep: bool):
         self._keep_square = bool(keep)
         if self.has_reference() and self._box[2] > 0:

@@ -277,7 +277,7 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_schedule_window_source_ui.py` | 5 | `_schedule_window_source` — window-source rows: load, visibility, signals (offscreen Qt) |
 | `test_timelapse_window_forecast.py` | 26 | `timelapse_window_forecast` — open/next window, inclusive edges, twilight depths on the local night, fixed-time fallback notes, clock-change durations, no log spam |
 | `test_timelapse_status_card.py` | 3 | `TimelapseStatusCard` — session line, projected window line, open-video button (offscreen Qt) |
-| `test_output_crop_card.py` | 21 | `OutputCropCard` / `CropBoxEditor` / `OutputCropController` — drag/resize/spin clamping, config round-trip, thumbnail cap + active gating, Fit-to-sky (offscreen Qt) |
+| `test_output_crop_card.py` | 23 | `OutputCropCard` / `CropBoxEditor` / `OutputCropController` — drag/resize/spin clamping, config round-trip, thumbnail cap + active gating, Fit-to-sky (offscreen Qt) |
 | `test_watch_controller_crop.py` | 4 | `WatchControllerQt` — the output crop on `img.info` reaches the all-sky preview renderer; `extras` forwarded on `image_processed` |
 | `test_watch_crop_cache.py` | 2 | `_on_watch_image_processed` — watch mode caches the pre-resize clean frame for Calibrate Now, not the cropped output |
 | `test_watcher.py` | 2 | `ImageFileHandler` — `process_image` extras reach the callback |

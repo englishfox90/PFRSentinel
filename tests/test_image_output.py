@@ -573,6 +573,25 @@ class TestOutputCrop:
         # for the all-sky preview translation (ui/controllers/watch_controller.py).
         assert img.info['OUTPUT_CROP'] == metadata['OUTPUT_CROP']
 
+    def test_clean_frame_is_not_the_object_overlays_are_drawn_on(self, temp_dir):
+        # RGBA + resize off + crop off: add_overlays skips convert() and draws
+        # straight onto the frame it is given, so clean_frame must be a copy.
+        src = Image.new('RGBA', (320, 240), (5, 5, 5, 255))
+        cfg = self._config(temp_dir, enabled=False)
+        cfg._values['overlays'] = [{'text': 'HELLO WORLD', 'anchor': 'Top-Left',
+                                  'x_offset': 10, 'y_offset': 10, 'font_size': 40,
+                                  'color': 'white', 'background': True}]
+        extras = {}
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's'}
+
+        ok, _path, err, out = process_image(src, cfg, metadata_dict=metadata, extras=extras)
+
+        assert ok and err is None
+        clean = extras['clean_frame']
+        assert clean is not out
+        assert clean.getextrema()[0] == (5, 5)        # no white text in the clean frame
+        assert out.getextrema()[0][1] > 5             # the output does carry the overlay
+
     def test_disabled_crop_leaves_the_frame_alone(self, sample_image, temp_dir):
         metadata = {'FILENAME': 'frame.png', 'SESSION': 's',
                     'OUTPUT_CROP': {'x': 1, 'y': 1, 'width': 2, 'height': 2,

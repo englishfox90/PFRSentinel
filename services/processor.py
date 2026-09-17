@@ -231,8 +231,9 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None, 
 
         # The pre-resize, pre-crop frame is what a watch-mode reprocess and
         # Calibrate Now must start from — resizing or cropping it twice would
-        # compound (issue #12).
-        clean_frame = raw_img
+        # compound (issue #12). A copy, not an alias: with resize off and no
+        # crop, add_overlays draws onto this very object (RGBA skips convert).
+        clean_frame = raw_img.copy() if isinstance(extras, dict) else None
         native_size = raw_img.size
         if resize_percent > 0 and resize_percent != 100:
             new_width = int(raw_img.width * resize_percent / 100)

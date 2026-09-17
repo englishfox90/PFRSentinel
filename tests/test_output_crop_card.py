@@ -357,6 +357,43 @@ class TestButtons:
         assert y == (3552 - 1000) // 2 or abs(y - (3552 - 1000) / 2) <= 1
         assert mw.config.get('output_crop')['x'] == x
 
+    def test_full_frame_ignores_the_square_lock_on_a_wide_sensor(self, card, qapp):
+        widget, mw = card
+        widget.load_from_config(mw.config)
+        widget.set_frame(_solid_frame(512), 1920, 1080)
+        widget.enable_switch.set_checked(True)
+        assert widget.square_switch.isChecked()
+        widget._set_box(100, 100, 600, 600, save=True)
+
+        widget.reset_btn.click()
+        qapp.processEvents()
+
+        assert widget.editor.box() == (0, 0, 1920, 1080)
+        saved = mw.config.get('output_crop')
+        assert (saved['width'], saved['height']) == (1920, 1080)
+
+    def test_smaller_reference_rescales_the_box_without_a_spin_cascade(self, card, qapp):
+        widget, mw = card
+        widget.load_from_config(mw.config)
+        widget.set_frame(_solid_frame(512), 3552, 3552)
+        widget.enable_switch.set_checked(True)
+        widget._set_box(80, 320, 2880, 2880, save=True)
+        saves = []
+        widget.settings_changed.connect(lambda: saves.append(1))
+
+        # A wide, smaller frame: every spin value now exceeds its new range,
+        # so setRange() clamps and fires valueChanged four times.
+        widget.set_frame(_solid_frame(512), 1776, 1000)
+        qapp.processEvents()
+
+        x, y, w, h = widget.editor.box()
+        assert (w, h) == (810, 810)   # 2880 scaled per axis (1440 x 810), square lock keeps the shorter
+        assert 0 <= x <= 1776 - w and 0 <= y <= 1000 - h
+        assert (widget.x_spin.value(), widget.y_spin.value(),
+                widget.w_spin.value(), widget.h_spin.value()) == (x, y, w, h)
+        assert saves == []                            # a new frame never saves by itself
+        assert mw.config.get('output_crop')['width'] == 2880   # config untouched
+
     def test_full_frame_button_resets_to_whole_frame(self, card, qapp):
         widget, mw = card
         widget.load_from_config(mw.config)
