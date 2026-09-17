@@ -707,8 +707,8 @@ Supports:
                     latitude=latitude if latitude else None,
                     longitude=longitude if longitude else None
                 )
-                loc_info = f"({latitude}, {longitude})" if has_coords else location
-                app_logger.info(f"Weather service initialized: {loc_info}, {units} units")
+                loc_info = "coordinates" if has_coords else "named location"
+                app_logger.info(f"Weather service initialized from {loc_info}, {units} units")
             else:
                 self.weather_service = None
                 app_logger.debug("Weather service not configured (missing API key or location/coordinates)")

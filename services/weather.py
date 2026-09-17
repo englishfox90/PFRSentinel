@@ -2,12 +2,35 @@
 Weather service - OpenWeatherMap API integration
 Fetches current weather data with caching to avoid excessive API calls
 """
+import re
 import requests
 import time
 from datetime import datetime, timedelta
 
 from .logger import app_logger
 from .utils_paths import get_app_data_dir
+
+
+_QUERY_SECRET_RE = re.compile(r"\b(appid|lat|lon|q)=([^&\s)]+)", re.I)
+
+
+def describe_weather_error(exc) -> str:
+    """Return a log-safe summary of a failed OpenWeatherMap request.
+
+    ``str()`` of a ``requests`` HTTPError or ConnectionError embeds the request
+    URL, and every OpenWeatherMap query carries the API key (``appid``) plus
+    the observer's exact position (``lat``/``lon``) or city (``q``). Logs ship
+    in support bundles whose config copy redacts exactly those keys, so the raw
+    exception must never reach the log. The HTTP status is what actually helps
+    anyway: 401 is a bad key, 404 an unknown city.
+    """
+    response = getattr(exc, 'response', None)
+    status = getattr(response, 'status_code', None)
+    if status:
+        reason = getattr(response, 'reason', None) or ''
+        return f"HTTP {status} {reason}".strip()
+    redacted = _QUERY_SECRET_RE.sub(r"\1=[REDACTED]", str(exc))
+    return f"{type(exc).__name__}: {redacted}"
 
 
 class WeatherService:
@@ -96,11 +119,11 @@ class WeatherService:
             self.lat = data['coord']['lat']
             self.lon = data['coord']['lon']
             
-            app_logger.info(f"Weather location resolved: {self.location}")
+            app_logger.info("Weather location resolved to coordinates")
             return True
             
         except requests.RequestException as e:
-            app_logger.error(f"Failed to resolve weather location '{self.location}': {e}")
+            app_logger.error(f"Failed to resolve weather location: {describe_weather_error(e)}")
             return False
         except KeyError as e:
             app_logger.error(f"Unexpected weather API response format: {e}")
@@ -168,7 +191,7 @@ class WeatherService:
             return weather_data
             
         except requests.RequestException as e:
-            app_logger.error(f"Failed to fetch weather data: {e}")
+            app_logger.error(f"Failed to fetch weather data: {describe_weather_error(e)}")
             return None
         except (KeyError, ValueError) as e:
             app_logger.error(f"Error parsing weather data: {e}")
