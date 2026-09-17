@@ -323,3 +323,46 @@ class TestConfigValidateMethod:
 
         warnings = config.validate()
         assert any('Discord' in w and 'webhook' in w.lower() for w in warnings)
+
+
+class TestDevModeDefaultFollowsBuildChannel:
+    """`dev_mode.enabled` is stamped by the build channel, not hardcoded.
+
+    scripts/ci/set_build_channel.py writes DEV_MODE_AVAILABLE into
+    services/dev_mode_config.py before PyInstaller runs, so a dev build has to
+    arrive with raw capture already on and a production build with it off.
+    DEFAULT_CONFIG is built at import time, so both directions are checked by
+    reloading the module with the flag patched.
+    """
+
+    @staticmethod
+    def _default_with_flag(available):
+        import importlib
+        from services import config_defaults, dev_mode_config
+
+        original = dev_mode_config.DEV_MODE_AVAILABLE
+        dev_mode_config.DEV_MODE_AVAILABLE = available
+        try:
+            reloaded = importlib.reload(config_defaults)
+            return reloaded.DEFAULT_CONFIG["dev_mode"]["enabled"]
+        finally:
+            dev_mode_config.DEV_MODE_AVAILABLE = original
+            importlib.reload(config_defaults)
+
+    def test_dev_build_defaults_to_enabled(self):
+        assert self._default_with_flag(True) is True
+
+    def test_production_build_defaults_to_disabled(self):
+        assert self._default_with_flag(False) is False
+
+    def test_a_saved_choice_survives_the_default(self, temp_config):
+        """Upgrading an install must not flip a setting the user already chose."""
+        Config(temp_config).save()
+        with open(temp_config, encoding="utf-8") as handle:
+            saved = json.load(handle)
+        saved["dev_mode"]["enabled"] = not saved["dev_mode"]["enabled"]
+        chosen = saved["dev_mode"]["enabled"]
+        with open(temp_config, "w", encoding="utf-8") as handle:
+            json.dump(saved, handle)
+
+        assert Config(temp_config).data["dev_mode"]["enabled"] is chosen

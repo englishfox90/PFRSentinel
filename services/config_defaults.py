@@ -7,6 +7,7 @@ Pure data — behaviour lives in services/config.py.
 """
 import os
 from .utils_paths import resource_path, get_app_data_dir
+from .dev_mode_config import is_dev_mode_available
 from .app_config import DEFAULT_OUTPUT_SUBFOLDER
 
 DEFAULT_CAMERA_PROFILE = {
@@ -181,7 +182,13 @@ DEFAULT_CONFIG = {
     
     # Developer Mode settings - for troubleshooting raw image data
     "dev_mode": {
-        "enabled": False,  # Save raw images before any processing
+        # Follows the build channel rather than carrying its own switch: a dev
+        # build stamps DEV_MODE_AVAILABLE=True into dev_mode_config.py (see
+        # scripts/ci/set_build_channel.py), so it arrives with raw capture on;
+        # a production build arrives with it off. Only NEW configs pick this up
+        # — Config.load merges against DEFAULT_CONFIG and a value already saved
+        # wins, so upgrading an existing install never flips the user's choice.
+        "enabled": is_dev_mode_available(),  # Save raw images before any processing
         "raw_folder": "raw_debug",  # Subfolder name for raw images (relative to output_directory)
         "save_histogram_stats": True,  # Log detailed per-channel statistics
         "use_raw16": False,  # Use RAW16 mode for full bit depth (requires camera support)

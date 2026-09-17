@@ -106,22 +106,49 @@ jobs:
                - python -m pytest -m "not requires_camera and not requires_network" --timeout=300
                For pytest, run only the failing test files first; run the full suite
                once you believe it is fixed. Set QT_QPA_PLATFORM=offscreen.
-            2. Fix the underlying problem in the code under test when the code is
+            2. A failure you could not reproduce is NOT thereby a flake, and the
+               two must never be reported as the same thing. Write "could not
+               reproduce"; reserve "flaky" for a failure you have actually seen
+               pass and fail on the same commit under identical conditions.
+               Re-running the job is not a remedy and must not be your
+               recommendation.
+
+               This container is not the machine that failed. Before you
+               conclude anything about timing, list what differs and try to
+               SIMULATE it — running the same command again, or under more
+               load, simulates none of the following:
+               - Uptime. time.monotonic() counts from boot, so any guard of the
+                 form `now - last_time < SOME_COOLDOWN` behaves differently on a
+                 runner that booted a minute ago than on a long-lived box, and a
+                 timestamp initialised to 0.0 reads as "just happened" on a
+                 fresh host. Simulate with `time.monotonic = lambda: 30.0`
+                 before importing the code under test.
+               - CPU count. os.cpu_count() sets the pytest-xdist worker count
+                 under -n auto, so the test distribution differs.
+               - Operating system, when the failing job is macOS or Linux: path
+                 separators, available fonts, and case sensitivity all differ.
+               - Locale, timezone, and HOME.
+
+               A failure reproducing on two unrelated branches is evidence of a
+               shared cause in the base, not evidence of a flake.
+            3. Fix the underlying problem in the code under test when the code is
                wrong. Fix the test only when the test itself is wrong. Never delete,
                skip, or loosen an assertion to make a failure disappear.
-            3. For a size-cap failure, split the file by responsibility as
+            4. For a size-cap failure, split the file by responsibility as
                .claude/rules/python-general.md describes. Do not edit the caps.
-            4. For a pip-audit finding, bump the affected package in requirements.txt
+            5. For a pip-audit finding, bump the affected package in requirements.txt
                to the fixed version and say which advisory it addresses.
-            5. Read CLAUDE.md and the matching .claude/rules/ file before editing.
-            6. Commit with a clear message, push the branch, and open a pull request
+            6. Read CLAUDE.md and the matching .claude/rules/ file before editing.
+            7. Commit with a clear message, push the branch, and open a pull request
                with `gh pr create --base ${{ github.event.workflow_run.head_branch }}`.
                In the body, explain the root cause and what you changed, and link
                the failed run. Then leave one comment on the original PR linking
                your fix PR.
 
             If you cannot find a correct fix, do not push anything. Instead leave one
-            comment on the original PR explaining what you found and what you tried.
+            comment on the original PR explaining what you found and what you tried,
+            naming the environmental differences from step 2 you ruled out and how.
+            Do not call the failure a flake and do not ask for a re-run.
           claude_args: |
             --max-turns 60
             --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,LS,Bash(git:*),Bash(gh:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(ruff:*),Bash(pytest:*),Bash(cat:*),Bash(ls:*)"
