@@ -29,8 +29,11 @@ These are real bugs that have shipped in this project. Get them right.
 - `stop_capture()` aborts the in-progress exposure and any running calibration, then joins the worker thread with a **3-second timeout**. Preserve that flow — the aborts are what make the short join safe. Dropping the aborts and keeping a short join will race; an unbounded join can deadlock shutdown.
 
 ## Per-camera profiles
-- Camera-specific settings live under `camera_profiles[<clean_camera_name>]`. The clean name strips index suffixes — two cameras with the same base name share one profile (a known limitation, not a bug).
-- When a setting is missing from the per-camera profile, fall back to the global default — never crash on a missing key.
+- Camera-specific settings live under `camera_profiles[<key>]`, keyed by the **hardware serial**: settings belong to a physical body, not a model, and two ASI676MC bodies need different gains. The serial can only be read off an open handle (`ASIGetSerialNumber`, `services/camera/camera_identity.py`), so it is learned on the first clean connect.
+- The model name — index suffix stripped — remains the fallback key for configs and cameras that predate the serial. A legacy name-keyed profile is copied to the serial key on first use so the body keeps its tuned settings; the name profile is left as a template for a same-model body that hasn't learned its own serial yet.
+- `prune_bogus_profiles()` removes artefacts of the old name-based keying: keys matching `Camera <n>` or containing `(Index:`.
+- Reach profiles through `Config`'s delegators (`config.get_camera_profile(name, serial)`) — don't import `services/camera_profiles.py` elsewhere.
+- When a setting is missing from the per-camera profile, fall back to `DEFAULT_CAMERA_PROFILE` — never crash on a missing key.
 - `scripts/fix_cameras.py` resets corrupted profiles. Don't roll your own reset logic in the main app.
 
 ## Auto-exposure

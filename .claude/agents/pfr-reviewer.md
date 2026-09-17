@@ -22,7 +22,7 @@ You review **diffs against `main`** for correctness, threading safety, and archi
    - Bayer pattern must be `COLOR_BayerBG2RGB` (BGGR), NOT RGGB.
    - Exposure unit conversion (ms ↔ s) at SDK boundary only.
    - Disconnect/cleanup: `__del__`, `__enter__/__exit__`, and `_cleanup_lock` must all still be present. `stop_capture()` aborts the exposure and any running calibration, then joins with a **3s** timeout — the aborts are what make the short join safe.
-   - Per-camera profiles keyed by **clean camera name** (no index suffix). Missing keys must fall back to global, not crash.
+   - Per-camera profiles keyed by **hardware serial**, with the model name only as the legacy fallback for pre-serial configs. Flag anything that reintroduces name-only keying — two bodies of the same model must not share a profile. Missing keys must fall back to `DEFAULT_CAMERA_PROFILE`, not crash.
    - Auto-exposure: target brightness 100, ±30% adjustment in 80–120 band. Flag any drift from these constants.
 
 4. **Config access**
