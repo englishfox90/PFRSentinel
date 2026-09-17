@@ -17,12 +17,15 @@ concurrency:
 
 jobs:
   claude-review:
-    # Drafts are not ready for review. Dependabot PRs get their own assessment
-    # workflow (claude-dependabot-assess.yml); repo secrets are not exposed to
-    # Dependabot-authored pull_request runs anyway, so this job would only fail.
+    # Drafts are not ready for review. Bot-authored PRs are skipped: Dependabot
+    # gets its own assessment workflow (claude-dependabot-assess.yml) and no repo
+    # secrets, and claude-code-action refuses any non-human actor ("Workflow
+    # initiated by non-human actor"), which failed the job on every
+    # claude-ci-fix.yml PR. This check is required on main, and a skipped job
+    # counts as passing where a failed one would block the merge.
     if: |
       !github.event.pull_request.draft &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      github.event.pull_request.user.type != 'Bot'
 
     runs-on: ubuntu-latest
     permissions:
