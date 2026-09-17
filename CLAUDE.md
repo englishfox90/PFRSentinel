@@ -182,8 +182,9 @@ against that branch. CodeQL and Dependabot are enabled at the repo level.
 
 `.github/workflows/build.yml` makes unsigned dev builds. Every merge to `main`
 (or a dispatch with `publish` ticked) replaces the single rolling `dev-latest` prerelease and posts
-the build to the "Dev builds" Discussions thread (names and text:
-`scripts/ci/dev_build_notes.py`). The updater polls `/releases/latest`, which
+the build to that release cycle's "Dev builds: X.Y.Z" Discussions thread, with the
+PRs merged since the last release (text: `scripts/ci/dev_build_notes.py`; PR list:
+`dev_build_changelog.py`; thread lifecycle: `dev_build_discussion.py`). The updater polls `/releases/latest`, which
 excludes prereleases, so production installs never see it. Every build here is
 stamped `X.Y.Z-dev.N` (`scripts/ci/set_dev_version.py`: next patch after the
 newest `vX.Y.Z` tag, N = commits since it; exe FileVersion `X.Y.Z.N`), and the
@@ -253,7 +254,9 @@ tracked so these runs read the same conventions a local session does.
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
-| `test_dev_build_notes.py` | 7 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks |
+| `test_dev_build_notes.py` | 9 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list |
+| `test_dev_build_changelog.py` | 6 | `scripts/ci/dev_build_changelog.py` — PRs since the last release via commits, grouping, delta since the previous dev build, API failure never blocks |
+| `test_dev_build_discussion.py` | 8 | `scripts/ci/dev_build_discussion.py` — one thread per release cycle, retire/reopen, never touches people's threads |
 | `test_set_dev_version.py` | 11 | `scripts/ci/set_dev_version.py` — dev version base/counter, Windows FileVersion, spec parses the same way |
 | `test_timelapse_window.py` | 13 | `timelapse_window` — sun window on the LOCAL calendar date (real astral, injected zones), fixed fallback, per-day cache |
 | `test_capture_schedule_window.py` | 39 | `capture_schedule_window` — timelapse-derived capture window ± margin, gate two-day logic, roof/always fallbacks, labels |
