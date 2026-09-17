@@ -2,9 +2,12 @@
 
 ``DEV_MODE_AVAILABLE`` is what this project already means by a dev versus a
 production build: it gates raw FITS/TIFF debug exports, calibration JSON
-dumps and the ML prediction integration. Until now, flipping it was item 1 on
-a printed checklist at the end of ``build_sentinel.bat`` — which is to say, a
-thing a human remembers or doesn't.
+dumps and the ML prediction integration.
+
+CI only ever asks for ``dev`` — release builds are signed and signing cannot
+run on a hosted runner, so they stay local. The ``production`` channel is here
+for that local build: it is the same one-command check as item 1 on the printed
+checklist at the end of ``build_sentinel.bat``, minus the remembering.
 
 The ``PFRSENTINEL_DEV_MODE`` environment override cannot do this job. It is
 read when ``dev_mode_config`` is imported, which in a frozen app happens on
@@ -50,6 +53,13 @@ def main() -> int:
         return 1
 
     previous = matches[0]
+    if previous == str(wanted):
+        # Leave the file byte-for-byte alone. Run locally before a release this
+        # is the common case, and a spurious diff in the working tree is a poor
+        # thank-you for running the check.
+        print(f"Build channel: {args.channel} (DEV_MODE_AVAILABLE already {wanted})")
+        return 0
+
     replacement = (f"DEV_MODE_AVAILABLE = {wanted}  "
                    f"# set by scripts/ci/set_build_channel.py ({args.channel} build)")
     TARGET.write_text(_ASSIGNMENT.sub(replacement, source, count=1), encoding="utf-8")

@@ -166,32 +166,37 @@ the same everywhere. Dev tooling is pinned in `requirements-dev.txt`.
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
-`.github/workflows/build.yml` packages the app on `v*` tags, on every pull
-request, and on manual dispatch, in one of two channels:
+`.github/workflows/build.yml` produces **dev builds only**, on every pull
+request and on manual dispatch. Every artifact has `DEV_MODE_AVAILABLE=True`
+(raw FITS/TIFF exports, calibration JSON, ML prediction compiled in), written
+into `services/dev_mode_config.py` by `scripts/ci/set_build_channel.py` before
+PyInstaller runs. **The `PFRSENTINEL_DEV_MODE` environment variable cannot do
+this** — it is read when `dev_mode_config` is imported, which for a frozen app
+is on the user's machine at launch, so setting it in a CI job changes nothing
+about the artifact. PRs get the app folder; dispatch also builds the Inno Setup
+installer by default, which is the only regular exercise `installer/PFRSentinel.iss`
+gets.
 
-| Trigger | Channel | `DEV_MODE_AVAILABLE` | Installer |
-|---|---|---|---|
-| Pull request | `dev` | `True` — raw FITS/TIFF exports, calibration JSON, ML prediction | no |
-| `v*` tag | `production` | `False` | yes |
-| Manual dispatch | your choice (default `dev`) | follows the choice | optional |
+There is **no production build in CI, and no tag trigger on `build.yml`**.
+Release builds are signed, and signing cannot run on a hosted runner:
+`scripts/Connect-SimplySign.ps1` drives the SimplySign Desktop GUI with
+synthetic keystrokes (needs an interactive desktop session), and `CERTUM_OTP_URI`
+is the TOTP seed for the signing identity. An unsigned production artifact would
+be a release candidate nobody can release. **Cut releases locally with
+`build_sentinel_installer.bat`**, which signs `PFRSentinel.exe` *before* Inno
+Setup packages it and signs the installer afterwards — the order matters, so a
+CI-built installer cannot simply be signed after the fact. Use
+`python scripts/ci/set_build_channel.py production` there in place of the manual
+checklist.
 
-`scripts/ci/set_build_channel.py` writes the flag into
-`services/dev_mode_config.py` before PyInstaller runs, replacing the manual
-checklist at the end of `build_sentinel.bat`. **The `PFRSENTINEL_DEV_MODE`
-environment variable cannot do this** — it is read when `dev_mode_config` is
-imported, which for a frozen app is on the user's machine at launch, so setting
-it in a CI job changes nothing about the artifact.
+Tags still run `tag-pushed.yml`, which now asserts `version.py` matches the tag.
+`claude-release-notes.yml` chains off it and only fires on success, so a
+mismatched tag blocks the draft rather than producing notes for a version no
+artifact will carry.
 
-The Windows job also builds the NINA plugin with `dotnet` (its only automated
-check — there is no C# test suite), asserts the exe's FileVersion matches
-`version.py`, and on a tag asserts `version.py` matches the tag itself before
-building anything. A missing NINA plugin DLL is a warning on `dev` and an error
-on `production`.
-
-**Nothing CI produces is code-signed, production included** — the Certum
-SimplySign flow in `build_sentinel.bat` needs a human to approve each request
-from a phone, so a tag build is a verified candidate, not a releasable binary.
-Cut the real one locally with `build_sentinel_installer.bat`.
+The Windows build job also compiles the NINA plugin with `dotnet` (its only
+automated check — there is no C# test suite) and asserts the exe's FileVersion
+matches `version.py`.
 
 macOS and Linux get `scripts/ci/check_spec_parses.py` instead of a build: it
 executes the spec with the PyInstaller classes stubbed, which catches a
