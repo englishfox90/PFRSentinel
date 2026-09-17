@@ -120,7 +120,7 @@ except Exception as e:
     print(f"[WARN] pystray: {e}")
     pystray_datas, pystray_binaries, pystray_hiddenimports = [], [], []
 
-# --- platformdirs (required by pkg_resources) ---
+# --- platformdirs (runtime dependency: services/utils_paths.py app-data root) ---
 try:
     platformdirs_datas, platformdirs_binaries, platformdirs_hiddenimports = collect_all('platformdirs')
     print(f"[OK] platformdirs: {len(platformdirs_datas)} datas, {len(platformdirs_hiddenimports)} imports")

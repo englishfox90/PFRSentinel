@@ -4,11 +4,12 @@ Thread-safe logging module for GUI with 7-day rotating file logs
 import queue
 import logging
 import logging.handlers
+import os
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from .app_config import APP_NAME, LOG_FILE
+from .app_config import APP_NAME, APP_DATA_FOLDER, LOG_FILE
 
 
 LOCATION_NOTICE_MARKER = '.log_location_notice'
@@ -69,6 +70,19 @@ def _safe_console_write(text):
         print(safe_text, file=stream)
     except Exception:
         pass
+
+
+def _legacy_log_directory():
+    r"""The pre-move log directory, or None when there cannot have been one.
+
+    Logs used to live in %APPDATA%\<APP_DATA_FOLDER>\logs. APPDATA is unset on
+    every non-Windows platform, where no such directory was ever written, so
+    there is nothing to point a reader at.
+    """
+    appdata = os.getenv('APPDATA')
+    if not appdata:
+        return None
+    return Path(appdata) / APP_DATA_FOLDER / 'logs'
 
 
 class AppLogger:
@@ -176,7 +190,15 @@ class AppLogger:
             marker.touch()
         except OSError:
             return
-        self.info(f"Log files are now stored in: {self.log_dir}")
+
+        notice = f"Log files are now stored in: {self.log_dir}"
+        legacy = _legacy_log_directory()
+        # The old retention glob never matched, so whatever is in the old
+        # directory is still there — name it so a support thread can account
+        # for the missing history without guessing.
+        if legacy is not None and legacy != self.log_dir:
+            notice += f" (previously {legacy}; any logs there were left in place)"
+        self.info(notice)
 
     def get_log_dir(self):
         """Get the log directory path for UI display"""

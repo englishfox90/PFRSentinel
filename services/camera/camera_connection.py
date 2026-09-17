@@ -124,12 +124,7 @@ class CameraConnection:
 
     @staticmethod
     def _is_running_as_admin() -> bool:
-        """Check if the current process holds elevated privileges.
-
-        POSIX reports the real euid. It gates nothing there — the USB
-        disable/enable ladder is Windows-only — but a silently false answer
-        would make the non-admin warnings fire on every macOS/Linux start.
-        """
+        """Elevated: Administrator on Windows, euid 0 on POSIX."""
         try:
             if sys.platform == 'win32':
                 import ctypes

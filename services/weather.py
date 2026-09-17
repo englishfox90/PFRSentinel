@@ -5,8 +5,8 @@ Fetches current weather data with caching to avoid excessive API calls
 import requests
 import time
 from datetime import datetime, timedelta
-from services.logger import app_logger
 
+from .logger import app_logger
 from .utils_paths import get_app_data_dir
 
 

@@ -2,7 +2,7 @@
 Tests for services.timelapse_writer.TimelapseWriter.
 
 Covers the ffmpeg process lifecycle. Output path and frame-geometry resolution
-live in test_timelapse_output_target.py.
+live in test_timelapse_writer_output.py.
 
 - The crash-loop guard: a persistent ffmpeg failure must NOT mint a new video
   file on every captured frame; restarts back off and orphan files are removed.

@@ -40,19 +40,39 @@ def offline_service(monkeypatch, no_network):
     return service
 
 
+@pytest.fixture
+def fake_app_data_root(monkeypatch, tmp_path):
+    """Redirect the shared resolver into tmp_path.
+
+    Without this the icon cache is created in the developer's real app-data
+    root every time the suite runs. The resolver's own platform behaviour is
+    covered by tests/test_utils_paths.py; what belongs here is only that
+    weather.py builds on top of it instead of reading the environment itself.
+    """
+    root = tmp_path / 'app_data_root'
+    root.mkdir()
+    # raising=False so that against code which does NOT delegate to the resolver
+    # the patch is simply inert and the test fails on the real assertion below,
+    # rather than erroring here about a missing attribute.
+    monkeypatch.setattr(weather_mod, 'get_app_data_dir', lambda: str(root),
+                        raising=False)
+    return root
+
+
 def test_icon_cache_dir_resolves_without_localappdata(
-    offline_service, monkeypatch, tmp_path
+    offline_service, fake_app_data_root, monkeypatch, tmp_path
 ):
     """With LOCALAPPDATA unset the icon cache directory must still be created,
-    at an absolute path outside the process working directory — not raise a
-    TypeError that the surrounding except swallows.
+    under whatever the shared resolver returns — not raise a TypeError that the
+    surrounding except swallows, and not fall back to the working directory.
 
-    makedirs is spied rather than asserting on the real directory: the app-data
-    root survives between runs, so an isdir() check would pass on stale state.
-    The resolver creates the root itself, so more than one call is expected.
+    makedirs is spied rather than only checking the directory afterwards: the
+    attempt is the thing that distinguishes fixed from unfixed code.
     """
     monkeypatch.delenv('LOCALAPPDATA', raising=False)
-    monkeypatch.chdir(tmp_path)
+    cwd = tmp_path / 'cwd'
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
 
     created = []
     real_makedirs = os.makedirs
@@ -65,10 +85,9 @@ def test_icon_cache_dir_resolves_without_localappdata(
 
     assert offline_service.get_weather_icon_path() is None   # no weather data
 
-    icon_dirs = [p for p in created if os.path.basename(p) == 'weather_icons']
-    assert icon_dirs, "icon cache directory was never created — resolution raised"
-    icon_dir = icon_dirs[0]
-    assert os.path.isabs(icon_dir)
-    assert tmp_path not in Path(icon_dir).parents
-    assert os.path.dirname(icon_dir) == get_app_data_dir()
-    assert not list(tmp_path.iterdir()), "nothing may be written to the cwd"
+    expected = fake_app_data_root / 'weather_icons'
+    assert str(expected) in created, \
+        "icon cache directory was never created — resolution raised"
+    assert os.path.isabs(str(expected))
+    assert expected.is_dir()
+    assert not list(cwd.iterdir()), "nothing may be written to the cwd"

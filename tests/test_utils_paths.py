@@ -9,10 +9,18 @@ tests also swap services.utils_paths.user_data_dir for a shim that drives the
 real platformdirs class for the platform under test, keeping the assertions
 against genuine path-building rather than a hand-rolled fake. Windows' own
 known-folder resolver is unavailable off Windows, so the Windows fixture
-stands in for it with platformdirs' WIN_PD_OVERRIDE_LOCAL_APPDATA hook.
-Every platform fixture pins sys.platform, so the suite behaves the same on
-the Windows CI runner as it does here.
+patches platformdirs' get_win_folder to point at tmp_path.
+
+EVERY test here must pin sys.platform, and every test that reaches the
+platformdirs branch must also clear LOCALAPPDATA and shim user_data_dir.
+A test that does neither silently changes meaning between this Linux
+container and the Windows CI runner: the runner takes the env-var branch,
+never calls the shim, and resolves the developer's real
+%LOCALAPPDATA%\PFRSentinel — creating files there and failing tmp_path
+assertions. That is a CI blocker, not a flake. The fixtures below do this;
+a test that does not use one has to do it itself.
 """
+import errno
 import os
 
 import pytest
@@ -36,14 +44,16 @@ def windows_dirs(monkeypatch, tmp_path):
     """Drive utils_paths through platformdirs' Windows class, rooted in tmp_path.
 
     LOCALAPPDATA is cleared so the env-var branch is out of the way and the
-    platformdirs fallback is what runs; WIN_PD_OVERRIDE_LOCAL_APPDATA is
-    platformdirs' own hook for standing in for the real known folder.
+    platformdirs fallback is what runs. get_win_folder stands in for the real
+    known-folder lookup, which is unavailable off Windows; patching the
+    resolver rather than using platformdirs' WIN_PD_OVERRIDE_* hook keeps this
+    working on every platformdirs release the app supports, not only 4.8+.
     """
     local_app_data = tmp_path / "AppData" / "Local"
     local_app_data.mkdir(parents=True)
     monkeypatch.setattr(utils_paths.sys, "platform", "win32")
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    monkeypatch.setenv("WIN_PD_OVERRIDE_LOCAL_APPDATA", str(local_app_data))
+    monkeypatch.setattr(pd_windows, "get_win_folder", lambda csidl_name: str(local_app_data))
     monkeypatch.setattr(utils_paths, "user_data_dir", _platform_shim(pd_windows.Windows))
     return local_app_data
 
@@ -150,28 +160,38 @@ def test_linux_app_data_dir_is_local_share(linux_dirs):
     assert os.path.isdir(app_dir)
 
 
-def test_app_data_dir_is_absolute_with_no_localappdata(monkeypatch, tmp_path):
-    """The old implementation joined an empty LOCALAPPDATA and produced a
-    relative 'PFRSentinel' under whatever the working directory happened to be."""
-    monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_windows_empty_localappdata_falls_through_to_platformdirs(
+    windows_dirs, monkeypatch, tmp_path
+):
+    """An empty LOCALAPPDATA must not be joined. Testing truthiness rather than
+    `is not None` is what stops os.path.join('', 'PFRSentinel') returning a
+    relative path that lands wherever the process happens to be running."""
+    monkeypatch.setenv("LOCALAPPDATA", "")
     monkeypatch.chdir(tmp_path)
 
     app_dir = utils_paths.get_app_data_dir()
 
     assert os.path.isabs(app_dir)
+    assert app_dir.replace("\\", "/") == str(windows_dirs / APP_DATA_FOLDER).replace("\\", "/")
     assert not (tmp_path / APP_DATA_FOLDER).exists()
 
 
-def test_app_config_app_data_dir_is_absolute_with_no_localappdata(monkeypatch, tmp_path):
+def test_app_config_does_not_create_a_relative_data_dir_in_the_working_directory(
+    linux_dirs, monkeypatch, tmp_path
+):
+    """app_config used to join os.getenv('LOCALAPPDATA', '') with no platform
+    branch, so off Windows it returned a bare 'PFRSentinel' and os.makedirs
+    created it under the process working directory."""
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.chdir(tmp_path)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
 
     app_dir = app_config.get_app_data_dir()
 
     assert os.path.isabs(app_dir)
-    assert not (tmp_path / APP_DATA_FOLDER).exists()
+    assert app_dir == str(linux_dirs / ".local" / "share" / APP_DATA_FOLDER)
+    assert not (cwd / APP_DATA_FOLDER).exists()
 
 
 def test_app_config_delegates_to_utils_paths(linux_dirs):
@@ -202,20 +222,44 @@ def test_ml_contribution_dir_under_app_data_dir(linux_dirs):
     assert os.path.isdir(ml_dir)
 
 
-def test_app_data_dir_falls_back_to_temp_when_home_is_read_only(monkeypatch, tmp_path):
-    """Sandboxed and read-only-home environments must not break module import."""
-    monkeypatch.setattr(utils_paths, "user_data_dir",
-                        lambda *args, **kwargs: str(tmp_path / "denied" / APP_DATA_FOLDER))
-
+def _deny_makedirs_under(monkeypatch, tmp_path, error):
+    """Make os.makedirs raise for the 'denied' root, and redirect the tempdir."""
     real_makedirs = os.makedirs
 
-    def _deny_under_denied(path, *args, **kwargs):
+    def _makedirs(path, *args, **kwargs):
         if "denied" in str(path):
-            raise PermissionError(path)
+            raise error
         return real_makedirs(path, *args, **kwargs)
 
-    monkeypatch.setattr(utils_paths.os, "makedirs", _deny_under_denied)
+    monkeypatch.setattr(utils_paths.os, "makedirs", _makedirs)
     monkeypatch.setattr(utils_paths.tempfile, "gettempdir", lambda: str(tmp_path / "tmp"))
+
+
+@pytest.mark.parametrize("platform_name", ["win32", "darwin", "linux"])
+def test_app_data_dir_falls_back_to_temp_when_root_is_unwritable(
+    monkeypatch, tmp_path, platform_name
+):
+    """Sandboxed and read-only-home environments must not break module import."""
+    monkeypatch.setattr(utils_paths.sys, "platform", platform_name)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(utils_paths, "user_data_dir",
+                        lambda *args, **kwargs: str(tmp_path / "denied" / APP_DATA_FOLDER))
+    _deny_makedirs_under(monkeypatch, tmp_path, PermissionError("denied"))
+
+    app_dir = utils_paths.get_app_data_dir()
+
+    assert app_dir == os.path.join(str(tmp_path / "tmp"), APP_DATA_FOLDER)
+    assert os.path.isdir(app_dir)
+
+
+def test_app_data_dir_falls_back_to_temp_on_read_only_filesystem(monkeypatch, tmp_path):
+    """EROFS and ENOSPC are not PermissionError. This function runs at import
+    time via config_defaults, so any unwritable root has to degrade, not raise.
+    Exercised through the Windows env-var branch, which shares the same guard."""
+    denied = tmp_path / "denied" / "Local"
+    monkeypatch.setattr(utils_paths.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(denied))
+    _deny_makedirs_under(monkeypatch, tmp_path, OSError(errno.EROFS, "Read-only file system"))
 
     app_dir = utils_paths.get_app_data_dir()
 

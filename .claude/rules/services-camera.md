@@ -25,7 +25,7 @@ These are real bugs that have shipped in this project. Get them right.
 - Windows USB reset uses `CM_Reenumerate_DevNode()` via ctypes. Wrap in try/except and fall back gracefully on non-Windows or unprivileged sessions.
 
 ## Disconnect / cleanup
-- `ZWOCamera` relies on a layered safety net: `__del__`, `__enter__/__exit__`, and a `_cleanup_lock`. Don't remove any of these — improper cleanup leaves the USB device hung until reboot.
+- The cleanup safety net is layered, and since the camera package split it spans two classes: `ZWOCamera` owns `__del__` and `__enter__`/`__exit__` (`services/camera/zwo_camera.py`); `CameraConnection` owns the `_cleanup_lock` that serialises teardown (`services/camera/camera_connection.py`). Don't remove any of them — improper cleanup leaves the USB device hung until reboot.
 - `stop_capture()` aborts the in-progress exposure and any running calibration, then joins the worker thread with a **3-second timeout**. Preserve that flow — the aborts are what make the short join safe. Dropping the aborts and keeping a short join will race; an unbounded join can deadlock shutdown.
 
 ## Per-camera profiles

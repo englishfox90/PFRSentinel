@@ -149,7 +149,7 @@ Verify:
 2. **Verify Installation**:
    - Application runs from Start Menu
    - Desktop shortcut works (if created)
-   - Logs appear in `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
+   - Logs appear in `%LOCALAPPDATA%\PFRSentinel\logs\`
 
 3. **Test Upgrade**:
    - Build new version (update `version.py`)
@@ -161,7 +161,7 @@ Verify:
    - Uninstall via Control Panel or Start Menu
    - Verify Program Files directory removed
    - Verify Start Menu shortcuts removed
-   - Verify logs remain in `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
+   - Verify logs remain in `%LOCALAPPDATA%\PFRSentinel\logs\`
 
 ## Versioning
 
@@ -194,19 +194,19 @@ Verify:
 - **Libraries**: `_internal\` folder
 
 ### User Data (NOT removed on uninstall)
-- **Logs**: `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
-  - `watchdog.log` - Current log file
-  - `watchdog.log.YYYY-MM-DD` - Rotated logs (7 days kept)
+- **Logs**: `%LOCALAPPDATA%\PFRSentinel\logs\` (resolved via `services.utils_paths.get_log_dir()`)
+  - `sentinel.log` - Current log file
+  - `sentinel.log.YYYY-MM-DD` - Rotated logs (7 days kept)
   - Automatic daily rotation
   - Automatic cleanup of logs older than 7 days
 
-- **Config**: `config.json` (in application directory for now)
-  - **Note**: Could be moved to `%LOCALAPPDATA%\ASIOverlayWatchDog\` in future
+- **Config**: `%LOCALAPPDATA%\PFRSentinel\config.json`
+  - Resolved via `services.utils_paths.get_app_data_dir()` — the same root as the logs
 
 ## Logging System
 
 ### Log Behavior
-- **Location**: `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\watchdog.log`
+- **Location**: `%LOCALAPPDATA%\PFRSentinel\logs\sentinel.log`
 - **Rotation**: Daily at midnight
 - **Retention**: Last 7 days only
 - **Cleanup**: Automatic on app startup and via TimedRotatingFileHandler
@@ -223,7 +223,7 @@ Verify:
 ### Example Log Path
 On a typical Windows system for user "John":
 ```
-C:\Users\John\AppData\Local\ASIOverlayWatchDog\Logs\watchdog.log
+C:\Users\John\AppData\Local\PFRSentinel\logs\sentinel.log
 ```
 
 ## Distribution
@@ -288,7 +288,7 @@ pip install pyinstaller
   ```
 
 ### Logs Not Appearing
-- Check `%LOCALAPPDATA%\ASIOverlayWatchDog\Logs\`
+- Check `%LOCALAPPDATA%\PFRSentinel\logs\`
 - Verify write permissions
 - Check console output for logging initialization errors
 

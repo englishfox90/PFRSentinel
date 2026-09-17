@@ -8,11 +8,7 @@ import tempfile
 
 from platformdirs import user_data_dir
 
-# Import app configuration for centralized naming
-try:
-    from .app_config import APP_DATA_FOLDER
-except ImportError:
-    APP_DATA_FOLDER = "PFRSentinel"  # Fallback
+from .app_config import APP_DATA_FOLDER
 
 
 def resource_path(relative_path):
@@ -59,12 +55,13 @@ def get_app_data_dir():
         # %LOCALAPPDATA%\PFRSentinel\PFRSentinel, orphaning every existing config.
         app_dir = user_data_dir(APP_DATA_FOLDER, appauthor=False)
 
-    # Create directory if it doesn't exist. In sandboxed/dev environments the
-    # home directory may be read-only; use the temp directory rather than
-    # failing module import.
+    # Create directory if it doesn't exist. This runs at import time via
+    # config_defaults, so any unwritable root — a sandbox, a read-only
+    # ~/Library or bind mount (EROFS), a full disk (ENOSPC) — has to degrade
+    # to the temp directory rather than take down module import.
     try:
         os.makedirs(app_dir, exist_ok=True)
-    except PermissionError:
+    except OSError:
         app_dir = os.path.join(tempfile.gettempdir(), APP_DATA_FOLDER)
         os.makedirs(app_dir, exist_ok=True)
 

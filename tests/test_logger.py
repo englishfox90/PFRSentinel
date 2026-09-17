@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from services import utils_paths
-from services.app_config import LOG_FILE
+from services.app_config import APP_DATA_FOLDER, LOG_FILE
 from services.logger import LOCATION_NOTICE_MARKER, AppLogger, _safe_console_write
 
 NON_ASCII_MESSAGE = "warning ⚠ threshold exceeded → check camera"
@@ -64,6 +64,23 @@ def _make_isolated_logger(tmp_path, logger_name, request):
     inst.file_logger = file_logger
     inst.file_handler = handler
     return inst, log_path
+
+
+def _isolate_app_data(tmp_path, monkeypatch):
+    """Point the app data root at tmp_path and return its logs child."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(utils_paths, 'get_app_data_dir', lambda: str(tmp_path))
+    return log_dir
+
+
+def _announce_twice(inst):
+    """Announce twice (the marker must suppress the second) and drain the queue."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sys, 'stdout', io.StringIO())
+        inst._announce_log_location()
+        inst._announce_log_location()
+    return inst.get_messages()
 
 
 class TestSafeConsoleWrite:
@@ -266,22 +283,45 @@ class TestLogLocationReporting:
 
     def test_location_notice_logged_once_with_marker_outside_log_dir(
             self, tmp_path, request, monkeypatch):
-        log_dir = tmp_path / "logs"
-        log_dir.mkdir()
-        app_data_root = tmp_path
-        monkeypatch.setattr(utils_paths, 'get_app_data_dir', lambda: str(app_data_root))
-
+        log_dir = _isolate_app_data(tmp_path, monkeypatch)
+        monkeypatch.delenv('APPDATA', raising=False)
         inst, _ = _make_isolated_logger(log_dir, "TestLoggerNotice", request)
 
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(sys, 'stdout', io.StringIO())
-            inst._announce_log_location()
-            inst._announce_log_location()
+        messages = _announce_twice(inst)
 
-        messages = inst.get_messages()
         assert len(messages) == 1
         assert str(log_dir) in messages[0]
 
-        markers = [p.name for p in app_data_root.iterdir() if p.name.startswith('.')]
+        markers = [p.name for p in tmp_path.iterdir() if p.name.startswith('.')]
         assert markers == [LOCATION_NOTICE_MARKER]
         assert not any(p.name.startswith('.') for p in log_dir.iterdir())
+
+    def test_location_notice_names_legacy_appdata_dir_on_windows(
+            self, tmp_path, request, monkeypatch):
+        log_dir = _isolate_app_data(tmp_path, monkeypatch)
+        roaming = tmp_path / "Roaming"
+        monkeypatch.setenv('APPDATA', str(roaming))
+        inst, _ = _make_isolated_logger(log_dir, "TestLoggerNoticeLegacy", request)
+
+        messages = _announce_twice(inst)
+
+        legacy = roaming / APP_DATA_FOLDER / 'logs'
+        assert len(messages) == 1
+        assert str(log_dir) in messages[0]
+        assert f"previously {legacy}" in messages[0]
+        assert "left in place" in messages[0]
+
+        # Naming the old directory must never bring it into existence.
+        assert not legacy.exists()
+
+    def test_location_notice_omits_legacy_dir_without_appdata(
+            self, tmp_path, request, monkeypatch):
+        log_dir = _isolate_app_data(tmp_path, monkeypatch)
+        monkeypatch.delenv('APPDATA', raising=False)
+        inst, _ = _make_isolated_logger(log_dir, "TestLoggerNoticePosix", request)
+
+        messages = _announce_twice(inst)
+
+        assert len(messages) == 1
+        assert messages[0].endswith(f"Log files are now stored in: {log_dir}")
+        assert "previously" not in messages[0]
