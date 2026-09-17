@@ -254,6 +254,7 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_camera.py` | 14 | `zwo_camera` — SDK, config, debayering (3 need `requires_camera`) |
 | `test_discord.py` | 32 | `discord_alerts` — webhooks, embeds (mocked) |
 | `test_image_output.py` | 18 | `processor` — overlays, stretch, output formats |
+| `test_output_crop.py` | 58 | `output_crop` — box normalisation/clamping/evenness, centring, fit-to-circle, proportional rescale across frame sizes, PIL crop, metadata round-trip, DEFAULT_CONFIG integration |
 | `test_settings.py` | 11 | `config` — JSON save/load, merge, defaults |
 | `test_webserver.py` | 13 | `web_output` — HTTP server, ETag, status JSON (`requires_network`) |
 | `test_ml_classifiers.py` | 6 | `ml.roof_classifier` / `ml.sky_classifier` + production `ui/controllers/ml_prediction.py` — ONNX load + inference smoke tests (`requires_ml_models`) |
@@ -276,6 +277,11 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_schedule_window_source_ui.py` | 5 | `_schedule_window_source` — window-source rows: load, visibility, signals (offscreen Qt) |
 | `test_timelapse_window_forecast.py` | 26 | `timelapse_window_forecast` — open/next window, inclusive edges, twilight depths on the local night, fixed-time fallback notes, clock-change durations, no log spam |
 | `test_timelapse_status_card.py` | 3 | `TimelapseStatusCard` — session line, projected window line, open-video button (offscreen Qt) |
+| `test_output_crop_card.py` | 21 | `OutputCropCard` / `CropBoxEditor` / `OutputCropController` — drag/resize/spin clamping, config round-trip, thumbnail cap + active gating, Fit-to-sky (offscreen Qt) |
+| `test_watch_controller_crop.py` | 4 | `WatchControllerQt` — the output crop on `img.info` reaches the all-sky preview renderer; `extras` forwarded on `image_processed` |
+| `test_watch_crop_cache.py` | 2 | `_on_watch_image_processed` — watch mode caches the pre-resize clean frame for Calibrate Now, not the cropped output |
+| `test_watcher.py` | 2 | `ImageFileHandler` — `process_image` extras reach the callback |
+| `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.

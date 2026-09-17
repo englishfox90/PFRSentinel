@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from services.logger import app_logger as log
+from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
 
 # Pre-import scipy at module level so background threads never trigger
 # a first-time import (causes segfault in PyInstaller builds).
@@ -125,38 +126,33 @@ def render_allsky_overlay(
     if model is None:
         return img  # Silently skip — not calibrated
 
-    # --- Rescale model when the target image differs from calibration size ---
-    # resize_percent < 100 shrinks the image after calibration; the model's
-    # pixel coordinates (cx, cy, a1, a3, a5) must scale proportionally or
-    # every projected star lands in the wrong pixel.
-    if model.image_width > 0 and model.image_height > 0:
-        w_target, h_target = img.size
-        w_model, h_model = model.image_width, model.image_height
-        if w_target != w_model or h_target != h_model:
-            ar_model = w_model / h_model
-            ar_target = w_target / h_target
-            if abs(ar_model - ar_target) / max(ar_model, ar_target) > 0.02:
-                log.warning(
-                    f"allsky: aspect-ratio mismatch — calibrated at "
-                    f"{w_model}x{h_model}, rendering at {w_target}x{h_target}. "
-                    "Image was cropped, not resized; skipping overlay to avoid "
-                    "misalignment."
-                )
+    # --- Fit the model to the frame we are drawing on ---
+    # An OUTPUT_CROP in the metadata means the caller cut a sub-rectangle out of
+    # the frame the model was scaled for (issue #12). That has to TRANSLATE the
+    # optical centre, not scale it — and a square-to-square crop has the same
+    # aspect ratio as the full frame, so the aspect test below cannot tell the
+    # two apart on its own. Scale first (resize_percent), then translate.
+    crop = CropBox.from_metadata(metadata.get(CROP_METADATA_KEY))
+    if crop is not None and img.size != (crop.width, crop.height):
+        log.warning(
+            f"allsky: OUTPUT_CROP says {crop.width}x{crop.height} but the image is "
+            f"{img.width}x{img.height}; skipping overlay rather than misplace it."
+        )
+        return img
+    if crop is not None:
+        if model.image_width > 0 and model.image_height > 0:
+            model = _scale_model_to(model, crop.frame_width, crop.frame_height)
+            if model is None:
                 return img
-            s = w_target / w_model
-            global _last_scale_logged
-            if s != _last_scale_logged:
-                log.info(
-                    f"allsky: scaling calibration model by {s:.3f} "
-                    f"({w_model}x{h_model} → {w_target}x{h_target})"
-                )
-                _last_scale_logged = s
-            model = replace(
-                model,
-                cx=model.cx * s, cy=model.cy * s,
-                a1=model.a1 * s, a3=model.a3 * s, a5=model.a5 * s,
-                image_width=w_target, image_height=h_target,
-            )
+        model = replace(
+            model,
+            cx=model.cx - crop.x, cy=model.cy - crop.y,
+            image_width=crop.width, image_height=crop.height,
+        )
+    elif model.image_width > 0 and model.image_height > 0:
+        model = _scale_model_to(model, *img.size)
+        if model is None:
+            return img
 
     # --- Determine observation time ---
     # Prefer the authoritative true-UTC instant injected by the preview path
@@ -285,6 +281,48 @@ def render_allsky_for_preview(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _scale_model_to(
+    model: FisheyeModel, w_target: int, h_target: int,
+) -> Optional[FisheyeModel]:
+    """Rescale a model's pixel coordinates to a differently sized frame.
+
+    resize_percent < 100 shrinks the image after calibration; the model's pixel
+    coordinates (cx, cy, a1, a3, a5) must scale proportionally or every
+    projected star lands in the wrong pixel. Returns ``None`` when the aspect
+    ratios disagree — the frame was cropped by something that did not declare
+    an OUTPUT_CROP, and scaling would silently misalign the whole overlay.
+    """
+    w_model, h_model = model.image_width, model.image_height
+    if w_target == w_model and h_target == h_model:
+        return model
+
+    ar_model = w_model / h_model
+    ar_target = w_target / h_target
+    if abs(ar_model - ar_target) / max(ar_model, ar_target) > 0.02:
+        log.warning(
+            f"allsky: aspect-ratio mismatch — calibrated at "
+            f"{w_model}x{h_model}, rendering at {w_target}x{h_target}. "
+            "Image was cropped, not resized; skipping overlay to avoid "
+            "misalignment."
+        )
+        return None
+
+    s = w_target / w_model
+    global _last_scale_logged
+    if s != _last_scale_logged:
+        log.info(
+            f"allsky: scaling calibration model by {s:.3f} "
+            f"({w_model}x{h_model} → {w_target}x{h_target})"
+        )
+        _last_scale_logged = s
+    return replace(
+        model,
+        cx=model.cx * s, cy=model.cy * s,
+        a1=model.a1 * s, a3=model.a3 * s, a5=model.a5 * s,
+        image_width=w_target, image_height=h_target,
+    )
+
 
 def _compute_allowed_ids(
     config: dict,

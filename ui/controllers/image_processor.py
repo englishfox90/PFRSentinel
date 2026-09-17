@@ -17,11 +17,16 @@ from services.gc_scheduler import request_full_collect
 from services.logger import app_logger
 from services.notifications import ERROR, ROOF_CHANGED, NotificationEvent
 from services.preview_scaling import downscale_for_preview
+from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from services.processor import add_overlays, auto_stretch_image
 from services.sharpening import apply_unsharp_mask
 from services.ml_service import get_ml_service, analyze_image_for_tokens
 from services.allsky.overlay_renderer import render_allsky_for_preview as _render_allsky_for_preview
 from .dev_mode_utils import dev_mode_saver, collect_ml_contribution_sample
+
+# One-shot guard so the output-crop DEBUG line fires once per distinct box
+# rather than on every frame.
+_last_crop_logged = None
 
 
 class ImageProcessingTask:
@@ -38,8 +43,9 @@ class ImageProcessingTask:
     which must not run on the GUI thread; the factory returns
     ``(pil_image, metadata)`` or ``(None, None)`` when nothing can be rebuilt.
     """
-    def __init__(self, img, metadata: dict, config: dict, frame_factory=None):
+    def __init__(self, img, metadata: dict, config: dict, frame_factory=None, reprocess=False):
         self.img = img
+        self.reprocess = reprocess
         self.metadata = metadata.copy() if metadata else {}
         self.config = config.copy() if config else {}
         self.frame_factory = frame_factory
@@ -232,7 +238,8 @@ class ImageProcessorWorker(QThread):
                 'g': np.histogram(raw_array[:, :, 1], bins=256, range=hist_range)[0],
                 'b': np.histogram(raw_array[:, :, 2], bins=256, range=hist_range)[0],
                 'auto_exposure': zwo_auto_exposure,
-                'target_brightness': target_brightness
+                'target_brightness': target_brightness,
+                'native_size': (img.width, img.height),  # pre-resize: the crop editor's reference
             }
             # Note: We keep metadata['RAW_RGB_16BIT'] alive for auto-stretch below
             
@@ -409,6 +416,23 @@ class ImageProcessorWorker(QThread):
 
             del raw_array  # Last use above — release the 76 MB numpy array before overlay rendering
 
+            # Output framing (issue #12). Everything above — auto-stretch, ML,
+            # star detection, the calibration feed, the meteor detection frame —
+            # has already run on the FULL frame; only the rendered outputs are
+            # cut down, and the overlays below are anchored on the cropped edges.
+            img, crop_box = apply_output_crop(img, config.get('output_crop', {}))
+            if crop_box is not None:
+                metadata[CROP_METADATA_KEY] = crop_box.as_metadata()
+                global _last_crop_logged
+                if crop_box != _last_crop_logged:
+                    _last_crop_logged = crop_box
+                    app_logger.debug(
+                        f"Output crop: {crop_box.width}x{crop_box.height} at "
+                        f"({crop_box.x}, {crop_box.y}) of "
+                        f"{crop_box.frame_width}x{crop_box.frame_height}")
+            else:
+                metadata.pop(CROP_METADATA_KEY, None)
+
             # Base render — no all-sky overlay. This is the CLEAN image: it is
             # what reaches processing_complete's output_img slot and what
             # watch-mode caches for "Calibrate Now". It must stay clean
@@ -436,10 +460,18 @@ class ImageProcessorWorker(QThread):
             gui_preview_img = downscale_for_preview(preview_img)
 
             # Timelapse receives the clean image unless opted into burn-in.
-            self.timelapse_ready.emit(stretched_for_preview, timelapse_img)
-            # Meteor stack receives the pre-stretch detection frame + full-res clean.
-            if _det_frame is not None:
-                self.detection_frame_ready.emit(_det_frame, stretched_for_preview)
+            # The clean timelapse frame is cut to the same box: issue #12 is
+            # about the timelapse, and include_overlays defaults to off.
+            timelapse_clean = (stretched_for_preview.crop(crop_box.pil_box)
+                               if crop_box is not None else stretched_for_preview)
+            # A reprocess is the same capture again with new settings: feeding
+            # it to the timelapse duplicates a frame (and a crop edit would
+            # split the session on every drag); the meteor stack would diff a
+            # frame against itself. Both are time series of captures only.
+            if not task.reprocess:
+                self.timelapse_ready.emit(timelapse_clean, timelapse_img)
+                if _det_frame is not None:
+                    self.detection_frame_ready.emit(_det_frame, stretched_for_preview)
 
             # Generate output path
             session = metadata.get('session', datetime.now().strftime('%Y-%m-%d'))
@@ -601,7 +633,7 @@ class ImageProcessor(QObject):
         self._worker.wait(1000)
         app_logger.debug("Image processor stopped")
     
-    def process_and_save(self, img, metadata: dict, frame_factory=None):
+    def process_and_save(self, img, metadata: dict, frame_factory=None, reprocess=False):
         """
         Process image and save to disk
         
@@ -626,7 +658,8 @@ class ImageProcessor(QObject):
                 return
             
             # Create task and queue it
-            task = ImageProcessingTask(img, metadata, config, frame_factory=frame_factory)
+            task = ImageProcessingTask(img, metadata, config, frame_factory=frame_factory,
+                                       reprocess=reprocess)
             self._worker.queue_task(task)
             
         except Exception as e:
@@ -673,6 +706,7 @@ class ImageProcessor(QObject):
             'allsky_overlay': mw.config.get('allsky_overlay', {}),
             'weather': mw.config.get('weather', {}),
             'meteor': mw.config.get('meteor', {}),
+            'output_crop': mw.config.get('output_crop', {}),
         }
 
         return config

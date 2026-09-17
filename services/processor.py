@@ -6,6 +6,7 @@ from PIL import Image
 import numpy as np
 from .logger import app_logger
 from .image_stretch import auto_stretch_image, mtf_stretch, _stretch_channel, _calculate_mtf_midtone  # noqa: F401
+from .output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from .overlay_renderer import add_overlays  # noqa: F401
 
 
@@ -136,7 +137,7 @@ def build_output_filename(pattern, metadata, output_format='PNG'):
     return result
 
 
-def process_image(image_path, config, metadata_dict=None, weather_service=None):
+def process_image(image_path, config, metadata_dict=None, weather_service=None, extras=None):
     """
     Main processing function:
     1. Parse sidecar file OR use provided metadata
@@ -147,6 +148,10 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None):
         image_path: Path to image file OR PIL Image object
         config: Config object
         metadata_dict: Optional pre-built metadata dictionary (for camera capture)
+        extras: Optional dict the caller owns; filled with 'metadata', 'native_size'
+            (frame size before resize) and 'clean_frame' (the pre-resize, pre-crop,
+            pre-overlay image) so watch mode caches a full frame for Calibrate Now
+            and reprocess (issue #12)
 
     Returns: (success: bool, output_path: str, error: str)
     """
@@ -224,10 +229,25 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None):
                 raw_img = raw_img.convert('RGB')
             raw_img = auto_stretch_image(raw_img, auto_stretch_config)
 
+        # The pre-resize, pre-crop frame is what a watch-mode reprocess and
+        # Calibrate Now must start from — resizing or cropping it twice would
+        # compound (issue #12).
+        clean_frame = raw_img
+        native_size = raw_img.size
         if resize_percent > 0 and resize_percent != 100:
             new_width = int(raw_img.width * resize_percent / 100)
             new_height = int(raw_img.height * resize_percent / 100)
             raw_img = raw_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # Output framing (issue #12) — after every analysis stage above, so only
+        # the rendered output is cut down; overlays anchor on the cropped edges.
+        raw_img, crop_box = apply_output_crop(raw_img, config.get('output_crop', {}))
+        if isinstance(extras, dict):
+            extras.update(metadata=metadata, native_size=native_size, clean_frame=clean_frame)
+        if crop_box is not None:
+            metadata[CROP_METADATA_KEY] = crop_box.as_metadata()
+        else:
+            metadata.pop(CROP_METADATA_KEY, None)
 
         processed_img = add_overlays(raw_img, overlays_to_apply, metadata, weather_service=weather_service)
 
@@ -273,6 +293,10 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None):
         else:
             save_image_atomic(processed_img, output_path, output_format.upper())
 
+        if crop_box is not None:
+            # Watch mode only gets the image back (FileWatcher's callback is
+            # (path, image)), so the all-sky preview reads the crop from here.
+            processed_img.info[CROP_METADATA_KEY] = crop_box.as_metadata()
         return True, output_path, None, processed_img
 
     except Exception as e:

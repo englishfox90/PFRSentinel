@@ -66,16 +66,31 @@ Previously, PFRSentinel stored camera settings **globally** - all cameras shared
   - `_on_flip_changed()` - saves `flip`
   - `_on_bayer_changed()` - saves `bayer_pattern`
 
-### 4. ROI Handling (`services/camera_connection.py`)
+### 4. ROI Handling (`services/camera/camera_connection.py`)
 **IMPORTANT**: ROI (Region of Interest) is ALWAYS set to full frame:
 - In `connect()` method (line 274-282): Sets ROI to MaxWidth x MaxHeight
 - In `configure()` method (line 434-436): Sets ROI to full frame
 - This is CORRECT behavior - prevents resolution mismatch errors
 
-The ROI is NOT configurable per camera because:
+The sensor ROI is NOT configurable per camera, and this is intentional, not a
+missing feature:
 1. Full frame is the safest default
 2. Prevents reshape errors during image processing
 3. Camera capabilities (MaxWidth/MaxHeight) are read dynamically
+4. Auto-exposure and auto-stretch anchor their statistics on the dark
+   corners of the full frame — a sensor ROI would feed them a different
+   population of pixels and change their behaviour underfoot
+5. The ML roof/sky classifiers were trained on full-frame corner features
+6. All-sky calibration works in full-frame optical coordinates (the lens
+   centre, plate scale, etc. are all measured against the full sensor)
+7. Meteor detection exclusion zones are drawn in full-frame coordinates
+
+For issue #12 (an all-sky lens rarely fills the sensor, so users want the
+*outputs* to carry the sky disc without black margins) the fix is instead an
+**output-stage crop**: every analysis stage above still sees the full frame,
+and only the saved file / web frame / timelapse output is cut down after
+processing. See the `output_crop` config block, `services/output_crop.py`,
+and the Processing page's "Output framing" card.
 
 ## Camera Fix Script
 
@@ -175,13 +190,18 @@ After implementing changes, test:
 
 ### Why ROI is Always Full Frame
 The ROI (Region of Interest) is intentionally set to the camera's maximum resolution:
-- **Line 274-282** in `camera_connection.py`: Initial connection sets full frame
-- **Line 434-436** in `camera_connection.py`: Configuration sets full frame
-- **Reason**: Prevents resolution mismatch errors during image capture/processing
+- **Line 274-282** in `services/camera/camera_connection.py`: Initial connection sets full frame
+- **Line 434-436** in `services/camera/camera_connection.py`: Configuration sets full frame
+- **Reason**: Prevents resolution mismatch errors during image capture/processing, and keeps
+  every analysis stage (auto-exposure, auto-stretch, ML classifiers, all-sky calibration,
+  meteor exclusion zones) working against the same full-frame pixel geometry
 
-If you need to capture a smaller region:
-- Do it in **post-processing** (resize_percent in output settings)
-- NOT in ROI settings (would break compatibility)
+If you need the *outputs* to show only part of the frame (e.g. an all-sky
+disc without the black corners):
+- Use the **output-stage crop** (issue #12) — `output_crop` in config, backed
+  by `services/output_crop.py`, set via the Processing page's "Output framing"
+  card, or the simple **resize_percent** in output settings for a uniform downscale
+- NOT sensor ROI settings (would break compatibility with every analysis stage above)
 
 ### Profile Storage Location
 - **Windows**: `%LOCALAPPDATA%\PFRSentinel\config.json`

@@ -270,6 +270,195 @@ def test_small_frame_reaches_the_preview_untouched(worker, tmp_path):
     assert preview.size == (640, 480) and output.size == (640, 480)
 
 
+# ---------------------------------------------------------------------------
+# Output framing (issue #12) — the crop is an OUTPUT-stage cut: every analysis
+# frame stays full size, only the rendered destinations shrink.
+# ---------------------------------------------------------------------------
+
+def _crop_config(tmp_path, **over):
+    cfg = _base_config(tmp_path, {'enabled': False})
+    crop = {'enabled': True, 'x': 40, 'y': 100, 'width': 200, 'height': 200,
+            'ref_width': 400, 'ref_height': 400}
+    crop.update(over)
+    cfg['output_crop'] = crop
+    return cfg
+
+
+def test_crop_applies_to_every_output_destination(worker, tmp_path):
+    worker._main_window = None
+    results, timelapse = [], []
+    worker.processing_complete.connect(
+        lambda p, o, m, path, d: results.append((o, m, path, d)))
+    worker.timelapse_ready.connect(lambda clean, out: timelapse.append((clean, out)))
+
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (400, 400), (30, 40, 50)), {'FILENAME': 'f.png'},
+        _crop_config(tmp_path)))
+
+    assert results, "processing_complete did not fire"
+    output_img, metadata, path, dispatch_img = results[0]
+    assert output_img.size == (200, 200)
+    assert dispatch_img.size == (200, 200)
+    assert Image.open(path).size == (200, 200)
+    assert timelapse and timelapse[0][1].size == (200, 200)
+    assert metadata['OUTPUT_CROP'] == {
+        'x': 40, 'y': 100, 'width': 200, 'height': 200,
+        'frame_width': 400, 'frame_height': 400,
+    }
+
+
+def test_crop_leaves_the_analysis_frames_full_size(worker, tmp_path):
+    worker._main_window = None
+    cfg = _crop_config(tmp_path)
+    cfg['meteor'] = {'enabled': True, 'detection_long_side': 128}
+
+    timelapse, detection = [], []
+    worker.timelapse_ready.connect(lambda clean, out: timelapse.append(clean))
+    worker.detection_frame_ready.connect(lambda det, full: detection.append((det, full)))
+
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (400, 400), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg))
+
+    # The timelapse is the point of issue #12: its clean frame is cut to the
+    # box even with include_overlays off. Meteor detection stays full frame.
+    assert timelapse and timelapse[0].size == (200, 200)
+    assert detection
+    det_frame, full_clean = detection[0]
+    assert max(det_frame.size) == 128
+    assert full_clean.size == (400, 400)
+
+
+def test_crop_box_is_scaled_when_the_frame_differs_from_the_reference(worker, tmp_path):
+    # resize_percent halves the frame before the crop; the reference box must
+    # follow, and the metadata must describe the frame it was actually cut from.
+    worker._main_window = None
+    cfg = _crop_config(tmp_path)
+    cfg['resize_percent'] = 50
+    results = []
+    worker.processing_complete.connect(lambda p, o, m, path, d: results.append((o, m)))
+
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (400, 400), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg))
+
+    output_img, metadata = results[0]
+    assert output_img.size == (100, 100)
+    assert metadata['OUTPUT_CROP'] == {
+        'x': 20, 'y': 50, 'width': 100, 'height': 100,
+        'frame_width': 200, 'frame_height': 200,
+    }
+
+
+@pytest.mark.parametrize("over", [{'enabled': False}, {'width': 0, 'height': 0}])
+def test_disabled_or_zero_crop_changes_nothing_and_clears_stale_metadata(
+        worker, tmp_path, over):
+    worker._main_window = None
+    results = []
+    worker.processing_complete.connect(lambda p, o, m, path, d: results.append((o, m, path)))
+    metadata = {'FILENAME': 'f.png', 'OUTPUT_CROP': {'x': 1, 'y': 2, 'width': 3,
+                                                     'height': 4, 'frame_width': 5,
+                                                     'frame_height': 6}}
+
+    task = ImageProcessingTask(Image.new('RGB', (400, 400), (30, 40, 50)),
+                               metadata, _crop_config(tmp_path, **over))
+    worker._process_task(task)
+
+    output_img, emitted, path = results[0]
+    assert output_img.size == (400, 400)
+    assert Image.open(path).size == (400, 400)
+    assert 'OUTPUT_CROP' not in emitted
+
+
+# ---------------------------------------------------------------------------
+# reprocess=True (issue #12 review fix) — a reprocess is the same capture
+# again, not a new frame in the time series: timelapse/meteor must not see it,
+# but everything else (save, processing_complete, preview_ready) still fires.
+# ---------------------------------------------------------------------------
+
+def test_reprocess_suppresses_timelapse_and_detection_but_not_other_signals(worker, tmp_path):
+    worker._main_window = None
+    cfg = _base_config(tmp_path, {'enabled': False})
+    cfg['meteor'] = {'enabled': True, 'detection_long_side': 128}
+
+    timelapse, detection, complete, preview = [], [], [], []
+    worker.timelapse_ready.connect(lambda *a: timelapse.append(a))
+    worker.detection_frame_ready.connect(lambda *a: detection.append(a))
+    worker.processing_complete.connect(lambda *a: complete.append(a))
+    worker.preview_ready.connect(lambda *a: preview.append(a))
+
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (64, 64), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg,
+        reprocess=True))
+
+    assert timelapse == [], "reprocess must not feed the timelapse a duplicate frame"
+    assert detection == [], "reprocess must not feed the meteor stack a duplicate frame"
+    assert complete, "processing_complete must still fire on reprocess"
+    assert preview, "preview_ready must still fire on reprocess"
+
+
+def test_non_reprocess_frame_still_emits_timelapse_and_detection(worker, tmp_path):
+    # Control for the test above — the suppression is reprocess-specific, not
+    # a general regression in the meteor/timelapse wiring.
+    worker._main_window = None
+    cfg = _base_config(tmp_path, {'enabled': False})
+    cfg['meteor'] = {'enabled': True, 'detection_long_side': 128}
+
+    timelapse, detection = [], []
+    worker.timelapse_ready.connect(lambda *a: timelapse.append(a))
+    worker.detection_frame_ready.connect(lambda *a: detection.append(a))
+
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (64, 64), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg,
+        reprocess=False))
+
+    assert timelapse and detection
+
+
+def test_task_reprocess_flag_defaults_false_and_is_stored():
+    assert ImageProcessingTask(None, {}, {}).reprocess is False
+    assert ImageProcessingTask(None, {}, {}, reprocess=True).reprocess is True
+
+
+def test_preview_ready_native_size_is_captured_before_resize(worker, tmp_path):
+    worker._main_window = None
+    cfg = _base_config(tmp_path, {'enabled': False})
+    cfg['resize_percent'] = 50
+
+    preview = []
+    worker.preview_ready.connect(lambda img, hist: preview.append((img, hist)))
+
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (400, 300), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg))
+
+    assert preview
+    img, hist_data = preview[0]
+    assert hist_data['native_size'] == (400, 300)
+    assert img.size == (200, 150), "the emitted preview image is still the resized frame"
+
+
+def test_process_and_save_forwards_reprocess_flag_to_the_task(_qapp, tmp_path):
+    from PySide6.QtCore import QEvent
+
+    from ui.controllers.image_processor import ImageProcessor
+
+    proc = ImageProcessor()
+    try:
+        proc._main_window = type('MW', (), {'config': {'output_directory': str(tmp_path)}})()
+        queued = []
+        proc._worker.queue_task = queued.append
+
+        proc.process_and_save(Image.new('RGB', (4, 4)), {'FILENAME': 'x.png'}, reprocess=True)
+        proc.process_and_save(Image.new('RGB', (4, 4)), {'FILENAME': 'y.png'})
+
+        assert len(queued) == 2
+        assert queued[0].reprocess is True
+        assert queued[1].reprocess is False
+    finally:
+        proc._worker.deleteLater()
+        proc.deleteLater()
+        _qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        _qapp.processEvents()
+
+
 def test_worker_reuses_one_overlay_image_cache_across_frames(worker, tmp_path):
     """The worker must hand the SAME cache dict to add_overlays every frame —
     a per-frame dict would re-decode the user's logo on every capture."""

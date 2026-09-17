@@ -301,3 +301,111 @@ class TestOverlayRenderer:
         config = self._make_config(cal_path)
         result = render_allsky_overlay(img_rgb, config, {})
         assert result.mode == 'RGB', f"Expected RGB, got {result.mode}"
+
+
+# ===================================================================
+# Output crop (issue #12) — the model must be TRANSLATED into output
+# pixels, never scaled. A square→square crop has the same aspect ratio
+# as the full frame, so the resize path cannot tell them apart alone.
+# ===================================================================
+
+class TestOutputCropTranslation:
+    def _sized_model(self, w=1000, h=1000) -> FisheyeModel:
+        return FisheyeModel(
+            cx=500.0, cy=500.0, a1=400.0, a3=0.0, a5=0.0,
+            roll=0.0, axis_alt=90.0, axis_az=0.0,
+            rms_residual=1.0, n_matches=50,
+            calibrated_at="2024-01-01T00:00:00+00:00",
+            image_width=w, image_height=h,
+        )
+
+    def _spy_model(self, monkeypatch):
+        """Capture the model handed to the first render layer."""
+        seen = []
+
+        def _spy(img, model, config):
+            seen.append(model)
+            return img
+
+        monkeypatch.setattr('services.allsky.overlay_renderer.render_grid', _spy)
+        return seen
+
+    def _render(self, tmp_path, monkeypatch, model, img, metadata):
+        from services.allsky.overlay_renderer import render_allsky_overlay
+        cal_path = str(tmp_path / "cal.json")
+        model.save(cal_path)
+        seen = self._spy_model(monkeypatch)
+        config = {'enabled': True, 'calibration_file': cal_path,
+                  '_lat': LAT, '_lon': LON, 'grid': {'enabled': True},
+                  'constellations': {'enabled': False}, 'messier': {'enabled': False},
+                  'ngc': {'enabled': False}, 'planets': {'enabled': False}}
+        render_allsky_overlay(img, config, metadata)
+        assert seen, "grid layer never ran"
+        return seen[0]
+
+    def test_crop_translates_the_optical_centre(self, tmp_path, monkeypatch):
+        crop = {'x': 200, 'y': 100, 'width': 600, 'height': 600,
+                'frame_width': 1000, 'frame_height': 1000}
+        used = self._render(tmp_path, monkeypatch, self._sized_model(),
+                            Image.new('RGBA', (600, 600), (10, 10, 30, 255)),
+                            {'OUTPUT_CROP': crop})
+
+        assert (used.cx, used.cy) == (300.0, 400.0)
+        assert used.a1 == 400.0, "plate scale must NOT change on a crop"
+        assert (used.image_width, used.image_height) == (600, 600)
+
+    def test_resize_then_crop_scales_before_translating(self, tmp_path, monkeypatch):
+        # resize_percent 50 first (1000 -> 500), then a 300x300 cut at (100, 50).
+        crop = {'x': 100, 'y': 50, 'width': 300, 'height': 300,
+                'frame_width': 500, 'frame_height': 500}
+        used = self._render(tmp_path, monkeypatch, self._sized_model(),
+                            Image.new('RGBA', (300, 300), (10, 10, 30, 255)),
+                            {'OUTPUT_CROP': crop})
+
+        assert used.a1 == 200.0, "resize must still scale the plate scale"
+        assert (used.cx, used.cy) == (150.0, 200.0)
+        assert (used.image_width, used.image_height) == (300, 300)
+
+    def test_legacy_model_without_a_size_is_only_translated(self, tmp_path, monkeypatch):
+        crop = {'x': 200, 'y': 100, 'width': 600, 'height': 600,
+                'frame_width': 1000, 'frame_height': 1000}
+        used = self._render(tmp_path, monkeypatch, self._sized_model(w=0, h=0),
+                            Image.new('RGBA', (600, 600), (10, 10, 30, 255)),
+                            {'OUTPUT_CROP': crop})
+
+        assert (used.cx, used.cy) == (300.0, 400.0)
+        assert used.a1 == 400.0
+
+    def test_without_crop_metadata_a_smaller_frame_still_scales(self, tmp_path, monkeypatch):
+        used = self._render(tmp_path, monkeypatch, self._sized_model(),
+                            Image.new('RGBA', (500, 500), (10, 10, 30, 255)), {})
+
+        assert (used.cx, used.cy) == (250.0, 250.0)
+        assert used.a1 == 200.0
+
+    def test_crop_size_mismatch_skips_the_render(self, tmp_path, monkeypatch):
+        # OUTPUT_CROP claims a 600x600 box but the frame we were actually
+        # handed is 500x500 (stale/mismatched metadata) — rather than guess,
+        # the renderer must log a warning and hand the image back untouched.
+        from services.allsky.overlay_renderer import render_allsky_overlay
+
+        cal_path = str(tmp_path / "cal.json")
+        self._sized_model().save(cal_path)
+        seen = self._spy_model(monkeypatch)
+        warnings = []
+        monkeypatch.setattr('services.allsky.overlay_renderer.log.warning',
+                            lambda msg: warnings.append(msg))
+
+        crop = {'x': 200, 'y': 100, 'width': 600, 'height': 600,
+                'frame_width': 1000, 'frame_height': 1000}
+        img = Image.new('RGBA', (500, 500), (10, 10, 30, 255))
+        config = {'enabled': True, 'calibration_file': cal_path,
+                  '_lat': LAT, '_lon': LON, 'grid': {'enabled': True},
+                  'constellations': {'enabled': False}, 'messier': {'enabled': False},
+                  'ngc': {'enabled': False}, 'planets': {'enabled': False}}
+
+        result = render_allsky_overlay(img, config, {'OUTPUT_CROP': crop})
+
+        assert result is img, "must return the image unchanged, not attempt a render"
+        assert seen == [], "no render layer should have run"
+        assert warnings and 'OUTPUT_CROP' in warnings[0]

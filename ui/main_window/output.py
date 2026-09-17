@@ -19,6 +19,11 @@ from ui.controllers.capture_command_bridge import CaptureCommandBridge
 
 class _MainWindowOutputMixin:
 
+    # Full-frame, post-stretch, pre-overlay frame from the last preview_ready.
+    # output_image can be cropped (output_crop, issue #12); calibration must
+    # never be handed cropped pixels. Class-level so the mixin needs no __init__.
+    _last_clean_full_frame = None
+
     # =========================================================================
     # DISCORD HELPERS
     # =========================================================================
@@ -218,10 +223,11 @@ class _MainWindowOutputMixin:
             self.image_processor.process_and_save(
                 None, cached,
                 frame_factory=lambda: frame_builder.rebuild_frame(cached),
+                reprocess=True,
             )
         else:
             self.image_processor.process_and_save(
-                self._cached_raw_image, self._cached_raw_metadata
+                self._cached_raw_image, self._cached_raw_metadata, reprocess=True
             )
 
     def _on_image_processed(self, preview_image, output_image, metadata: dict, output_path: str,
@@ -235,7 +241,9 @@ class _MainWindowOutputMixin:
             # Camera mode already cached a superior RAW pre-overlay frame in
             # on_image_captured — don't clobber it with the overlaid output.
             if self.config.get('capture_mode', 'camera') == 'watch':
-                self._cached_raw_image = output_image.copy()
+                clean = self._last_clean_full_frame
+                self._cached_raw_image = (clean if clean is not None else output_image).copy()
+                self._last_clean_full_frame = None
                 self._cached_raw_metadata = metadata
                 self._cached_raw_time = datetime.now(timezone.utc)
 
@@ -285,6 +293,13 @@ class _MainWindowOutputMixin:
 
     def _on_preview_ready(self, preview_image, hist_data: dict):
         try:
+            # Emitted by the worker immediately before processing_complete, on
+            # the same thread — so _on_image_processed can rely on it being the
+            # full frame that produced the (possibly cropped) output image.
+            # Watch mode only: camera mode caches a better RAW frame of its own,
+            # and holding this would pin a full-res PIL image between frames.
+            if self.config.get('capture_mode', 'camera') == 'watch':
+                self._last_clean_full_frame = preview_image
             if hist_data:
                 app_logger.debug(f"Histogram data received: r={len(hist_data.get('r', []))}, auto_exposure={hist_data.get('auto_exposure')}, target={hist_data.get('target_brightness')}")
                 self.live_panel.histogram.update_from_data(hist_data)
