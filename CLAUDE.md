@@ -173,11 +173,22 @@ the same everywhere. Dev tooling is pinned in `requirements-dev.txt`.
 
 The Windows test job is named **`Tests and dependency audit (Windows)`** while
 the other two are `Tests (macOS)` / `Tests (Linux)`. That asymmetry is load-bearing:
-`main`'s branch protection requires the Windows job by that exact string, and
-renaming it leaves the required check stuck on "Expected — waiting for status to
-be reported", blocking every merge. **Don't regularise the names without changing
-branch protection in the same PR.** macOS and Linux are not required checks, so
-they report without gating merges — deliberate while the port in #1 is in flight.
+`main`'s ruleset ("main: CI must pass" — a repository ruleset, not classic branch
+protection) requires the Windows job by that exact string, and renaming it leaves
+the required check stuck on "Expected — waiting for status to be reported",
+blocking every merge. **Don't regularise the names without changing the ruleset
+in the same PR.** macOS and Linux are not required checks, so they report without
+gating merges — deliberate while the port in #1 is in flight.
+
+The ruleset's required checks are `Lint and size audit`, `Tests and dependency
+audit (Windows)` and `claude-review`, plus a code scanning rule: CodeQL results
+must be in, and a PR may not add alerts at `error` or security severity
+`high_or_higher`. Auto-merge waits for exactly these and nothing else — the dev
+build, macOS/Linux tests and spec parses can still be running when a PR merges.
+`build.yml` is deliberately not required: it skips docs-only PRs, so a required
+build check would never report on them. `claude-review` only makes a merge wait
+for the review to post; it passes whatever the review finds. Any check added here
+must report on *every* PR (skipped counts as passing, absent does not).
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
