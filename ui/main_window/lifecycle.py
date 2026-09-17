@@ -235,9 +235,8 @@ class _MainWindowLifecycleMixin:
             enabled: True to enable tray mode, False to disable
         """
         if enabled and self.system_tray is None:
+            from ..system_tray_qt import SystemTrayQt, TrayUnavailableError
             try:
-                from ..system_tray_qt import SystemTrayQt, TrayUnavailableError
-
                 # start_hidden=False: enabling tray from Settings must not yank
                 # the window away — it stays open and only hides on close.
                 self.system_tray = SystemTrayQt(
