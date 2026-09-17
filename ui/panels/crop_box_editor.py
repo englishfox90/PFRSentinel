@@ -107,7 +107,8 @@ class CropBoxEditor(QWidget):
         top-left 1080 square — a crop, not a reset.
         """
         if self.has_reference():
-            self._box = (0, 0, self._ref_w, self._ref_h)
+            self._box = normalise_box(0, 0, self._ref_w, self._ref_h,
+                                      self._ref_w, self._ref_h, keep_square=False)
         self.update()
 
     def set_keep_square(self, keep: bool):

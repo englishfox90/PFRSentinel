@@ -80,7 +80,9 @@ class OutputCropController(QObject):
     def _build_thumbnail(self, pil_image, native=None):
         try:
             width, height = native if native and native[0] > 0 and native[1] > 0 else pil_image.size
-            factor = max(1, -(-max(width, height) // THUMBNAIL_MAX_PX))  # ceil: honour the cap
+            # Reduce what we were given (post-resize); `native` is only the
+            # reference size the box is expressed in.
+            factor = max(1, -(-max(pil_image.size) // THUMBNAIL_MAX_PX))  # ceil: honour the cap
             if pil_image.mode != 'RGB':
                 pil_image = pil_image.convert('RGB')
             thumb = pil_image.reduce(factor) if factor > 1 else pil_image.copy()

@@ -357,6 +357,20 @@ class TestButtons:
         assert y == (3552 - 1000) // 2 or abs(y - (3552 - 1000) / 2) <= 1
         assert mw.config.get('output_crop')['x'] == x
 
+    def test_full_frame_on_an_odd_sized_sensor_resolves_to_no_crop(self, card, qapp):
+        from services.output_crop import resolve_crop_box
+        widget, mw = card
+        widget.load_from_config(mw.config)
+        widget.set_frame(_solid_frame(512), 1921, 1081)
+        widget.enable_switch.set_checked(True)
+        widget._set_box(100, 100, 600, 600, save=True)
+
+        widget.reset_btn.click()
+        qapp.processEvents()
+
+        assert widget.editor.box() == (0, 0, 1920, 1080)   # evenness shaves one px
+        assert resolve_crop_box(mw.config.get('output_crop'), 1921, 1081) is None
+
     def test_full_frame_ignores_the_square_lock_on_a_wide_sensor(self, card, qapp):
         widget, mw = card
         widget.load_from_config(mw.config)
@@ -447,6 +461,20 @@ class TestControllerThumbnail:
         assert _pump_until(qapp, lambda: bool(received))
         assert received['w'] == 1440 and received['h'] == 1440
         assert max(received['thumb'].size) <= 720
+
+    def test_thumbnail_is_reduced_from_the_given_frame_not_the_native_size(self, qapp, controller):
+        # resize_percent 25 on a 3552 sensor hands us an 888 px frame with a
+        # 3552 native reference; a factor from the native size would over-reduce it.
+        received = {}
+        controller.thumbnail_ready.connect(
+            lambda thumb, w, h: received.update(thumb=thumb, w=w, h=h)
+        )
+
+        controller.on_preview_ready(_solid_frame(888), {'native_size': (3552, 3552)})
+
+        assert _pump_until(qapp, lambda: bool(received))
+        assert (received['w'], received['h']) == (3552, 3552)
+        assert received['thumb'].size == (444, 444)   # ceil(888/720) = 2, not 5
 
     def test_thumbnail_honours_the_cap_on_the_real_sensor_size(self, qapp, controller):
         # 3552 / 720 is not an integer: a floor factor (4) gave 888 px, above

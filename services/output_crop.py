@@ -139,8 +139,13 @@ def square_around_circle(cx: float, cy: float, radius: float,
 
 
 def is_full_frame(box: Box, ref_width: int, ref_height: int) -> bool:
+    """True when the box keeps everything a normalised box can keep.
+
+    Evenness rounds an odd frame edge down by one pixel; that shave must not
+    turn "Full frame" into a one-pixel crop.
+    """
     x, y, w, h = box
-    return x == 0 and y == 0 and w >= ref_width and h >= ref_height
+    return x == 0 and y == 0 and w >= _even(ref_width) and h >= _even(ref_height)
 
 
 def resolve_crop_box(cfg, frame_width: int, frame_height: int) -> Optional[CropBox]:

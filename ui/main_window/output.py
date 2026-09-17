@@ -240,12 +240,17 @@ class _MainWindowOutputMixin:
             # clean (no all-sky) output frame here for manual "Calibrate Now".
             # Camera mode already cached a superior RAW pre-overlay frame in
             # on_image_captured — don't clobber it with the overlaid output.
+            # _last_clean_full_frame is the pre-resize, pre-crop frame from
+            # process_image (set by _on_watch_image_processed). A reprocess has
+            # none, and must leave the cache alone: recaching its resized
+            # output would compound resize_percent on every crop-box drag.
             if self.config.get('capture_mode', 'camera') == 'watch':
                 clean = self._last_clean_full_frame
-                self._cached_raw_image = (clean if clean is not None else output_image).copy()
+                if clean is not None or self._cached_raw_image is None:
+                    self._cached_raw_image = (clean if clean is not None else output_image).copy()
+                    self._cached_raw_metadata = metadata
+                    self._cached_raw_time = datetime.now(timezone.utc)
                 self._last_clean_full_frame = None
-                self._cached_raw_metadata = metadata
-                self._cached_raw_time = datetime.now(timezone.utc)
 
             # preview_image may carry the all-sky overlay (GUI only).
             # output_image is always clean — the watch-mode cache above and any
@@ -293,13 +298,6 @@ class _MainWindowOutputMixin:
 
     def _on_preview_ready(self, preview_image, hist_data: dict):
         try:
-            # Emitted by the worker immediately before processing_complete, on
-            # the same thread — so _on_image_processed can rely on it being the
-            # full frame that produced the (possibly cropped) output image.
-            # Watch mode only: camera mode caches a better RAW frame of its own,
-            # and holding this would pin a full-res PIL image between frames.
-            if self.config.get('capture_mode', 'camera') == 'watch':
-                self._last_clean_full_frame = preview_image
             if hist_data:
                 app_logger.debug(f"Histogram data received: r={len(hist_data.get('r', []))}, auto_exposure={hist_data.get('auto_exposure')}, target={hist_data.get('target_brightness')}")
                 self.live_panel.histogram.update_from_data(hist_data)

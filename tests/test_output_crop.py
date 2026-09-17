@@ -152,6 +152,10 @@ class TestIsFullFrame:
     def test_false_when_box_is_smaller(self):
         assert is_full_frame((0, 0, 999, 800), 1000, 800) is False
 
+    def test_evenness_shave_on_an_odd_frame_still_counts_as_full(self):
+        assert is_full_frame((0, 0, 1000, 800), 1001, 801) is True
+        assert is_full_frame((0, 0, 998, 800), 1001, 801) is False
+
     def test_false_when_offset_even_if_full_size(self):
         assert is_full_frame((10, 0, 1000, 800), 1000, 800) is False
 

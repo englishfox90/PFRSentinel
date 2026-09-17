@@ -32,6 +32,7 @@ def _window():
     win.is_capturing = False
     win.image_library = None
     win._last_clean_full_frame = None
+    win._cached_raw_image = None   # a MagicMock attribute would never read as "nothing cached"
     _bind(win, _MainWindowCaptureMixin, '_on_watch_image_processed')
     _bind(win, _MainWindowOutputMixin, '_on_image_processed')
     return win
@@ -68,3 +69,22 @@ def test_no_crash_and_no_controller_call_when_extras_carry_no_clean_frame():
     win.output_crop_controller.on_preview_ready.assert_not_called()
     # Falls back to the (uncropped, in this case) output image.
     assert win._cached_raw_image.size == out.size
+
+
+def test_reprocess_keeps_the_pre_resize_cache_in_watch_mode():
+    # A live frame caches the pre-resize clean frame; a reprocess emits only
+    # processing_complete (no extras, stash None) and must not replace it with
+    # its own resized output.
+    win = _window()
+    clean = Image.new('RGB', (640, 480), (5, 5, 5))
+    out = Image.new('RGB', (200, 200), (9, 9, 9))
+    metadata = {'FILENAME': 'a.png'}
+    win._on_watch_image_processed(out, out, 'a.png',
+                                  {'clean_frame': clean, 'native_size': (640, 480), 'metadata': metadata})
+    assert win._cached_raw_image.size == (640, 480)
+
+    reprocessed = Image.new('RGB', (320, 240), (7, 7, 7))
+    win._on_image_processed(reprocessed, reprocessed, metadata, 'a.png', reprocessed)
+
+    assert win._cached_raw_image.size == (640, 480)
+    assert win._last_clean_full_frame is None
