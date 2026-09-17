@@ -10,6 +10,13 @@ a real NINA folder or spawns a thread. The panel is built once for the whole
 module: an OutputSettingsPanel is a heavy widget tree, and churning through a
 dozen of them slows the shared QApplication enough to destabilise later
 event-loop tests in the same session.
+
+NINA is Windows-only (issue #37), so both the panel (``ui/panels/
+output_settings.py``) and the window mixin (``ui/main_window/settings.py``)
+skip building/refreshing the card unless ``IS_WINDOWS``. ``_force_windows``
+patches that flag in both modules so this UI is exercised on every CI
+platform, the same cross-platform-test pattern used in
+``test_windows_only_ui.py``.
 """
 import types
 
@@ -31,6 +38,18 @@ def qapp():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(scope="module")
+def _force_windows():
+    import ui.main_window.settings as settings_module
+    import ui.panels.output_settings as output_settings_module
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(output_settings_module, 'IS_WINDOWS', True)
+    mp.setattr(settings_module, 'IS_WINDOWS', True)
+    yield
+    mp.undo()
 
 
 # --- helpers --------------------------------------------------------------
@@ -111,7 +130,7 @@ def _build_panel(parent=None):
 
 
 @pytest.fixture(scope="module")
-def host(qapp):
+def host(qapp, _force_windows):
     """A MainWindow stand-in (real QWidget) with the real Output panel."""
     from PySide6.QtWidgets import QWidget
 
@@ -161,7 +180,7 @@ def panel(window):
 
 
 @pytest.fixture
-def detached_panel(qapp):
+def detached_panel(qapp, _force_windows):
     """A panel on a bare QWidget parent (not a MainWindow).
 
     Disposed through Qt, not garbage collection: deleting the parent via
