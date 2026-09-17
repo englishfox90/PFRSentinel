@@ -421,3 +421,25 @@ class TestSaveBackup:
         assert not os.path.exists(bak)
         reloaded = FisheyeModel.load(cal)
         assert reloaded.provenance == 'pole' and reloaded.calibrated_at == stamped_at
+
+
+class TestFreshMonotonicClock:
+    """time.monotonic() counts from boot on every platform, so a machine that
+    starts Sentinel within the cooldown of booting (CI runners, autostart on
+    logon) reads a small clock. The 'last refinement' timestamps must mean
+    'never', not 'at monotonic zero', or the first refinement is held back by
+    a cooldown that never ran."""
+
+    def test_first_refinement_starts_even_when_the_clock_reads_under_the_cooldown(
+            self, qapp, fast_refine, monkeypatch):
+        monkeypatch.setattr(cs.time, 'monotonic', lambda: 5.0)
+        svc = _service()
+
+        svc._maybe_refine()
+
+        assert svc._refine_worker is not None, "cooldown blocked the first refinement"
+        svc._refine_worker.wait(5000)
+        for _ in range(200):
+            QCoreApplication.processEvents()
+            if svc._refine_worker is None:
+                break
