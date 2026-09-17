@@ -41,9 +41,16 @@ try:
 except Exception as e:
     print(f"[WARN] Could not read version.py: {e}")
 
-# Parse version components (e.g., "3.2.3" -> (3, 2, 3, 0))
-version_parts = version_str.split('.')
-version_tuple = tuple(int(p) for p in version_parts[:3]) + (0,) * (4 - len(version_parts[:3]))
+# "3.2.3" -> (3, 2, 3, 0). A CI dev build is stamped "3.7.7-dev.14" by
+# scripts/ci/set_dev_version.py; Windows version fields are integers only, so
+# the dev counter takes the fourth slot -> (3, 7, 7, 14). The full string
+# survives as ProductVersion.
+import re
+_version_match = re.match(r'(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$', version_str)
+if _version_match is None:
+    raise SystemExit(f"[FAIL] Unrecognised version in version.py: {version_str!r}")
+version_tuple = tuple(int(g or 0) for g in _version_match.groups())
+file_version_str = '.'.join(str(p) for p in version_tuple)
 
 # Create Windows version info structure dynamically.
 # PyInstaller.utils.win32 imports pywin32 machinery that only exists on Windows,
@@ -77,12 +84,12 @@ if IS_WINDOWS:
                     [
                         StringStruct('CompanyName', 'Paul Fox-Reeks'),
                         StringStruct('FileDescription', 'PFR Sentinel - Astrophotography Image Processor'),
-                        StringStruct('FileVersion', f'{version_str}.0'),
+                        StringStruct('FileVersion', file_version_str),
                         StringStruct('InternalName', 'PFRSentinel'),
                         StringStruct('LegalCopyright', 'Copyright (c) 2024-2026 Paul Fox-Reeks'),
                         StringStruct('OriginalFilename', 'PFRSentinel.exe'),
                         StringStruct('ProductName', 'PFR Sentinel'),
-                        StringStruct('ProductVersion', f'{version_str}.0'),
+                        StringStruct('ProductVersion', version_str),
                     ]
                 )
             ]),
