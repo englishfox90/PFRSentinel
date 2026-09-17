@@ -24,7 +24,8 @@ name: Build
 # installer to people without a GitHub login, which Actions artifacts cannot do
 # (they need a login, expire, and arrive zipped). The publish-dev job replaces
 # the single rolling dev prerelease and announces the build in one Discussions
-# thread. Names and text live in scripts/ci/dev_build_notes.py.
+# thread per release cycle. Names and text live in scripts/ci/dev_build_notes.py;
+# the change list in dev_build_changelog.py; the thread in dev_build_discussion.py.
 #
 # Publishing is on merge, not on PR push. With several PRs open, "latest" would
 # flip between unmerged branches, and Dependabot and fork PRs get a read-only
@@ -262,56 +263,21 @@ jobs:
           fi
           mv "${found[0]}" "staging/$DEV_ASSET_NAME"
 
-      # Runs before the release is touched, so a missing category fails while
-      # the previous dev build is still downloadable. Neither creating the
-      # category nor pinning the thread is possible through the API.
-      - name: Find or open the dev builds discussion
+      # Before the release is replaced: the previous dev-latest tag marks where
+      # the last dev build stopped, which is what the discussion comment's
+      # "new since the previous dev build" list is measured from.
+      - name: Collect the changes in this build
+        run: |
+          python3 scripts/ci/dev_build_changelog.py --head "$GITHUB_SHA" \
+            --previous-dev "$DEV_TAG" --full changelog.md --delta delta.md
+
+      # Also before the release is touched, so a missing category fails while
+      # the previous dev build is still downloadable.
+      - name: Refresh this release cycle's discussion
         id: discussion
         run: |
-          owner="${GITHUB_REPOSITORY%/*}"
-          name="${GITHUB_REPOSITORY#*/}"
-
-          repo=$(gh api graphql -f owner="$owner" -f name="$name" -f query='
-            query($owner: String!, $name: String!) {
-              repository(owner: $owner, name: $name) {
-                id
-                discussionCategories(first: 50) { nodes { id name } }
-              }
-            }')
-          repo_id=$(jq -r '.data.repository.id' <<<"$repo")
-          category_id=$(jq -r --arg c "$DEV_DISCUSSION_CATEGORY" \
-            '.data.repository.discussionCategories.nodes[] | select(.name == $c) | .id' <<<"$repo")
-          if [ -z "$category_id" ]; then
-            echo "::error::No '$DEV_DISCUSSION_CATEGORY' Discussions category. Create it under Settings > General > Discussions, then re-run."
-            exit 1
-          fi
-
-          existing=$(gh api graphql -f owner="$owner" -f name="$name" -f category="$category_id" -f query='
-            query($owner: String!, $name: String!, $category: ID!) {
-              repository(owner: $owner, name: $name) {
-                discussions(first: 50, categoryId: $category,
-                            orderBy: {field: CREATED_AT, direction: ASC}) {
-                  nodes { id url title }
-                }
-              }
-            }' | jq -c --arg t "$DEV_DISCUSSION_TITLE" \
-              '[.data.repository.discussions.nodes[] | select(.title == $t)][0] // empty')
-
-          if [ -z "$existing" ]; then
-            python3 scripts/ci/dev_build_notes.py intro > intro.md
-            existing=$(gh api graphql -f repo="$repo_id" -f category="$category_id" \
-              -f title="$DEV_DISCUSSION_TITLE" -F body=@intro.md -f query='
-              mutation($repo: ID!, $category: ID!, $title: String!, $body: String!) {
-                createDiscussion(input: {repositoryId: $repo, categoryId: $category,
-                                         title: $title, body: $body}) {
-                  discussion { id url title }
-                }
-              }' | jq -c '.data.createDiscussion.discussion')
-            echo "::notice::Opened the dev builds discussion at $(jq -r .url <<<"$existing") - pin it by hand."
-          fi
-
-          echo "id=$(jq -r .id <<<"$existing")" >> "$GITHUB_OUTPUT"
-          echo "url=$(jq -r .url <<<"$existing")" >> "$GITHUB_OUTPUT"
+          python3 scripts/ci/dev_build_discussion.py prepare \
+            --version "$DEV_VERSION" --sha "$GITHUB_SHA" --changelog-file changelog.md
 
       - name: Replace the dev prerelease
         env:
@@ -321,7 +287,7 @@ jobs:
           echo "DEV_PR=$pr" >> "$GITHUB_ENV"
           notes=(--version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$pr" --run-url "$RUN_URL")
           python3 scripts/ci/dev_build_notes.py release "${notes[@]}" \
-            --discussion-url "$DISCUSSION_URL" > release.md
+            --discussion-url "$DISCUSSION_URL" --changelog-file changelog.md > release.md
           title=$(python3 scripts/ci/dev_build_notes.py title "${notes[@]}")
 
           if gh release view "$DEV_TAG" >/dev/null 2>&1; then
@@ -342,13 +308,9 @@ jobs:
           DISCUSSION_ID: ${{ steps.discussion.outputs.id }}
         run: |
           python3 scripts/ci/dev_build_notes.py comment \
-            --version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" --run-url "$RUN_URL" > comment.md
-          gh api graphql -f discussion="$DISCUSSION_ID" -F body=@comment.md -f query='
-            mutation($discussion: ID!, $body: String!) {
-              addDiscussionComment(input: {discussionId: $discussion, body: $body}) {
-                comment { url }
-              }
-            }' --jq '.data.addDiscussionComment.comment.url'
+            --version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" \
+            --run-url "$RUN_URL" --delta-file delta.md > comment.md
+          python3 scripts/ci/dev_build_discussion.py comment --id "$DISCUSSION_ID" --body-file comment.md
 
       - name: Summary
         env:
