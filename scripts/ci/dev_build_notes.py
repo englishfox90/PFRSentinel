@@ -24,11 +24,8 @@ Run on the runner's system Python, so stdlib only.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO = "englishfox90/PFRSentinel"
 
 TAG = "dev-latest"
@@ -39,14 +36,6 @@ DISCUSSION_TITLE = "Dev builds: download and feedback"
 RELEASE_URL = f"https://github.com/{REPO}/releases/tag/{TAG}"
 ASSET_URL = f"https://github.com/{REPO}/releases/download/{TAG}/{ASSET_NAME}"
 PRODUCTION_URL = f"https://github.com/{REPO}/releases/latest"
-
-
-def read_version() -> str:
-    source = (REPO_ROOT / "version.py").read_text(encoding="utf-8")
-    match = re.search(r"""^__version__\s*=\s*["']([^"']+)["']""", source, re.MULTILINE)
-    if not match:
-        raise SystemExit(f"FAIL: no __version__ assignment in {REPO_ROOT / 'version.py'}")
-    return match.group(1)
 
 
 def release_title(version: str, sha: str) -> str:
@@ -72,9 +61,10 @@ def before_you_install() -> str:
         "config keeps whatever it already had.",
         "- **It replaces your installed Sentinel.** Dev and production builds install "
         "to the same place and share `%APPDATA%\\PFRSentinel`. This is not an upgrade "
-        "path: the in-app updater compares version numbers only, so it will not offer "
-        "a release with the same number as this build. To get back to a supported "
-        f"build, reinstall from the [latest release]({PRODUCTION_URL}).",
+        "path. The in-app updater never offers dev builds, and offers a release only "
+        "once one newer than this build ships, such as the release this build leads "
+        "up to. To get back to a supported build sooner, reinstall the "
+        f"[latest release]({PRODUCTION_URL}).",
         "- **Not supported.** It exists to test a change before it ships. Please "
         "report what you find, but don't run an observatory you rely on with it.",
     ])
@@ -134,7 +124,6 @@ def constants() -> str:
         f"DEV_ASSET_NAME={ASSET_NAME}",
         f"DEV_DISCUSSION_CATEGORY={DISCUSSION_CATEGORY}",
         f"DEV_DISCUSSION_TITLE={DISCUSSION_TITLE}",
-        f"DEV_VERSION={read_version()}",
         "",
     ])
 
@@ -147,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("intro", help="Body of a newly opened discussion")
 
     build_args = argparse.ArgumentParser(add_help=False)
+    # Stamped by set_dev_version.py on the build job. This job's own checkout
+    # still holds the committed version, so it cannot be read from version.py.
+    build_args.add_argument("--version", required=True, help="e.g. 3.7.7-dev.14")
     build_args.add_argument("--sha", required=True)
     build_args.add_argument("--ref", required=True)
     build_args.add_argument("--pr", default="", help="PR number; empty when none")
@@ -165,12 +157,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "intro":
         text = discussion_intro()
     elif args.command == "title":
-        text = release_title(read_version(), args.sha) + "\n"
+        text = release_title(args.version, args.sha) + "\n"
     elif args.command == "release":
-        text = release_body(read_version(), args.sha, args.ref, pr,
+        text = release_body(args.version, args.sha, args.ref, pr,
                             args.run_url, args.discussion_url)
     else:
-        text = build_comment(read_version(), args.sha, args.ref, pr, args.run_url)
+        text = build_comment(args.version, args.sha, args.ref, pr, args.run_url)
 
     sys.stdout.write(text)
     return 0

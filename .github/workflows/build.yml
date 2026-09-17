@@ -72,6 +72,8 @@ jobs:
     name: Windows dev build
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      dev_version: ${{ steps.version.outputs.version }}
     env:
       PYTHONUTF8: "1"
       # "true"/"false" strings. Main pushes always build it: publish-dev needs it.
@@ -83,7 +85,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.installer
         run: throw "publish needs the installer - dispatch again with 'installer' ticked"
 
+      # Full history and tags: the dev version counts commits since the last
+      # release tag.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
@@ -105,6 +111,13 @@ jobs:
       # user's machine at launch, so setting it here would change nothing.
       - name: Stamp the dev channel
         run: python scripts/ci/set_build_channel.py dev
+
+      # 3.7.7-dev.14 rather than the committed 3.7.6, so a tester's window
+      # title, diagnostics bundle and analytics never pass for production.
+      # Before the installer step: update_version.py reads it from version.py.
+      - name: Stamp the dev version
+        id: version
+        run: python scripts/ci/set_dev_version.py
 
       # The plugin has no test suite and no linting of its own, so this build is
       # the only automated check that it still compiles.
@@ -135,11 +148,15 @@ jobs:
 
           # Asserting the version the binary actually carries costs nothing and
           # catches a spec that silently stopped applying version_info.
-          $expected = (python -c "import version; print(version.__version__)").Trim()
-          $actual = (Get-Item $exe).VersionInfo.FileVersion
-          Write-Host "version.py=$expected  exe FileVersion=$actual"
-          if (-not $actual.StartsWith($expected)) {
-            throw "Version mismatch: version.py says $expected, exe reports $actual"
+          $info = (Get-Item $exe).VersionInfo
+          $expectedFile = "${{ steps.version.outputs.file_version }}"
+          $expectedProduct = "${{ steps.version.outputs.version }}"
+          Write-Host "stamped=$expectedProduct  exe FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
+          if ($info.FileVersion -ne $expectedFile) {
+            throw "FileVersion mismatch: expected $expectedFile, exe reports $($info.FileVersion)"
+          }
+          if ($info.ProductVersion -ne $expectedProduct) {
+            throw "ProductVersion mismatch: expected $expectedProduct, exe reports $($info.ProductVersion)"
           }
 
           # The plugin built and staged successfully by this point, so a DLL
@@ -188,7 +205,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Dev build"
+            echo "### Dev build ${{ steps.version.outputs.version }}"
             echo
             echo "Dev features (raw FITS/TIFF exports, calibration JSON, ML"
             echo "prediction) are compiled in. Unsigned, so Windows SmartScreen"
@@ -219,6 +236,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DEV_VERSION: ${{ needs.windows.outputs.dev_version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -301,7 +319,7 @@ jobs:
         run: |
           pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' || true)
           echo "DEV_PR=$pr" >> "$GITHUB_ENV"
-          notes=(--sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$pr" --run-url "$RUN_URL")
+          notes=(--version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$pr" --run-url "$RUN_URL")
           python3 scripts/ci/dev_build_notes.py release "${notes[@]}" \
             --discussion-url "$DISCUSSION_URL" > release.md
           title=$(python3 scripts/ci/dev_build_notes.py title "${notes[@]}")
@@ -324,7 +342,7 @@ jobs:
           DISCUSSION_ID: ${{ steps.discussion.outputs.id }}
         run: |
           python3 scripts/ci/dev_build_notes.py comment \
-            --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" --run-url "$RUN_URL" > comment.md
+            --version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" --run-url "$RUN_URL" > comment.md
           gh api graphql -f discussion="$DISCUSSION_ID" -F body=@comment.md -f query='
             mutation($discussion: ID!, $body: String!) {
               addDiscussionComment(input: {discussionId: $discussion, body: $body}) {
@@ -337,7 +355,7 @@ jobs:
           DISCUSSION_URL: ${{ steps.discussion.outputs.url }}
         run: |
           {
-            echo "### Dev prerelease published"
+            echo "### Dev prerelease $DEV_VERSION published"
             echo
             echo "- Download: https://github.com/$GITHUB_REPOSITORY/releases/download/$DEV_TAG/$DEV_ASSET_NAME"
             echo "- Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$DEV_TAG"

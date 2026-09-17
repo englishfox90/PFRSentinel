@@ -52,15 +52,19 @@ class UpdateInfo:
 def parse_version(version_str: str) -> tuple:
     """
     Parse version string to comparable tuple.
-    Handles formats like "3.2.5", "v3.2.5", "3.2.5-beta"
+    Handles formats like "3.2.5", "v3.2.5", "3.2.5-beta", "3.7.7-dev.14"
+
+    Any suffix ranks below the plain release (semver precedence). Dev builds
+    are stamped with the version they lead up to, so a tester on 3.7.7-dev.14
+    must still be offered 3.7.7 when it ships.
     """
-    # Remove 'v' prefix if present
     clean = version_str.lstrip('v')
-    # Extract numeric parts
-    match = re.match(r'(\d+)\.(\d+)\.(\d+)', clean)
+    match = re.match(r'(\d+)\.(\d+)\.(\d+)(-[^\d]*(\d+)?)?', clean)
     if match:
-        return tuple(int(x) for x in match.groups())
-    return (0, 0, 0)
+        major, minor, patch, suffix, counter = match.groups()
+        is_release = 0 if suffix else 1
+        return (int(major), int(minor), int(patch), is_release, int(counter or 0))
+    return (0, 0, 0, 0, 0)
 
 
 def compare_versions(current: str, latest: str) -> int:
