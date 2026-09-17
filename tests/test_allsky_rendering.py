@@ -15,6 +15,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from services.allsky.fisheye import FisheyeModel
 from services.allsky.label_collision import LabelGrid, default_gap, estimate_text_size
+from services.allsky.label_stability import reset_label_stability
+
+
+@pytest.fixture(autouse=True)
+def _fresh_label_state():
+    """The renderer keeps frame-to-frame label state; tests start clean."""
+    reset_label_stability()
+    yield
+    reset_label_stability()
 
 
 # ===================================================================

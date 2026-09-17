@@ -235,7 +235,7 @@ def render_constellations(
                     continue
 
             tw, th = estimate_text_size(text, label_size)
-            pos = label_grid.try_place(cx, cy, tw, th)
+            pos = label_grid.try_place(cx, cy, tw, th, key=f'con:{text}')
             if pos is not None:
                 draw.text(pos, text, fill=label_color, font=font)
 

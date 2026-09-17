@@ -11,7 +11,7 @@ The placed set is small (bounded by top_n), so exact rectangle tests are used
 rather than a cell grid — a coarse grid rounded a marker's own cell into its
 label's slot and rejected labels that were actually clear.
 """
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 _MIN_GAP_PX = 4.0
 
@@ -50,14 +50,21 @@ class LabelGrid:
 
     Records placed label boxes and reserved marker points. `cell_size` is kept
     for API compatibility and now sets the minimum clearance between labels.
+
+    `slot_memory` maps a label key to the candidate-slot index it last landed
+    in. It outlives the grid (which is rebuilt every frame) so a label keeps
+    its side of the star from one frame to the next instead of flipping the
+    moment a neighbour appears.
     """
 
-    def __init__(self, img_width: int, img_height: int, cell_size: int = 12):
+    def __init__(self, img_width: int, img_height: int, cell_size: int = 12,
+                 slot_memory: Optional[Dict[str, int]] = None):
         self._w = img_width
         self._h = img_height
         self._pad = cell_size / 2.0
         self._rects: List[Tuple[float, float, float, float]] = []
         self._markers: List[Tuple[float, float, float]] = []
+        self._slot_memory = slot_memory
 
     def is_free(self, x: float, y: float, w: float, h: float) -> bool:
         """True if the box does not touch any placed label or reserved marker."""
@@ -88,6 +95,7 @@ class LabelGrid:
         label_w: float,
         label_h: float,
         gap: Optional[float] = None,
+        key: Optional[str] = None,
     ) -> Optional[Tuple[float, float]]:
         """
         Try to place a label near (marker_x, marker_y).
@@ -95,15 +103,30 @@ class LabelGrid:
         Tests candidate slots in order; returns (label_x, label_y) — the text
         box's top-left — for the first collision-free slot inside the image, or
         None if every slot is taken. The chosen box is recorded as occupied.
+
+        With `key` and a slot memory, the slot this key used last time is
+        tried before the default order and the winning slot is remembered.
         """
         if gap is None:
             gap = default_gap(label_h)
 
-        for lx, ly in candidate_slots(marker_x, marker_y, label_w, label_h, gap):
+        slots = candidate_slots(marker_x, marker_y, label_w, label_h, gap)
+        order = list(range(len(slots)))
+        remembered = None
+        if key is not None and self._slot_memory is not None:
+            remembered = self._slot_memory.get(key)
+            if remembered is not None and 0 <= remembered < len(slots):
+                order.remove(remembered)
+                order.insert(0, remembered)
+
+        for i in order:
+            lx, ly = slots[i]
             if lx < 0 or ly < 0 or lx + label_w > self._w or ly + label_h > self._h:
                 continue
             if self.is_free(lx, ly, label_w, label_h):
                 self.occupy(lx, ly, label_w, label_h)
+                if key is not None and self._slot_memory is not None:
+                    self._slot_memory[key] = i
                 return lx, ly
 
         return None
