@@ -221,13 +221,53 @@ jobs:
             echo "Release builds are cut locally with \`build_sentinel_installer.bat\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Publishes only a build that is still the head of its branch. Creating the
+  # dev-latest tag at a commit whose workflow files differ from the default
+  # branch needs the `workflows` permission, which GITHUB_TOKEN can never hold,
+  # so GitHub answers 403 "Resource not accessible by integration" — and by
+  # then the previous dev release has already been deleted. That happens
+  # whenever a workflow change merges while this build runs. A build that is
+  # no longer the head is stale anyway, so it hands off to a fresh build of the
+  # branch rather than publishing. The dispatch lands in the same concurrency
+  # group and replaces any pending run there, so a burst of merges still ends
+  # in one publish of the newest commit, even one that opted out of CI.
+  # The same 403 still hits a manual publish from a branch that changes
+  # workflow files; there is no token-free way round that. Its own job, so
+  # publish-dev never holds actions: write.
+  freshness:
+    name: Check the build is still current
+    needs: windows
+    if: github.repository == 'englishfox90/PFRSentinel' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      current: ${{ steps.head.outputs.current }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Compare with the branch head
+        id: head
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "current=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::$GITHUB_REF_NAME moved to ${head:0:7} while ${GITHUB_SHA:0:7} was building. Not publishing it; dispatched a fresh build of $GITHUB_REF_NAME instead."
+          gh workflow run build.yml --ref "$GITHUB_REF_NAME" -f installer=true -f publish=true
+
   # Separate job so the build never holds release-write rights: everything in
   # the windows job runs third-party build tooling under contents: read. The
   # repository check keeps a fork's own main pushes from trying to publish.
   publish-dev:
     name: Publish the dev prerelease
-    needs: windows
-    if: github.repository == 'englishfox90/PFRSentinel' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    needs: [windows, freshness]
+    if: needs.freshness.outputs.current == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
