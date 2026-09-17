@@ -264,7 +264,7 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
-| `test_dev_build_notes.py` | 9 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list |
+| `test_dev_build_notes.py` | 11 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list |
 | `test_dev_build_changelog.py` | 6 | `scripts/ci/dev_build_changelog.py` — PRs since the last release via commits, grouping, delta since the previous dev build, API failure never blocks |
 | `test_dev_build_discussion.py` | 9 | `scripts/ci/dev_build_discussion.py` — one thread per release cycle, retire/reopen, never edits a post (GITHUB_TOKEN is refused updateDiscussion), never touches people's threads |
 | `test_set_dev_version.py` | 11 | `scripts/ci/set_dev_version.py` — dev version base/counter, Windows FileVersion, spec parses the same way |
