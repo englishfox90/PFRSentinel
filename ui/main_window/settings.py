@@ -126,6 +126,12 @@ class _MainWindowSettingsMixin:
 
         self._update_start_button()
 
+        # Timelapse-panel edits change what the "Same as Timelapse" schedule
+        # preview would show, even though the schedule card itself didn't fire.
+        camera_widget = getattr(getattr(self, 'capture_panel', None), 'camera_widget', None)
+        if hasattr(camera_widget, 'schedule_source_rows'):
+            camera_widget.schedule_source_rows.refresh_preview(self.config)
+
         # Live update camera settings if capturing (e.g., target brightness, auto-exposure)
         # Debounced to avoid spamming SDK calls during slider drags
         if self.is_capturing and self.camera_controller:

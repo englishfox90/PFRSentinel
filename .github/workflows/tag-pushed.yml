@@ -1,7 +1,17 @@
 name: Tag Pushed
 
-# Does nothing itself. claude-release-notes.yml chains off this run via
-# `workflow_run`, because claude-code-action rejects `push` events.
+# claude-release-notes.yml chains off this run via `workflow_run`, because
+# claude-code-action rejects `push` events.
+#
+# It gates on this workflow concluding successfully, so the check below also
+# decides whether a draft release gets written at all — which is the intent. A
+# tag that disagrees with version.py would otherwise produce release notes for
+# a version no artifact will ever carry, and update_checker.py matches release
+# assets by name.
+#
+# Building is not this workflow's job. Release builds are signed and signing
+# cannot run on a hosted runner, so they are cut locally with
+# build_sentinel_installer.bat. See build.yml.
 
 on:
   push:
@@ -11,7 +21,25 @@ permissions:
   contents: read
 
 jobs:
-  record:
+  check:
+    name: Tag matches version.py
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - run: echo "Tag ${GITHUB_REF_NAME} at ${GITHUB_SHA}"
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Compare the tag against version.py
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(python -c 'import version; print(version.__version__)')"
+          echo "Tag ${GITHUB_REF_NAME} at ${GITHUB_SHA}"
+          echo "tag=$tagged  version.py=$declared"
+          if [ "$tagged" != "$declared" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match version.py ($declared). \
+          Fix version.py, or retag, before building the release locally."
+            exit 1
+          fi

@@ -13,6 +13,7 @@ import time
 
 from services.logger import app_logger
 from services.camera import ZWOCamera
+from services.capture_schedule_window import gate_for_config
 from .camera_settings import apply_camera_settings_async, set_raw16_mode_async
 from .camera_usb_recovery import UsbResetWorker
 
@@ -266,6 +267,7 @@ class CameraControllerQt(QObject):
                 camera_name=params['clean_camera_name'],
                 camera_serial=params['camera_serial'],
             )
+            cam.schedule_gate = gate_for_config(self.config)
             cam.target_brightness = params['target_brightness']
             cam.set_capture_interval(params['capture_interval'])
             cam.use_raw16 = params['use_raw16']

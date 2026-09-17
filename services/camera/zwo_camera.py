@@ -91,6 +91,10 @@ class ZWOCamera:
         self.scheduled_start_time = scheduled_start_time  # Format: "HH:MM"
         self.scheduled_end_time = scheduled_end_time      # Format: "HH:MM"
         self.scheduled_window_interval = scheduled_window_interval  # seconds (variable mode)
+        # Assigned from config by whoever builds the camera (see
+        # capture_schedule_window.gate_for_config). None keeps the legacy
+        # fixed HH:MM window; a gate follows the timelapse window instead.
+        self.schedule_gate = None
         
         # Exposure tracking for UI
         self.exposure_start_time = None
@@ -179,6 +183,29 @@ class ZWOCamera:
             self.on_log_callback(message)
         app_logger.debug(message)
     
+    def _gate_verdict(self):
+        """The schedule gate's verdict, or None when no gate is set.
+
+        Fails open on error, like check_scheduled_window does — a schedule
+        fault must never stop an unattended camera, nor escape into the
+        capture loop.
+        """
+        gate = self.schedule_gate
+        if gate is None:
+            return None
+        try:
+            return bool(gate())
+        except Exception as e:
+            app_logger.debug(f"Schedule gate error ({e}), allowing capture")
+            return True
+
+    def _legacy_window(self):
+        return check_scheduled_window(
+            True,
+            self.scheduled_start_time,
+            self.scheduled_end_time
+        )
+
     def is_within_scheduled_window(self):
         """
         Whether capture is currently permitted (i.e. we should NOT pause).
@@ -190,19 +217,23 @@ class ZWOCamera:
         """
         if self.scheduled_capture_mode != "gated":
             return True
-        return check_scheduled_window(
-            True,
-            self.scheduled_start_time,
-            self.scheduled_end_time
-        )
+        verdict = self._gate_verdict()
+        return self._legacy_window() if verdict is None else verdict
 
     def is_in_time_window(self):
         """True when the current clock falls inside the configured window, mode-independent."""
-        return check_scheduled_window(
-            True,
-            self.scheduled_start_time,
-            self.scheduled_end_time
-        )
+        verdict = self._gate_verdict()
+        return self._legacy_window() if verdict is None else verdict
+
+    def scheduled_window_label(self):
+        """Human-readable capture window, for logs and the status API."""
+        gate = self.schedule_gate
+        if gate is not None:
+            try:
+                return gate.describe()
+            except Exception as e:
+                app_logger.debug(f"Schedule gate describe error ({e})")
+        return f"{self.scheduled_start_time} - {self.scheduled_end_time}"
 
     def request_immediate_capture(self):
         """Ask the capture loop to skip the rest of the current inter-frame wait."""
@@ -321,7 +352,7 @@ class ZWOCamera:
 
             self.log(f"✓ Camera connection successful")
             if self.scheduled_capture_enabled:
-                self.log(f"Scheduled capture enabled: {self.scheduled_start_time} - {self.scheduled_end_time}")
+                self.log(f"Scheduled capture enabled: {self.scheduled_window_label()}")
 
         return success
     

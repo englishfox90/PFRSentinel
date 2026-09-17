@@ -20,6 +20,48 @@ def _make_image(w=256, h=256):
     return Image.new('RGBA', (w, h), (0, 0, 0, 255))
 
 
+def _label_widths(img, mirror, size=160, cx=128, cy=128):
+    """Pixel width of the label on each side of `img`, as ``(west, east)``.
+
+    'W' is wider than 'E' in every Latin face, so which side carries the wide
+    glyph is a direct, font-independent reading of which label went where.
+
+    Ink totals are not usable for this and neither is position. Cropping a
+    fixed band clipped DejaVu's 'W' — 10px wider than Arial's — off Windows,
+    and a band wide enough for any 'W' reaches the star arms, which rasterise
+    a pixel further left than right; the labels' black shadow then darkens a
+    different slice of arm on each side. Width survives all of it.
+
+    The label-only ink comes from subtracting the same rose rendered with the
+    labels suppressed, and columns below 5% of the peak are dropped so the
+    shadow-over-arm residue does not extend the run.
+    """
+    from services import compass_overlay
+    px = max(10, size // 6)
+    sentinel = object()
+
+    previous = compass_overlay._FONT_CACHE.get(px, sentinel)
+    compass_overlay._FONT_CACHE[px] = None  # forces the "skip labels" path
+    try:
+        bare = draw_compass(_make_image(), size=size, cx=cx, cy=cy, mirror=mirror)
+    finally:
+        if previous is sentinel:
+            compass_overlay._FONT_CACHE.pop(px, None)
+        else:
+            compass_overlay._FONT_CACHE[px] = previous
+
+    glyphs = (np.array(img)[:, :, :3].astype(int)
+              - np.array(bare)[:, :, :3].astype(int))
+    columns = glyphs[cy - 20:cy + 20].sum(axis=(0, 2)).clip(min=0)
+    floor = 0.05 * columns.max()
+    assert floor > 0, "no label ink anywhere in the rendered compass"
+
+    def _width(lo, hi):
+        return int((columns[lo:hi] > floor).sum())
+
+    return _width(cx - 100, cx - 50), _width(cx + 50, cx + 100)
+
+
 class TestCompassRendering:
     """Test compass overlay rendering"""
 
@@ -71,16 +113,14 @@ class TestCompassMirror:
         normal = draw_compass(_make_image(), size=size, cx=cx, cy=cy)
         mirrored = draw_compass(_make_image(), size=size, cx=cx, cy=cy, mirror=True)
 
-        def _label_ink(img, x0, x1):
-            # Band sits outside the star points, so it only contains the label
-            crop = img.crop((cx + x0, cy - 20, cx + x1, cy + 20))
-            return int(np.array(crop)[:, :, :3].sum())
+        normal_w, normal_e = _label_widths(normal, mirror=False)
+        mirrored_w, mirrored_e = _label_widths(mirrored, mirror=True)
 
-        west_band, east_band = (-92, -58), (58, 92)
-        assert _label_ink(normal, *east_band) == _label_ink(mirrored, *west_band)
-        assert _label_ink(normal, *west_band) == _label_ink(mirrored, *east_band)
+        # The label that was on the east is now on the west, and vice versa.
+        assert normal_e == mirrored_w
+        assert normal_w == mirrored_e
         # Guard the assertions above against E and W rendering identically
-        assert _label_ink(normal, *east_band) != _label_ink(normal, *west_band)
+        assert normal_w > normal_e
 
     def test_mirror_keeps_north_up(self):
         """Test mirroring is left-right only — N stays where rotation puts it"""
@@ -215,13 +255,21 @@ class TestCompassFontCaching:
 
         ImageFont.truetype = counting
         try:
-            for _ in range(5):
+            draw_compass(_make_image(), size=160, cx=128, cy=128)
+            after_first_draw = list(calls)
+            for _ in range(4):
                 draw_compass(_make_image(), size=160, cx=128, cy=128)
         finally:
             ImageFont.truetype = real
             self._clear_cache()
 
-        assert len(calls) == 1, f"font re-resolved per call: {calls}"
+        # Count resolutions, not truetype calls: _label_font walks a candidate
+        # list, and how far it gets is platform-dependent — Windows hits
+        # arial.ttf first, Linux falls through to DejaVuSans.ttf. What must
+        # hold everywhere is that the walk happens once, not once per frame.
+        assert after_first_draw, "font was never resolved"
+        assert calls == after_first_draw, (
+            f"font re-resolved after the first draw: {calls[len(after_first_draw):]}")
 
     def test_consecutive_draws_use_the_same_font_despite_a_transient_failure(self):
         """The exact flake: font available for one call, unavailable for the next."""
@@ -247,13 +295,11 @@ class TestCompassFontCaching:
             ImageFont.truetype = real
             self._clear_cache()
 
-        def _ink(img, x0, x1):
-            crop = img.crop((128 + x0, 108, 128 + x1, 148))
-            return int(np.array(crop)[:, :, :3].sum())
+        normal_w, normal_e = _label_widths(normal, mirror=False)
+        mirrored_w, mirrored_e = _label_widths(mirrored, mirror=True)
 
-        west_band, east_band = (-92, -58), (58, 92)
-        assert _ink(normal, *east_band) == _ink(mirrored, *west_band)
-        assert _ink(normal, *west_band) == _ink(mirrored, *east_band)
+        assert normal_e == mirrored_w
+        assert normal_w == mirrored_e
 
     def test_missing_font_skips_labels_instead_of_failing_the_frame(self):
         """An unattended capture must not stop over a font that won't load."""

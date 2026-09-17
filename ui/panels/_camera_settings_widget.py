@@ -10,6 +10,7 @@ from qfluentwidgets import (
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, FormRow, SwitchRow, ClickSlider, CollapsibleCard
+from ._schedule_window_source import ScheduleWindowSourceRows
 from services.logger import app_logger
 from services.config import DEFAULT_CAMERA_PROFILE
 
@@ -267,7 +268,14 @@ class CameraSettingsWidget(QWidget):
         self.schedule_mode_hint.setWordWrap(True)
         card.add_widget(self.schedule_mode_hint)
 
-        # Time window row (shown for gated + variable)
+        # Window-source rows (fixed vs. follow-timelapse) — shown for gated + variable
+        self.schedule_source_rows = ScheduleWindowSourceRows()
+        self.schedule_source_rows.source_changed.connect(self._on_schedule_source_changed)
+        self.schedule_source_rows.margin_changed.connect(self._on_schedule_margin_changed)
+        self.schedule_source_rows.hide()
+        card.add_widget(self.schedule_source_rows)
+
+        # Time window row (shown for gated + variable, fixed source only)
         self.schedule_time_widget = QWidget()
         time_row = QHBoxLayout(self.schedule_time_widget)
         time_row.setContentsMargins(0, 0, 0, 0)
@@ -526,11 +534,16 @@ class CameraSettingsWidget(QWidget):
             f"{'Full' if checked else 'Standard 8-bit'} sensor bit depth will be used"
         )
 
+    def _update_schedule_window_visibility(self, mode: str):
+        """Shared visibility rule for the window rows, keyed by mode + source."""
+        uses_window = mode in ("gated", "variable")
+        self.schedule_source_rows.setVisible(uses_window)
+        self.schedule_time_widget.setVisible(uses_window and not self.schedule_source_rows.uses_timelapse())
+
     def _on_schedule_mode_changed(self, index):
         mode = _SCHEDULE_MODES[index] if 0 <= index < len(_SCHEDULE_MODES) else "always"
         self.schedule_mode_hint.setText(_SCHEDULE_MODE_HINTS.get(mode, ""))
-        # Window row is visible for any mode that uses the window.
-        self.schedule_time_widget.setVisible(mode in ("gated", "variable"))
+        self._update_schedule_window_visibility(mode)
         # In-window interval is only meaningful in variable mode.
         self.schedule_window_row.setVisible(mode == "variable")
         if self._can_save:
@@ -552,6 +565,20 @@ class CameraSettingsWidget(QWidget):
     def _on_schedule_window_interval_changed(self, value):
         if self._can_save:
             self.main_window.config.set('scheduled_window_interval', value)
+            self.settings_changed.emit()
+
+    def _on_schedule_source_changed(self, source):
+        mode = _SCHEDULE_MODES[self.schedule_mode_combo.currentIndex()]
+        self._update_schedule_window_visibility(mode)
+        if self._can_save:
+            self.main_window.config.set('scheduled_window_source', source)
+            self.schedule_source_rows.refresh_preview(self.main_window.config)
+            self.settings_changed.emit()
+
+    def _on_schedule_margin_changed(self, value):
+        if self._can_save:
+            self.main_window.config.set('scheduled_window_margin_min', value)
+            self.schedule_source_rows.refresh_preview(self.main_window.config)
             self.settings_changed.emit()
 
     def _on_wb_mode_changed(self, index):
@@ -615,7 +642,8 @@ class CameraSettingsWidget(QWidget):
             self.schedule_end.setTime(QTime(end_h, end_m))
             self.schedule_window_interval_spin.setValue(config.get('scheduled_window_interval', 5.0))
 
-            self.schedule_time_widget.setVisible(mode in ("gated", "variable"))
+            self.schedule_source_rows.load(config)
+            self._update_schedule_window_visibility(mode)
             self.schedule_window_row.setVisible(mode == "variable")
 
             wb_settings = config.get('white_balance', {})

@@ -31,7 +31,7 @@ def test_arm_is_idempotent():
     assert wd._armed is True
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="force-kill path is Windows-specific")
+@pytest.mark.requires_windows
 def test_watchdog_kills_hung_process():
     """A process that wedges after arming is force-terminated by the deadline."""
     script = textwrap.dedent(

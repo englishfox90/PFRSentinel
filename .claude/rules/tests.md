@@ -14,8 +14,16 @@ Defined in `pytest.ini`:
 - `@pytest.mark.requires_camera` — physical ZWO ASI camera attached
 - `@pytest.mark.requires_network` — internet access (weather API, web server bind)
 - `@pytest.mark.requires_ml_models` — ONNX models present in models dir
+- `@pytest.mark.requires_windows` — Windows-only behaviour (NTFS junctions, drive
+  roots, Win32 APIs). `tests/conftest.py` skips these off Windows automatically,
+  so use the marker rather than an inline `skipif(sys.platform != "win32")` — the
+  marker is selectable (`-m requires_windows`) and keeps one pytest command line
+  working on all three CI runners.
 
 Default CI run: `pytest -m "not requires_camera and not requires_network"`.
+
+`tests/conftest.py` also sets `QT_QPA_PLATFORM=offscreen` (via `setdefault`, so a
+real display still wins locally). Don't re-set it per file.
 
 ## What to mock
 - All network: `requests`, Discord webhooks, weather API, web server clients

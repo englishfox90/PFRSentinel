@@ -7,6 +7,7 @@ Pure data — behaviour lives in services/config.py.
 """
 import os
 from .utils_paths import resource_path, get_app_data_dir
+from .dev_mode_config import is_dev_mode_available
 from .app_config import DEFAULT_OUTPUT_SUBFOLDER
 
 DEFAULT_CAMERA_PROFILE = {
@@ -111,6 +112,12 @@ DEFAULT_CONFIG = {
     "scheduled_start_time": "16:00",        # 4:00 PM — window start (24hr)
     "scheduled_end_time": "09:00",          # 9:00 AM — window end (next day for overnight)
     "scheduled_window_interval": 30.0,      # seconds between captures when inside the window (variable mode only)
+    # window source:
+    #   "fixed"     — use scheduled_start_time/scheduled_end_time above (default)
+    #   "timelapse" — follow the Timelapse recording window (Timelapse settings +
+    #                 weather coordinates), widened by the margin below
+    "scheduled_window_source": "fixed",
+    "scheduled_window_margin_min": 15,      # minutes before/after the timelapse window (0-180)
     
     # White Balance configuration
     "white_balance": {
@@ -175,7 +182,13 @@ DEFAULT_CONFIG = {
     
     # Developer Mode settings - for troubleshooting raw image data
     "dev_mode": {
-        "enabled": False,  # Save raw images before any processing
+        # Follows the build channel rather than carrying its own switch: a dev
+        # build stamps DEV_MODE_AVAILABLE=True into dev_mode_config.py (see
+        # scripts/ci/set_build_channel.py), so it arrives with raw capture on;
+        # a production build arrives with it off. Only NEW configs pick this up
+        # — Config.load merges against DEFAULT_CONFIG and a value already saved
+        # wins, so upgrading an existing install never flips the user's choice.
+        "enabled": is_dev_mode_available(),  # Save raw images before any processing
         "raw_folder": "raw_debug",  # Subfolder name for raw images (relative to output_directory)
         "save_histogram_stats": True,  # Log detailed per-channel statistics
         "use_raw16": False,  # Use RAW16 mode for full bit depth (requires camera support)

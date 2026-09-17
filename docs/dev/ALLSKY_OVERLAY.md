@@ -16,6 +16,7 @@ services/allsky/
 ├── calibration.py         Grid-search initial match → scipy.optimize.least_squares fit
 ├── star_centroid.py       OpenCV blob detection + weighted-moment sub-pixel centroids
 ├── label_collision.py     Edge-anchored label placement (no overlaps, off the stars)
+├── label_stability.py     Frame-to-frame hysteresis: mask vote, sticky top-N, slot memory
 ├── render_grid.py         AltAz grid, horizon circle, cardinal labels
 ├── render_constellations.py  IAU/Dien constellation lines + abbreviation labels
 ├── render_objects.py      Planet circles, Messier diamonds, NGC crosses
@@ -96,6 +97,32 @@ where θ is the angle from the optical axis in radians (0 = zenith, π/2 = horiz
 - Fewer than `min_matches` catalog stars above the horizon (check lat/lon + UTC)
 - Grid search finds < 3 matches (wrong scale or time)
 - Final RMS > `max_residual_px` after fit
+
+---
+
+## Label Stability
+
+Each frame is rendered from scratch, and three stages are noisy at their
+margin: star detection (a 4σ star blinks in and out), the visibility mask built
+from those detections (an object near a disc edge flips between sky and
+obstruction), and the fixed `top_n` budget (one object dropping out promotes
+the next-ranked one, and both swap back a frame later). Issues #31 and #13
+report the result: labels popping on and off in the timelapse, and the whole
+overlay vanishing on frames with fewer than 10 detections.
+
+`label_stability.py` keeps the small amount of state that lets consecutive
+frames agree. It is process-wide (`get_label_stabilizer()`) because the
+renderer serves one live frame stream; `reset_label_stability()` clears it.
+
+| Piece | What it does | Constant |
+|---|---|---|
+| `SkyMaskHistory` | Majority vote over the last N detection masks; a frame with no usable mask reuses the last vote for up to M frames before the renderer falls back to raw grayscale | `MASK_VOTE_DEPTH = 3`, `MASK_HOLD_FRAMES = 3` |
+| `StickySelection` | An object already on screen stays eligible up to `top_n + margin` and competes with a `margin`-rank bonus, so a newcomer must out-rank it by more than the margin (a rising Moon still displaces it) | `RANK_MARGIN = 3` |
+| `LabelGrid(slot_memory=…)` | The candidate slot a label used last frame is tried first, so a new neighbour does not flip it to the other side of its star | — |
+
+A real change (roof closing, cloud) is adopted after two frames; a sustained
+detection failure releases the mask hold and clears the history so stale
+frames cannot out-vote fresh ones.
 
 ---
 
@@ -258,4 +285,5 @@ The calibration JSON (`allsky_calibration.json`) is stored in `%LOCALAPPDATA%\PF
 |---|---|---|
 | `test_allsky_coords.py` | 20 | Julian Date, GMST, AltAz round-trips, Bennett refraction, ecliptic→equatorial |
 | `test_allsky_calibration.py` | 12 | FisheyeModel projection, JSON persistence, synthetic star detection |
-| `test_allsky_rendering.py` | 13 | LabelGrid, each render layer, full pipeline with/without calibration |
+| `test_allsky_rendering.py` | 25 | LabelGrid, each render layer, full pipeline with/without calibration |
+| `test_allsky_label_stability.py` | 27 | Mask vote and hold, sticky top-N (incl. the #31 boundary-flicker regression), slot memory, renderer on synthetic frames with an injected low-detection frame |

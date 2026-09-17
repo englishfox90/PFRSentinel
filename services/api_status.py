@@ -42,8 +42,11 @@ CAPTURE_FIELDS = [
     ("effective_interval_seconds", "number",
      "Interval actually in effect now, honouring variable-rate schedules; null in watch mode."),
     ("schedule", "object",
-     "Scheduled-window config: {mode, start_time, end_time, in_window, window_interval_seconds}. "
-     "null when no schedule applies."),
+     "Scheduled-window config: {mode, source, start_time, end_time, window, in_window, "
+     "window_interval_seconds}. 'source' is 'fixed' (the configured HH:MM times) or "
+     "'timelapse' (the timelapse recording window widened by the configured margin, in "
+     "which case start_time/end_time are the times of the window in force). 'window' is a "
+     "human-readable label for that window. null when no schedule applies."),
     ("last_capture_age_seconds", "integer",
      "Seconds since the last successful capture, or null if none yet."),
     ("next_capture_in_seconds", "integer",
@@ -58,6 +61,78 @@ CAPTURE_FIELDS = [
      "tell a NEW failure from the same fault reported again — the message text "
      "cannot, because a repeated fault reads identically."),
 ]
+
+
+def build_schedule(config, zwo_camera=None) -> dict:
+    """Build the ``schedule`` block of the capture snapshot, GUI or headless.
+
+    ``zwo_camera`` is optional: with capture stopped the schedule is still
+    reported, computed straight from config, so a client can see when the rig
+    is due to wake up.
+    """
+    # Local imports keep this module's import surface free of the camera
+    # package for the web-server thread.
+    from .camera.camera_utils import is_within_scheduled_window
+    from .capture_schedule_window import SOURCE_FIXED, gate_for_config
+
+    mode = config.get('scheduled_capture_mode', 'always')
+    source = config.get('scheduled_window_source', SOURCE_FIXED)
+    start = config.get('scheduled_start_time', '17:00')
+    end = config.get('scheduled_end_time', '09:00')
+    label = f"{start} - {end}"
+
+    # Prefer the camera's own gate: it carries the per-day cache, and this
+    # runs on every status tick. A fresh gate only when capture is stopped.
+    gate = getattr(zwo_camera, 'schedule_gate', None)
+    if gate is None:
+        try:
+            gate = gate_for_config(config)
+        except Exception:
+            gate = None
+
+    if gate is not None:
+        try:
+            window = gate.active_window()
+            if window is not None:
+                start = window[0].strftime('%H:%M')
+                end = window[1].strftime('%H:%M')
+            label = gate.describe()
+        except Exception:
+            pass
+
+    if zwo_camera is not None:
+        try:
+            label = zwo_camera.scheduled_window_label()
+        except Exception:
+            pass
+
+    in_window = True
+    if mode != 'always':
+        try:
+            if zwo_camera is not None:
+                in_window = zwo_camera.is_in_time_window()
+            elif gate is not None:
+                in_window = gate()
+            else:
+                in_window = is_within_scheduled_window(
+                    True,
+                    config.get('scheduled_start_time', '17:00'),
+                    config.get('scheduled_end_time', '09:00'),
+                )
+        except Exception:
+            in_window = True
+
+    return {
+        "mode": mode,
+        "source": source,
+        "start_time": start,
+        "end_time": end,
+        "window": label,
+        "in_window": in_window,
+        "window_interval_seconds": (
+            config.get('scheduled_window_interval', 5.0) if mode == 'variable' else None
+        ),
+    }
 
 
 def build_capture_snapshot(

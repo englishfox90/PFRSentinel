@@ -45,44 +45,53 @@ except Exception as e:
 version_parts = version_str.split('.')
 version_tuple = tuple(int(p) for p in version_parts[:3]) + (0,) * (4 - len(version_parts[:3]))
 
-# Create Windows version info structure dynamically
-from PyInstaller.utils.win32.versioninfo import (
-    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, 
-    StringStruct, VarFileInfo, VarStruct
-)
+# Create Windows version info structure dynamically.
+# PyInstaller.utils.win32 imports pywin32 machinery that only exists on Windows,
+# so this has to stay inside the platform guard — at module scope it made the
+# spec unparseable on macOS and Linux (issue #38). EXE(version=None) is the
+# documented no-op everywhere else.
+IS_WINDOWS = sys.platform == 'win32'
+version_info = None
 
-version_info = VSVersionInfo(
-    ffi=FixedFileInfo(
-        filevers=version_tuple,
-        prodvers=version_tuple,
-        mask=0x3f,
-        flags=0x0,
-        OS=0x40004,
-        fileType=0x1,
-        subtype=0x0,
-        date=(0, 0)
-    ),
-    kids=[
-        StringFileInfo([
-            StringTable(
-                '040904B0',
-                [
-                    StringStruct('CompanyName', 'Paul Fox-Reeks'),
-                    StringStruct('FileDescription', 'PFR Sentinel - Astrophotography Image Processor'),
-                    StringStruct('FileVersion', f'{version_str}.0'),
-                    StringStruct('InternalName', 'PFRSentinel'),
-                    StringStruct('LegalCopyright', 'Copyright (c) 2024-2026 Paul Fox-Reeks'),
-                    StringStruct('OriginalFilename', 'PFRSentinel.exe'),
-                    StringStruct('ProductName', 'PFR Sentinel'),
-                    StringStruct('ProductVersion', f'{version_str}.0'),
-                ]
-            )
-        ]),
-        VarFileInfo([VarStruct('Translation', [1033, 1200])])
-    ]
-)
+if IS_WINDOWS:
+    from PyInstaller.utils.win32.versioninfo import (
+        VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
+        StringStruct, VarFileInfo, VarStruct
+    )
 
-print(f"[OK] Version info generated: {version_tuple}")
+    version_info = VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=version_tuple,
+            prodvers=version_tuple,
+            mask=0x3f,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0)
+        ),
+        kids=[
+            StringFileInfo([
+                StringTable(
+                    '040904B0',
+                    [
+                        StringStruct('CompanyName', 'Paul Fox-Reeks'),
+                        StringStruct('FileDescription', 'PFR Sentinel - Astrophotography Image Processor'),
+                        StringStruct('FileVersion', f'{version_str}.0'),
+                        StringStruct('InternalName', 'PFRSentinel'),
+                        StringStruct('LegalCopyright', 'Copyright (c) 2024-2026 Paul Fox-Reeks'),
+                        StringStruct('OriginalFilename', 'PFRSentinel.exe'),
+                        StringStruct('ProductName', 'PFR Sentinel'),
+                        StringStruct('ProductVersion', f'{version_str}.0'),
+                    ]
+                )
+            ]),
+            VarFileInfo([VarStruct('Translation', [1033, 1200])])
+        ]
+    )
+
+print(f"[OK] Version info generated: {version_tuple}" if IS_WINDOWS
+      else "[INFO] Non-Windows build: no VSVersionInfo resource")
 
 # ============================================================================
 # COLLECT REQUIRED PACKAGES
@@ -420,6 +429,11 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Windows takes the .ico directly. macOS wants an .icns, which is Phase 5 work
+# (#41) — until it exists, ship no icon rather than handing PyInstaller a format
+# it rejects. Linux ignores EXE(icon=...) entirely.
+app_icon = 'assets/app_icon.ico' if IS_WINDOWS else None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -436,7 +450,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/app_icon.ico',
+    icon=app_icon,
     # Version info generated dynamically from version.py (helps AV heuristics)
     version=version_info,
 )
