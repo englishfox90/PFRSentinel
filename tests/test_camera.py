@@ -281,9 +281,9 @@ class TestWaitForCaptureThreadExit:
         cam.is_capturing = True
 
         # Ignores the stop flag (simulates an SDK-wedged thread); must outlast
-        # the 0.1s join timeout below since the trailing t.join() eats it whole.
+        # the 0.1s join timeout below with margin for CI scheduling jitter.
         def stuck():
-            time.sleep(0.15)
+            time.sleep(1.0)
 
         t = threading.Thread(target=stuck, daemon=True)
         cam.capture_thread = t
