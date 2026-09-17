@@ -8,6 +8,7 @@ import os
 from PySide6.QtCore import QObject, Signal, QTimer
 from services.timelapse_writer import TimelapseWriter
 from services.timelapse_publishers import TimelapsePublishers, make_timelapse_metadata
+from services.timelapse_window_forecast import describe_forecast, forecast_window
 from services.logger import app_logger
 
 
@@ -22,7 +23,7 @@ class TimelapseController(QObject):
     - Emit status updates for the panel to display
     """
 
-    status_updated = Signal(dict)  # Emits get_status() dict periodically
+    status_updated = Signal(dict)  # Emits get_display_status() dict periodically
     finalizing_started = Signal()          # Background ffmpeg finalization began
     finalizing_finished = Signal(str)      # Finalization done; arg is session path ('' if none)
     youtube_upload_status_changed = Signal(dict)
@@ -134,8 +135,23 @@ class TimelapseController(QObject):
     def get_status(self) -> dict:
         return self._writer.get_status()
 
+    def get_display_status(self) -> dict:
+        """get_status() plus the projected recording window, for the panel."""
+        status = self._writer.get_status()
+        status['window_forecast'] = self._describe_window(status.get('recording', False))
+        return status
+
+    def _describe_window(self, recording: bool) -> str:
+        """The projected recording window, for the panel's Status card."""
+        cfg = self._get_timelapse_config()
+        return describe_forecast(
+            forecast_window(cfg),
+            enabled=cfg.get('enabled', False),
+            recording=recording,
+        )
+
     def _emit_status(self):
-        self.status_updated.emit(self._writer.get_status())
+        self.status_updated.emit(self.get_display_status())
 
     def _emit_youtube_status(self, status: dict):
         self.youtube_upload_status_changed.emit(status)

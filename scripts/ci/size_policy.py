@@ -12,7 +12,6 @@ WARN_CAP = 600
 # introduced (+5% above that day's line count). Do not raise these without a
 # commit that actually splits the file.
 EXCEPTIONS = {
-    "ui/panels/timelapse_panel.py": 750,
     "ml/train_sky_classifier.py": 743,
     "ui/panels/live_monitoring.py": 723,
     "tests/test_camera.py": 1430,
