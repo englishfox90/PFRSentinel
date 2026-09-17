@@ -8,7 +8,6 @@ Required packages (from requirements.txt):
 - Pillow, numpy, opencv-python (Image processing)
 - requests (HTTP/Discord)
 - watchdog (File monitoring)
-- pystray (System tray)
 - zwoasi (ZWO camera - optional)
 - onnxruntime (ML inference - lightweight)
 
@@ -128,14 +127,6 @@ except Exception as e:
     print(f"[WARN] jaraco: {e}")
     jaraco_datas, jaraco_binaries, jaraco_hiddenimports = [], [], []
 
-# --- pystray (system tray) ---
-try:
-    pystray_datas, pystray_binaries, pystray_hiddenimports = collect_all('pystray')
-    print(f"[OK] pystray: {len(pystray_datas)} datas, {len(pystray_hiddenimports)} imports")
-except Exception as e:
-    print(f"[WARN] pystray: {e}")
-    pystray_datas, pystray_binaries, pystray_hiddenimports = [], [], []
-
 # --- platformdirs (runtime dependency: services/utils_paths.py app-data root) ---
 try:
     platformdirs_datas, platformdirs_binaries, platformdirs_hiddenimports = collect_all('platformdirs')
@@ -244,6 +235,11 @@ added_files = [
     ('version.py', '.'),
     ('assets/app_icon.ico', 'assets'),
     ('assets/app_icon.png', 'assets'),
+    ('assets/app_icon.icns', 'assets'),
+    # Bundled overlay font so text overlays render the same on every OS
+    # (services/font_loader.py). OFL-licensed; the licence ships beside it.
+    ('assets/fonts/SpaceGrotesk-Medium.ttf', 'assets/fonts'),
+    ('assets/fonts/OFL-SpaceGrotesk.txt', 'assets/fonts'),
     # ML models (ONNX format for production)
     ('ml/models/roof_classifier_v1.onnx', 'ml/models'),
     ('ml/models/sky_classifier_v1.onnx', 'ml/models'),
@@ -320,9 +316,6 @@ hiddenimports = [
     # --- File monitoring ---
     'watchdog', 'watchdog.observers', 'watchdog.events',
     
-    # --- System tray ---
-    'pystray', 'pystray._base', 'pystray._util', 'pystray._win32',
-    
     # --- ZWO Camera (optional, fails gracefully) ---
     'zwoasi',
     
@@ -362,7 +355,7 @@ hiddenimports = [
     # --- ML modules ---
     'ml', 'ml.roof_classifier', 'ml.sky_classifier',
     'onnxruntime',
-] + fluent_hiddenimports + requests_hiddenimports + jaraco_hiddenimports + pystray_hiddenimports + platformdirs_hiddenimports + onnx_hiddenimports + posthog_hiddenimports + backoff_hiddenimports + otel_hiddenimports + scipy_hiddenimports + google_hiddenimports
+] + fluent_hiddenimports + requests_hiddenimports + jaraco_hiddenimports + platformdirs_hiddenimports + onnx_hiddenimports + posthog_hiddenimports + backoff_hiddenimports + otel_hiddenimports + scipy_hiddenimports + google_hiddenimports
 
 # ============================================================================
 # ANALYSIS
@@ -371,8 +364,8 @@ hiddenimports = [
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=fluent_binaries + requests_binaries + jaraco_binaries + pystray_binaries + platformdirs_binaries + onnx_binaries + xml_binaries + posthog_binaries + backoff_binaries + otel_binaries + scipy_binaries + google_binaries,
-    datas=added_files + fluent_datas + requests_datas + jaraco_datas + pystray_datas + platformdirs_datas + onnx_datas + posthog_datas + backoff_datas + otel_datas + scipy_datas + google_datas,
+    binaries=fluent_binaries + requests_binaries + jaraco_binaries + platformdirs_binaries + onnx_binaries + xml_binaries + posthog_binaries + backoff_binaries + otel_binaries + scipy_binaries + google_binaries,
+    datas=added_files + fluent_datas + requests_datas + jaraco_datas + platformdirs_datas + onnx_datas + posthog_datas + backoff_datas + otel_datas + scipy_datas + google_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -436,10 +429,15 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# Windows takes the .ico directly. macOS wants an .icns, which is Phase 5 work
-# (#41) — until it exists, ship no icon rather than handing PyInstaller a format
-# it rejects. Linux ignores EXE(icon=...) entirely.
-app_icon = 'assets/app_icon.ico' if IS_WINDOWS else None
+# Windows takes the .ico directly; macOS wants an .icns (generated from
+# assets/Icon.png). Linux ignores EXE(icon=...) entirely — its desktop entry
+# points at the PNG, which is Phase 5 (#41) packaging work.
+if IS_WINDOWS:
+    app_icon = 'assets/app_icon.ico'
+elif sys.platform == 'darwin':
+    app_icon = 'assets/app_icon.icns'
+else:
+    app_icon = None
 
 exe = EXE(
     pyz,

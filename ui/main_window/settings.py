@@ -1,6 +1,7 @@
 from PySide6.QtCore import QTimer
 
 from services.logger import app_logger
+from services.host_platform import IS_WINDOWS
 
 
 class _MainWindowSettingsMixin:
@@ -73,6 +74,10 @@ class _MainWindowSettingsMixin:
             return False
 
     def refresh_nina_plugin_status(self) -> bool:
+        # NINA (and the plugin DLL it loads) is Windows-only — skip so no
+        # controller thread spins up on macOS/Linux.
+        if not IS_WINDOWS:
+            return False
         return self.run_nina_plugin_action('refresh')
 
     def _on_nina_plugin_status(self, status):

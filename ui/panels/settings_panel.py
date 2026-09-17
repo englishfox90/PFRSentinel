@@ -21,6 +21,7 @@ from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, FormRow, SwitchRow, CollapsibleCard
 from services.ffmpeg_utils import is_ffmpeg_available  # noqa: F401 – re-exported for legacy callers
+from services.host_platform import IS_WINDOWS, platform_label
 
 
 class SettingsPanel(QScrollArea):
@@ -110,13 +111,17 @@ class SettingsPanel(QScrollArea):
         self.tray_enabled_switch.checkedChanged.connect(self._on_system_changed)
         system_card.add_widget(tray_row)
 
-        # Run on Windows startup
+        # Run at login (Windows-only for now; Phase 4 / #40 brings this to
+        # macOS and Linux)
         startup_row = SwitchRow(
-            "Start with Windows",
+            "Start at login",
             "Launch automatically on logon (scheduled task; expect a one-time admin prompt)"
+            if IS_WINDOWS else f"Coming to {platform_label()} in a later release"
         )
         self.startup_switch = startup_row.switch
         self.startup_switch.checkedChanged.connect(self._on_startup_changed)
+        if not IS_WINDOWS:
+            self.startup_switch.setEnabled(False)
         system_card.add_widget(startup_row)
 
         # Auto-start capture when launched on startup
@@ -336,7 +341,7 @@ class SettingsPanel(QScrollArea):
             self.settings_changed.emit()
 
     def _on_startup_changed(self):
-        """Handle 'Start with Windows' / 'Auto-start capture' toggles.
+        """Handle 'Start at login' / 'Auto-start capture' toggles.
 
         Both feed the same scheduled-task registration: the auto-start switch
         only changes the command the task runs, so toggling it re-registers the

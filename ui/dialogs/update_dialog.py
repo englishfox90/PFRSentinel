@@ -12,7 +12,9 @@ from qfluentwidgets import (
     PrimaryPushButton, PushButton
 )
 
+from services.host_platform import IS_WINDOWS, platform_label
 from services.logger import app_logger
+from services.reveal_in_file_manager import reveal_path
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
 
@@ -135,13 +137,15 @@ class UpdateDialog(MessageBoxBase):
         self.status_label.setVisible(False)
         self.viewLayout.addWidget(self.status_label)
 
-        # Buttons
+        # Buttons. Off Windows there is no installer asset to download (Phase 5,
+        # #41), so "View on GitHub" takes the primary slot and download is hidden.
         self.download_btn = PrimaryPushButton("Download Update")
         self.download_btn.setIcon(mdi('download'))
         self.download_btn.setCursor(Qt.PointingHandCursor)
         self.download_btn.clicked.connect(self._on_download)
 
-        self.view_btn = PushButton("View on GitHub")
+        view_btn_cls = PushButton if IS_WINDOWS else PrimaryPushButton
+        self.view_btn = view_btn_cls("View on GitHub")
         self.view_btn.setIcon(mdi('open-in-new'))
         self.view_btn.setCursor(Qt.PointingHandCursor)
         self.view_btn.clicked.connect(self._on_view_github)
@@ -153,6 +157,16 @@ class UpdateDialog(MessageBoxBase):
         self.buttonLayout.addWidget(self.download_btn)
         self.buttonLayout.addWidget(self.view_btn)
         self.buttonLayout.addWidget(self.skip_btn)
+
+        if not IS_WINDOWS:
+            self.download_btn.hide()
+            no_installer_note = CaptionLabel(
+                f"Installers for {platform_label()} arrive in a later release — "
+                "until then, pull the new version from GitHub."
+            )
+            no_installer_note.setStyleSheet(f"color: {Colors.text_muted};")
+            no_installer_note.setWordWrap(True)
+            self.viewLayout.addWidget(no_installer_note)
 
         self.widget.setMinimumWidth(self._dialog_width())
 
@@ -261,6 +275,12 @@ class UpdateDialog(MessageBoxBase):
         import os
         import subprocess
 
+        if not IS_WINDOWS:
+            # Belt and braces: the download button that leads here is hidden
+            # off Windows, since no non-Windows installer asset exists yet.
+            app_logger.warning("Run Installer requested off Windows; ignoring")
+            return
+
         if not self._downloaded_path or not os.path.exists(self._downloaded_path):
             self.status_label.setText("Installer file not found")
             self.status_label.setStyleSheet(f"color: {Colors.status_error};")
@@ -286,10 +306,7 @@ class UpdateDialog(MessageBoxBase):
             self.status_label.setText(f"Failed to launch: {e}")
             self.status_label.setStyleSheet(f"color: {Colors.status_error};")
             # Fallback: open the containing folder
-            try:
-                os.startfile(os.path.dirname(str(self._downloaded_path)))
-            except Exception:
-                pass
+            reveal_path(self._downloaded_path)
 
     def _on_view_github(self):
         """Open releases page in browser."""

@@ -23,12 +23,15 @@ All output dispatch goes through `_push_to_output_servers()` in `ui/main_window/
 PFRSentinel/
 ├── ui/                         # PySide6 + qfluentwidgets UI
 │   ├── main_window/            # FluentWindow + QStackedWidget navigation (window.py, capture.py, output.py, lifecycle.py …)
-│   ├── system_tray_qt.py       # Qt system tray + notifications
+│   ├── system_tray_qt.py       # QSystemTrayIcon tray menu (no third-party backend)
 │   ├── components/             # Reusable widgets (header, monitoring panel, status indicator)
 │   ├── panels/                 # Pages (layout only) — monitoring, capture, output, overlays, timelapse, logs
 │   ├── controllers/            # Business logic — capture, output, overlay, timelapse, ML prediction
 │   └── theme/                  # tokens.py, styles.py, accent_themes.py, icons.py
 ├── services/                   # Core processing modules
+│   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
+│   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
+│   ├── font_loader.py          # PIL font resolution: Arial (Windows) → bundled Space Grotesk → DejaVu → default
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
 │   ├── config_defaults.py      # DEFAULT_CONFIG + DEFAULT_CAMERA_PROFILE (data only)
 │   ├── utils_paths.py          # get_app_data_dir() — per-platform app-data root; resource paths
@@ -171,20 +174,21 @@ skipped elsewhere by `tests/conftest.py`, so the pytest command is identical on
 every runner. `pip-audit` runs on the Windows job alone; the dependency set is
 the same everywhere. Dev tooling is pinned in `requirements-dev.txt`.
 
-The Windows test job is named **`Tests and dependency audit (Windows)`** while
-the other two are `Tests (macOS)` / `Tests (Linux)`. That asymmetry is load-bearing:
-`main`'s ruleset ("main: CI must pass" — a repository ruleset, not classic branch
-protection) requires the Windows job by that exact string, and renaming it leaves
-the required check stuck on "Expected — waiting for status to be reported",
-blocking every merge. **Don't regularise the names without changing the ruleset
-in the same PR.** macOS and Linux are not required checks, so they report without
-gating merges — deliberate while the port in #1 is in flight.
+The three test jobs are named **`Tests and dependency audit (Windows)`**,
+`Tests (macOS)` and `Tests (Linux)`, and `main`'s ruleset ("main: CI must pass" —
+a repository ruleset, not classic branch protection) requires each one by that
+exact string. Renaming any of them leaves the required check stuck on
+"Expected — waiting for status to be reported", blocking every merge. **Don't
+rename a job without changing the ruleset in the same PR.** The Windows name is
+longer because `pip-audit` runs there alone. All three became required with
+cross-platform Phase 1 (#37): Directory Watch mode runs from source on macOS and
+Linux, so a failure on those runners is a user-facing regression, not information.
 
-The ruleset's required checks are `Lint and size audit`, `Tests and dependency
-audit (Windows)` and `claude-review`, plus a code scanning rule: CodeQL results
-must be in, and a PR may not add alerts at `error` or security severity
-`high_or_higher`. Auto-merge waits for exactly these and nothing else — the dev
-build, macOS/Linux tests and spec parses can still be running when a PR merges.
+The ruleset's required checks are `Lint and size audit`, the three test jobs and
+`claude-review`, plus a code scanning rule: CodeQL results must be in, and a PR
+may not add alerts at `error` or security severity `high_or_higher`. Auto-merge
+waits for exactly these and nothing else — the dev build and spec parses can
+still be running when a PR merges.
 `build.yml` is deliberately not required: it skips docs-only PRs, so a required
 build check would never report on them. `claude-review` only makes a merge wait
 for the review to post; it passes whatever the review finds. Any check added here
@@ -287,12 +291,18 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_api_status_schedule.py` | 11 | `api_status.build_schedule` — status API schedule block for fixed and timelapse sources, with and without a camera |
 | `test_schedule_window_source_ui.py` | 5 | `_schedule_window_source` — window-source rows: load, visibility, signals (offscreen Qt) |
 | `test_timelapse_window_forecast.py` | 26 | `timelapse_window_forecast` — open/next window, inclusive edges, twilight depths on the local night, fixed-time fallback notes, clock-change durations, no log spam |
-| `test_timelapse_status_card.py` | 3 | `TimelapseStatusCard` — session line, projected window line, open-video button (offscreen Qt) |
+| `test_timelapse_status_card.py` | 5 | `TimelapseStatusCard` — session line, projected window line, open-video button (offscreen Qt) |
 | `test_output_crop_card.py` | 25 | `OutputCropCard` / `CropBoxEditor` / `OutputCropController` — drag/resize/spin clamping, config round-trip, thumbnail cap + active gating, Fit-to-sky (offscreen Qt) |
 | `test_watch_controller_crop.py` | 4 | `WatchControllerQt` — the output crop on `img.info` reaches the all-sky preview renderer; `extras` forwarded on `image_processed` |
 | `test_watch_crop_cache.py` | 3 | `_on_watch_image_processed` — watch mode caches the pre-resize clean frame for Calibrate Now, not the cropped output |
 | `test_watcher.py` | 2 | `ImageFileHandler` — `process_image` extras reach the callback |
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
+| `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
+| `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
+| `test_font_loader.py` | 5 | `font_loader` — bundled Space Grotesk resolves off Windows, Arial never tried there, fallback outcome cached |
+| `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
+| `test_windows_only_ui.py` | 5 | `FfmpegInstallCard` copyable install command off Windows; `MissingCameraNotice` hides Revive where there is no USB reset API (offscreen Qt) |
+| `test_update_dialog_platform.py` | 3 | `UpdateDialog` — download hidden and GitHub made primary off Windows; installer launch is a no-op there (offscreen Qt) |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.

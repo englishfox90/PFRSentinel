@@ -8,8 +8,10 @@ Draws:
   - Cardinal direction labels
 """
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from typing import Tuple, Optional
+
+from services.font_loader import load_font
 
 from .fisheye import FisheyeModel
 
@@ -23,24 +25,7 @@ def _parse_color(hex_str: str, opacity: int) -> Tuple[int, int, int, int]:
 
 def _load_font(size: int):
     """Load Space Grotesk if available, fall back to Arial / DejaVu / default."""
-    import os
-    user_fonts = os.path.join(
-        os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'Windows', 'Fonts'
-    )
-    for name in ('SpaceGrotesk-Medium.ttf', 'SpaceGrotesk-Regular.ttf',
-                 'SpaceGrotesk-VariableFont_wght.ttf'):
-        path = os.path.join(user_fonts, name)
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                pass
-    for fallback in ('arial.ttf', 'DejaVuSans.ttf'):
-        try:
-            return ImageFont.truetype(fallback, size)
-        except Exception:
-            pass
-    return ImageFont.load_default()
+    return load_font(size, 'display')
 
 
 def render_grid(

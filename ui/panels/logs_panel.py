@@ -188,19 +188,11 @@ class LogsPanel(QScrollArea):
         self.log_text.clear()
     
     def _open_log_folder(self):
-        """Open log folder in file explorer"""
-        import subprocess
-        import platform
+        """Open log folder in the OS file manager"""
         from services.logger import app_logger
-        
-        log_dir = app_logger.get_log_dir()
-        
-        if platform.system() == 'Windows':
-            subprocess.run(['explorer', log_dir])
-        elif platform.system() == 'Darwin':
-            subprocess.run(['open', log_dir])
-        else:
-            subprocess.run(['xdg-open', log_dir])
+        from services.reveal_in_file_manager import reveal_path
+
+        reveal_path(app_logger.get_log_dir())
     
     # === DIAGNOSTICS EXPORT ===
 

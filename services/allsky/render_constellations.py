@@ -4,12 +4,13 @@ Constellation line and label renderer for all-sky overlays.
 Draws IAU/Dien constellation lines and optional abbreviated name labels
 using the calibrated fisheye model.
 """
-import os
 from collections import defaultdict
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+
+from services.font_loader import load_font
 
 from .fisheye import FisheyeModel
 from .catalogs import get_western_constellation_lines, get_western_constellation_labels
@@ -40,23 +41,7 @@ def _parse_color(hex_str: str, opacity: int) -> Tuple[int, int, int, int]:
 
 def _load_font(size: int):
     """Load Space Grotesk if available, fall back to Arial / DejaVu / default."""
-    user_fonts = os.path.join(
-        os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'Windows', 'Fonts'
-    )
-    for name in ('SpaceGrotesk-Medium.ttf', 'SpaceGrotesk-Regular.ttf',
-                 'SpaceGrotesk-VariableFont_wght.ttf'):
-        path = os.path.join(user_fonts, name)
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                pass
-    for fallback in ('arial.ttf', 'DejaVuSans.ttf'):
-        try:
-            return ImageFont.truetype(fallback, size)
-        except Exception:
-            pass
-    return ImageFont.load_default()
+    return load_font(size, 'display')
 
 
 def _build_edge_fade_mask(

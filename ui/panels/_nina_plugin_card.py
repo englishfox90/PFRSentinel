@@ -69,7 +69,12 @@ class NinaPluginCardMixin:
     # === DISPLAY (called by the window, on the GUI thread) ===
 
     def set_nina_plugin_status(self, status):
-        """Render a PluginStatus. The service's message is shown verbatim."""
+        """Render a PluginStatus. The service's message is shown verbatim.
+
+        No-op when the card wasn't built (NINA is Windows-only).
+        """
+        if not hasattr(self, 'nina_status_label'):
+            return
         self._nina_plugin_status = status
         self.nina_status_label.setText(getattr(status, 'message', '') or '')
         self.nina_install_btn.setText(
@@ -78,6 +83,8 @@ class NinaPluginCardMixin:
         self._apply_nina_plugin_buttons()
 
     def set_nina_plugin_busy(self, busy):
+        if not hasattr(self, 'nina_status_label'):
+            return
         self._nina_plugin_busy = bool(busy)
         self._apply_nina_plugin_buttons()
 

@@ -1,22 +1,28 @@
 """
 ffmpeg install prompt for the Timelapse page.
 
-Shown in place of the timelapse settings while ffmpeg is missing; offers a
-winget install or a link to download it manually.
+Shown in place of the timelapse settings while ffmpeg is missing. On Windows
+with winget available, offers a one-click winget install; everywhere else
+(and on Windows without winget) it shows a platform-appropriate install
+command the user can copy, plus a link to download ffmpeg manually.
 """
 import subprocess
 import sys
 import webbrowser
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout
-from PySide6.QtCore import Signal, QThread
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QApplication
+from PySide6.QtCore import Signal, QThread, QTimer
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel,
-    PushButton, PrimaryPushButton, IndeterminateProgressBar
+    PushButton, PrimaryPushButton, LineEdit, IndeterminateProgressBar
 )
 
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
-from services.ffmpeg_utils import is_ffmpeg_available, is_winget_available
+from services.host_platform import IS_WINDOWS
+from services.ffmpeg_utils import (
+    is_ffmpeg_available, is_winget_available,
+    ffmpeg_install_command, ffmpeg_install_hint,
+)
 
 
 # ------------------------------------------------------------------ #
@@ -24,7 +30,7 @@ from services.ffmpeg_utils import is_ffmpeg_available, is_winget_available
 # ------------------------------------------------------------------ #
 
 class WingetInstallWorker(QThread):
-    """Runs winget install ffmpeg in a background thread."""
+    """Runs winget install ffmpeg in a background thread. Windows only."""
 
     finished = Signal(bool, str)  # (success, message)
 
@@ -67,13 +73,14 @@ class WingetInstallWorker(QThread):
 # ------------------------------------------------------------------ #
 
 class FfmpegInstallCard(CardWidget):
-    """Shown when ffmpeg is not installed. Offers winget or manual install."""
+    """Shown when ffmpeg is not installed. Offers winget or a copyable command."""
 
     install_succeeded = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker: WingetInstallWorker | None = None
+        self._winget_btn = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -97,10 +104,12 @@ class FfmpegInstallCard(CardWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(Spacing.sm)
 
-        self._winget_btn = PrimaryPushButton("Install via winget")
-        self._winget_btn.setIcon(mdi('download'))
-        self._winget_btn.clicked.connect(self._start_winget_install)
-        btn_row.addWidget(self._winget_btn)
+        use_winget = IS_WINDOWS and is_winget_available()
+        if use_winget:
+            self._winget_btn = PrimaryPushButton("Install via winget")
+            self._winget_btn.setIcon(mdi('download'))
+            self._winget_btn.clicked.connect(self._start_winget_install)
+            btn_row.addWidget(self._winget_btn)
 
         manual_btn = PushButton("Download manually")
         manual_btn.setIcon(mdi('open-in-new'))
@@ -119,16 +128,33 @@ class FfmpegInstallCard(CardWidget):
         self._status_label.setWordWrap(True)
         layout.addWidget(self._status_label)
 
-        # Hide winget button if not available
-        if not is_winget_available():
-            self._winget_btn.hide()
-            note = CaptionLabel(
-                "winget (Windows Package Manager) is not available on this system. "
-                "Please install ffmpeg manually and add it to PATH."
-            )
+        if not use_winget:
+            note = CaptionLabel(ffmpeg_install_hint())
             note.setWordWrap(True)
             note.setStyleSheet(f"color: {Colors.text_muted};")
             layout.addWidget(note)
+
+            command = ffmpeg_install_command()
+            if command:
+                cmd_row = QHBoxLayout()
+                cmd_row.setSpacing(Spacing.sm)
+
+                self._command_input = LineEdit()
+                self._command_input.setText(command)
+                self._command_input.setReadOnly(True)
+                cmd_row.addWidget(self._command_input, 1)
+
+                self._copy_btn = PushButton("Copy")
+                self._copy_btn.setIcon(mdi('content-copy'))
+                self._copy_btn.clicked.connect(self._copy_install_command)
+                cmd_row.addWidget(self._copy_btn)
+
+                layout.addLayout(cmd_row)
+
+    def _copy_install_command(self):
+        QApplication.clipboard().setText(self._command_input.text())
+        self._copy_btn.setText("Copied")
+        QTimer.singleShot(1500, self, lambda: self._copy_btn.setText("Copy"))
 
     def _start_winget_install(self):
         self._winget_btn.setEnabled(False)

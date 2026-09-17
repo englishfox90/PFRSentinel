@@ -2,8 +2,9 @@
 import os
 import re
 from datetime import datetime
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from .logger import app_logger
+from .font_loader import load_font
 
 
 def is_safe_path(path: str) -> bool:
@@ -369,13 +370,7 @@ def add_text_overlay(img, overlay, metadata):
         background_color = overlay.get('background_color', 'black')
         alignment = overlay.get('alignment', 'left')
 
-        try:
-            font = ImageFont.truetype("arial.ttf", font_size)
-        except (OSError, IOError):
-            try:
-                font = ImageFont.truetype("Arial.ttf", font_size)
-            except (OSError, IOError):
-                font = ImageFont.load_default()
+        font = load_font(font_size, 'text')
 
         bbox = draw.textbbox((0, 0), text, font=font)
         text_width = bbox[2] - bbox[0]

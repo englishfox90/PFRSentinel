@@ -3,7 +3,7 @@ Image Processor for Qt UI
 Handles image processing pipeline using services/processor.py functions
 """
 from PySide6.QtCore import QObject, Signal, QThread
-from PIL import Image, ImageEnhance, ImageDraw, ImageFont
+from PIL import Image, ImageEnhance, ImageDraw
 import numpy as np
 import os
 import queue
@@ -13,6 +13,7 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from services.font_loader import load_font
 from services.gc_scheduler import request_full_collect
 from services.logger import app_logger
 from services.notifications import ERROR, ROOF_CHANGED, NotificationEvent
@@ -315,10 +316,7 @@ class ImageProcessorWorker(QThread):
             if timestamp_corner:
                 draw = ImageDraw.Draw(img)
                 timestamp_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                try:
-                    font = ImageFont.truetype("arial.ttf", 20)
-                except (OSError, IOError):
-                    font = ImageFont.load_default()
+                font = load_font(20, 'text')
                 draw.text((img.width - 200, 10), timestamp_text, fill='white', font=font)
             
             # Apply cosmetic star sharpening (unsharp mask, before overlays)
