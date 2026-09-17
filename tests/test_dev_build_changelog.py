@@ -100,7 +100,8 @@ def test_first_publish_uses_the_full_list_and_a_rebuild_has_no_delta():
                         pulls={"a": [_pr(48, "feat(dev-mode): raw capture on")]},
                         refs={})
     _, full, delta = load_changelog().build_fragments(HEAD, "dev-latest", github)
-    assert delta == full
+    assert "(#48)" in full
+    assert delta == ""
 
     github.refs = {"dev-latest": HEAD}
     _, _, delta = load_changelog().build_fragments(HEAD, "dev-latest", github)
@@ -115,5 +116,21 @@ def test_an_api_failure_writes_a_placeholder_instead_of_blocking(tmp_path, capsy
     assert load_changelog().main(["--head", HEAD, "--full", str(full), "--delta", str(delta)],
                                  api=broken) == 0
     assert "could not be collected" in full.read_text(encoding="utf-8")
-    assert delta.read_text(encoding="utf-8") == full.read_text(encoding="utf-8")
+    assert delta.read_text(encoding="utf-8") == ""
     assert "::warning::" in capsys.readouterr().out
+
+
+def test_a_delta_that_is_only_the_last_group_is_still_a_delta():
+    # The new PR is the only tooling PR, so its rendered group is the exact
+    # tail of the full list. Only the PR numbers can tell the two apart.
+    github = FakeGitHub(
+        tags=["v3.7.6"],
+        ranges={f"v3.7.6...{HEAD}": ["a", "b", "c"], f"prev...{HEAD}": ["c"]},
+        pulls={"a": [_pr(50, "feat(web): serve thumbnails", "2026-09-10T00:00:00Z")],
+               "b": [_pr(51, "fix(camera): reconnect", "2026-09-11T00:00:00Z")],
+               "c": [_pr(62, "ci(dev-builds): list once", "2026-09-12T00:00:00Z")]},
+        refs={"dev-latest": "prev"},
+    )
+    _, full, delta = load_changelog().build_fragments(HEAD, "dev-latest", github)
+    assert full.rstrip().endswith(delta.strip())
+    assert "(#62)" in delta and "(#50)" not in delta
