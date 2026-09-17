@@ -175,7 +175,15 @@ class UpdateChecker:
             
             # Record successful check
             self._record_check()
-            
+
+            # /releases/latest already excludes these. The check keeps the dev
+            # channel (a rolling prerelease) out of production installs should
+            # this ever poll a listing that includes them.
+            if data.get('prerelease') or data.get('draft'):
+                app_logger.info(f"Ignoring prerelease {data.get('tag_name')}")
+                self._last_update_info = None
+                return None
+
             # Parse version from tag
             latest_version = data.get('tag_name', '').lstrip('v')
             current_version = __version__

@@ -21,6 +21,11 @@ permissions:
 
 jobs:
   github-releases-to-discord:
+    # The rolling dev prerelease (build.yml publish-dev) is replaced on every
+    # publish; announcing each one would flood the channel. It is created with
+    # GITHUB_TOKEN, which fires no release event today, so this only matters
+    # if that changes or someone republishes it by hand.
+    if: github.event_name == 'workflow_dispatch' || github.event.release.tag_name != 'dev-latest'
     runs-on: ubuntu-latest
     steps:
       - name: GitHub Releases to Discord

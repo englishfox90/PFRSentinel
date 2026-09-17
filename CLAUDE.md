@@ -176,6 +176,12 @@ they report without gating merges — deliberate while the port in #1 is in flig
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
+`.github/workflows/build.yml` makes unsigned dev builds. Dispatching it with
+`publish` ticked replaces the single rolling `dev-latest` prerelease and posts
+the build to the "Dev builds" Discussions thread (names and text:
+`scripts/ci/dev_build_notes.py`). The updater polls `/releases/latest`, which
+excludes prereleases, so production installs never see it.
+
 `.github/workflows/build.yml` produces **dev builds only**, on every pull
 request and on manual dispatch. Every artifact has `DEV_MODE_AVAILABLE=True`
 (raw FITS/TIFF exports, calibration JSON, ML prediction compiled in), written
@@ -239,6 +245,8 @@ tracked so these runs read the same conventions a local session does.
 | `test_diagnostics_bundle.py` | 9 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary |
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
+| `test_update_checker.py` | 4 | `update_checker` — prereleases/drafts and the dev asset are never offered |
+| `test_dev_build_notes.py` | 7 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks |
 | `test_timelapse_window.py` | 13 | `timelapse_window` — sun window on the LOCAL calendar date (real astral, injected zones), fixed fallback, per-day cache |
 | `test_capture_schedule_window.py` | 39 | `capture_schedule_window` — timelapse-derived capture window ± margin, gate two-day logic, roof/always fallbacks, labels |
 | `test_zwo_schedule_gate.py` | 16 | `zwo_camera` — schedule gate vs legacy HH:MM path, fail-open, `scheduled_window_label` |

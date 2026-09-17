@@ -20,6 +20,12 @@ name: Build
 #
 # Tags are not ignored: tag-pushed.yml checks version.py against the tag.
 #
+# A dispatch with `publish` ticked also hands the installer to people without a
+# GitHub login, which Actions artifacts cannot do (they need a login, expire,
+# and arrive zipped). The publish-dev job replaces the single rolling dev
+# prerelease and announces the build in one Discussions thread. Names and text
+# live in scripts/ci/dev_build_notes.py.
+#
 # Windows is the only platform that produces an artifact today. macOS and Linux
 # get a spec-parse smoke test instead — the packaging work for them
 # (BUNDLE/.icns/notarization, .deb, the udev rule, ARM wheels) is issue #41.
@@ -32,6 +38,10 @@ on:
         description: "Also build the Inno Setup installer"
         type: boolean
         default: true
+      publish:
+        description: "Publish the installer as the rolling dev prerelease (replaces the current one)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,6 +61,12 @@ jobs:
     env:
       PYTHONUTF8: "1"
     steps:
+      # Here rather than in publish-dev, so the mistake costs seconds instead
+      # of a full freeze that then has nothing to publish.
+      - name: Check the dispatch inputs
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.installer
+        run: throw "publish needs the installer - dispatch again with 'installer' ticked"
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
@@ -163,6 +179,152 @@ jobs:
             echo "will warn — this is a test build, not a release."
             echo
             echo "Release builds are cut locally with \`build_sentinel_installer.bat\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Separate job so the build never holds release-write rights: everything in
+  # the windows job runs third-party build tooling under contents: read.
+  publish-dev:
+    name: Publish the dev prerelease
+    needs: windows
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      discussions: write
+    # The build concurrency group is per ref, so builds of two branches can
+    # finish together. Replacing the release is delete-then-create, and two of
+    # those interleaved would strand a tag or a second release.
+    concurrency:
+      group: dev-prerelease
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Load the channel names
+        run: python3 scripts/ci/dev_build_notes.py constants >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: PFRSentinel-installer-dev-unsigned
+          path: staging
+
+      # A fixed name keeps the download URL stable across builds. It also
+      # avoids "setup", the word update_checker.py picks installers by.
+      - name: Stage the installer under its stable name
+        run: |
+          shopt -s nullglob
+          found=(staging/*.exe)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one installer in the artifact, found ${#found[@]}"
+            exit 1
+          fi
+          mv "${found[0]}" "staging/$DEV_ASSET_NAME"
+
+      # Runs before the release is touched, so a missing category fails while
+      # the previous dev build is still downloadable. Neither creating the
+      # category nor pinning the thread is possible through the API.
+      - name: Find or open the dev builds discussion
+        id: discussion
+        run: |
+          owner="${GITHUB_REPOSITORY%/*}"
+          name="${GITHUB_REPOSITORY#*/}"
+
+          repo=$(gh api graphql -f owner="$owner" -f name="$name" -f query='
+            query($owner: String!, $name: String!) {
+              repository(owner: $owner, name: $name) {
+                id
+                discussionCategories(first: 50) { nodes { id name } }
+              }
+            }')
+          repo_id=$(jq -r '.data.repository.id' <<<"$repo")
+          category_id=$(jq -r --arg c "$DEV_DISCUSSION_CATEGORY" \
+            '.data.repository.discussionCategories.nodes[] | select(.name == $c) | .id' <<<"$repo")
+          if [ -z "$category_id" ]; then
+            echo "::error::No '$DEV_DISCUSSION_CATEGORY' Discussions category. Create it under Settings > General > Discussions, then re-run."
+            exit 1
+          fi
+
+          existing=$(gh api graphql -f owner="$owner" -f name="$name" -f category="$category_id" -f query='
+            query($owner: String!, $name: String!, $category: ID!) {
+              repository(owner: $owner, name: $name) {
+                discussions(first: 50, categoryId: $category,
+                            orderBy: {field: CREATED_AT, direction: ASC}) {
+                  nodes { id url title }
+                }
+              }
+            }' | jq -c --arg t "$DEV_DISCUSSION_TITLE" \
+              '[.data.repository.discussions.nodes[] | select(.title == $t)][0] // empty')
+
+          if [ -z "$existing" ]; then
+            python3 scripts/ci/dev_build_notes.py intro > intro.md
+            existing=$(gh api graphql -f repo="$repo_id" -f category="$category_id" \
+              -f title="$DEV_DISCUSSION_TITLE" -F body=@intro.md -f query='
+              mutation($repo: ID!, $category: ID!, $title: String!, $body: String!) {
+                createDiscussion(input: {repositoryId: $repo, categoryId: $category,
+                                         title: $title, body: $body}) {
+                  discussion { id url title }
+                }
+              }' | jq -c '.data.createDiscussion.discussion')
+            echo "::notice::Opened the dev builds discussion at $(jq -r .url <<<"$existing") - pin it by hand."
+          fi
+
+          echo "id=$(jq -r .id <<<"$existing")" >> "$GITHUB_OUTPUT"
+          echo "url=$(jq -r .url <<<"$existing")" >> "$GITHUB_OUTPUT"
+
+      - name: Replace the dev prerelease
+        env:
+          DISCUSSION_URL: ${{ steps.discussion.outputs.url }}
+        run: |
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' || true)
+          echo "DEV_PR=$pr" >> "$GITHUB_ENV"
+          notes=(--sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$pr" --run-url "$RUN_URL")
+          python3 scripts/ci/dev_build_notes.py release "${notes[@]}" \
+            --discussion-url "$DISCUSSION_URL" > release.md
+          title=$(python3 scripts/ci/dev_build_notes.py title "${notes[@]}")
+
+          if gh release view "$DEV_TAG" >/dev/null 2>&1; then
+            gh release delete "$DEV_TAG" --cleanup-tag --yes
+          fi
+          # A tag left without its release (a run that died between delete and
+          # create) would otherwise be reused where it stands, at the old commit.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$DEV_TAG" >/dev/null 2>&1; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$DEV_TAG"
+          fi
+
+          gh release create "$DEV_TAG" "staging/$DEV_ASSET_NAME" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "$title" --notes-file release.md
+
+      - name: Announce the build in the discussion
+        env:
+          DISCUSSION_ID: ${{ steps.discussion.outputs.id }}
+        run: |
+          python3 scripts/ci/dev_build_notes.py comment \
+            --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" --run-url "$RUN_URL" > comment.md
+          gh api graphql -f discussion="$DISCUSSION_ID" -F body=@comment.md -f query='
+            mutation($discussion: ID!, $body: String!) {
+              addDiscussionComment(input: {discussionId: $discussion, body: $body}) {
+                comment { url }
+              }
+            }' --jq '.data.addDiscussionComment.comment.url'
+
+      - name: Summary
+        env:
+          DISCUSSION_URL: ${{ steps.discussion.outputs.url }}
+        run: |
+          {
+            echo "### Dev prerelease published"
+            echo
+            echo "- Download: https://github.com/$GITHUB_REPOSITORY/releases/download/$DEV_TAG/$DEV_ASSET_NAME"
+            echo "- Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$DEV_TAG"
+            echo "- Discussion: $DISCUSSION_URL"
           } >> "$GITHUB_STEP_SUMMARY"
 
   spec:
