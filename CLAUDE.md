@@ -237,6 +237,16 @@ the house style (never publishes); `claude-issue-triage.yml` labels and
 acknowledges new issues. `.claude/` (rules, hooks, commands, agents, skills) is
 tracked so these runs read the same conventions a local session does.
 
+Two traps in the Claude workflows, both of which fail **green**:
+- `claude-code-action` skips any PR that edits the workflow file it runs from
+  (it must match `main`), so a change to `claude-code-review.yml` can only be
+  tested after it merges. The skipped job still passes.
+- The review plugin launches its agents in the background. Without
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` the main session ends its turn to
+  "wait", the run ends with them, and the job passes having posted nothing. A
+  passing `claude-review` check is not evidence a review happened — look for
+  the comment.
+
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
