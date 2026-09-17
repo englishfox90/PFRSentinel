@@ -176,8 +176,8 @@ they report without gating merges — deliberate while the port in #1 is in flig
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
 
-`.github/workflows/build.yml` makes unsigned dev builds. Dispatching it with
-`publish` ticked replaces the single rolling `dev-latest` prerelease and posts
+`.github/workflows/build.yml` makes unsigned dev builds. Every merge to `main`
+(or a dispatch with `publish` ticked) replaces the single rolling `dev-latest` prerelease and posts
 the build to the "Dev builds" Discussions thread (names and text:
 `scripts/ci/dev_build_notes.py`). The updater polls `/releases/latest`, which
 excludes prereleases, so production installs never see it.

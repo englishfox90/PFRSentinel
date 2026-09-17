@@ -20,11 +20,15 @@ name: Build
 #
 # Tags are not ignored: tag-pushed.yml checks version.py against the tag.
 #
-# A dispatch with `publish` ticked also hands the installer to people without a
-# GitHub login, which Actions artifacts cannot do (they need a login, expire,
-# and arrive zipped). The publish-dev job replaces the single rolling dev
-# prerelease and announces the build in one Discussions thread. Names and text
-# live in scripts/ci/dev_build_notes.py.
+# Every merge to main (and a dispatch with `publish` ticked) also hands the
+# installer to people without a GitHub login, which Actions artifacts cannot do
+# (they need a login, expire, and arrive zipped). The publish-dev job replaces
+# the single rolling dev prerelease and announces the build in one Discussions
+# thread. Names and text live in scripts/ci/dev_build_notes.py.
+#
+# Publishing is on merge, not on PR push. With several PRs open, "latest" would
+# flip between unmerged branches, and Dependabot and fork PRs get a read-only
+# token that cannot publish at all. PRs keep their per-run artifacts.
 #
 # Windows is the only platform that produces an artifact today. macOS and Linux
 # get a spec-parse smoke test instead — the packaging work for them
@@ -32,6 +36,13 @@ name: Build
 
 on:
   pull_request:
+  push:
+    branches: [main]
+    # A docs-only merge would republish an identical binary and notify
+    # everyone subscribed to the discussion for nothing.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
     inputs:
       installer:
@@ -46,9 +57,12 @@ on:
 permissions:
   contents: read
 
+# Only PR runs cancel each other. Cancelling a main run could land mid-way
+# through publish-dev's delete-then-create and leave no dev release at all;
+# queued instead, the newest merge still publishes last.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHON_VERSION: "3.13"
@@ -60,6 +74,8 @@ jobs:
     timeout-minutes: 45
     env:
       PYTHONUTF8: "1"
+      # "true"/"false" strings. Main pushes always build it: publish-dev needs it.
+      BUILD_INSTALLER: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.installer) }}
     steps:
       # Here rather than in publish-dev, so the mistake costs seconds instead
       # of a full freeze that then has nothing to publish.
@@ -143,14 +159,14 @@ jobs:
 
       # Skipped on pull requests: Inno Setup takes minutes to install and
       # compile, and the artifact that matters for review is the app above.
-      # On dispatch it is on by default, which is also the only regular
-      # exercise installer/PFRSentinel.iss gets.
+      # Every merge to main builds it for publish-dev, which also makes that
+      # the regular exercise installer/PFRSentinel.iss gets.
       - name: Install Inno Setup
-        if: github.event_name == 'workflow_dispatch' && inputs.installer
+        if: env.BUILD_INSTALLER == 'true'
         run: choco install innosetup -y --no-progress
 
       - name: Build the installer
-        if: github.event_name == 'workflow_dispatch' && inputs.installer
+        if: env.BUILD_INSTALLER == 'true'
         run: |
           python scripts\update_version.py
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\PFRSentinel.iss
@@ -159,7 +175,7 @@ jobs:
           Write-Host "Built $($setup.Name)"
 
       - name: Upload the installer
-        if: github.event_name == 'workflow_dispatch' && inputs.installer
+        if: env.BUILD_INSTALLER == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: PFRSentinel-installer-dev-unsigned
@@ -182,11 +198,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Separate job so the build never holds release-write rights: everything in
-  # the windows job runs third-party build tooling under contents: read.
+  # the windows job runs third-party build tooling under contents: read. The
+  # repository check keeps a fork's own main pushes from trying to publish.
   publish-dev:
     name: Publish the dev prerelease
     needs: windows
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    if: github.repository == 'englishfox90/PFRSentinel' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
