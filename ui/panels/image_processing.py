@@ -17,6 +17,7 @@ from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, FormRow, SwitchRow, CollapsibleCard, ClickSlider
 from .image_processing_ml import ImageProcessingMLSection
+from .output_crop_card import OutputCropCard
 from services.dev_mode_config import is_dev_mode_available
 
 
@@ -83,6 +84,11 @@ class ImageProcessingPanel(QScrollArea):
         resize_card.add_row("Scale", resize_widget, "10% to 100%")
 
         layout.addWidget(resize_card)
+
+        # === OUTPUT FRAMING (issue #12) ===
+        self.crop_card = OutputCropCard(self.main_window)
+        self.crop_card.settings_changed.connect(self.settings_changed)
+        layout.addWidget(self.crop_card)
 
         # === ADJUSTMENTS ===
         adjust_card = SettingsCard(
@@ -483,3 +489,4 @@ class ImageProcessingPanel(QScrollArea):
             self._loading_config = False
 
         self.ml_section.load_from_config(config)
+        self.crop_card.load_from_config(config)

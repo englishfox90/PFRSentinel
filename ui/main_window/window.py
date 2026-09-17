@@ -44,6 +44,7 @@ from ..controllers.timelapse_controller import TimelapseController
 from ..controllers.allsky_controller import AllSkyController
 from ..controllers.meteor_controller import MeteorController
 from ..controllers.library_controller import LibraryController
+from ..controllers.output_crop_controller import OutputCropController
 from ..controllers.diagnostics_controller import DiagnosticsController
 
 from .capture import _MainWindowCaptureMixin
@@ -240,6 +241,7 @@ class MainWindow(
         self.library_panel = LibraryPanel(self)
         self.settings_panel = SettingsPanel(self)
 
+        self.output_crop_controller = OutputCropController(self)
         self.library_controller = LibraryController(self)
         self.library_controller.sessions_ready.connect(self.library_panel.set_sessions)
         self.library_controller.frames_ready.connect(self.library_panel.set_frames)
@@ -373,6 +375,8 @@ class MainWindow(
 
         self.image_processor.processing_complete.connect(self._on_image_processed)
         self.image_processor.preview_ready.connect(self._on_preview_ready)
+
+        self.output_crop_controller.bind(self.image_processor, self.processing_panel.crop_card)
         self.image_processor.error_occurred.connect(self._on_processing_error)
 
     def _apply_styles(self):

@@ -152,7 +152,9 @@ class ImageFileHandler(FileSystemEventHandler):
             
             # Process the image
             self.update_status(f"Processing: {filename}")
-            success, output_path, error, processed_img = process_image(filepath, self.config, weather_service=self.weather_service)
+            extras = {}
+            success, output_path, error, processed_img = process_image(
+                filepath, self.config, weather_service=self.weather_service, extras=extras)
             
             if success:
                 self.update_status(f"✓ Saved: {os.path.basename(output_path)}")
@@ -171,7 +173,7 @@ class ImageFileHandler(FileSystemEventHandler):
 
                 # Notify callback with both path and image
                 if self.on_image_processed:
-                    self.on_image_processed(output_path, processed_img)
+                    self.on_image_processed(output_path, processed_img, extras)
 
                 # Run cleanup if enabled
                 if self.config.get('cleanup_enabled', False):

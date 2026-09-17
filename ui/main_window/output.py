@@ -19,6 +19,11 @@ from ui.controllers.capture_command_bridge import CaptureCommandBridge
 
 class _MainWindowOutputMixin:
 
+    # Full-frame, post-stretch, pre-overlay frame from the last preview_ready.
+    # output_image can be cropped (output_crop, issue #12); calibration must
+    # never be handed cropped pixels. Class-level so the mixin needs no __init__.
+    _last_clean_full_frame = None
+
     # =========================================================================
     # DISCORD HELPERS
     # =========================================================================
@@ -218,10 +223,11 @@ class _MainWindowOutputMixin:
             self.image_processor.process_and_save(
                 None, cached,
                 frame_factory=lambda: frame_builder.rebuild_frame(cached),
+                reprocess=True,
             )
         else:
             self.image_processor.process_and_save(
-                self._cached_raw_image, self._cached_raw_metadata
+                self._cached_raw_image, self._cached_raw_metadata, reprocess=True
             )
 
     def _on_image_processed(self, preview_image, output_image, metadata: dict, output_path: str,
@@ -234,10 +240,17 @@ class _MainWindowOutputMixin:
             # clean (no all-sky) output frame here for manual "Calibrate Now".
             # Camera mode already cached a superior RAW pre-overlay frame in
             # on_image_captured — don't clobber it with the overlaid output.
+            # _last_clean_full_frame is the pre-resize, pre-crop frame from
+            # process_image (set by _on_watch_image_processed). A reprocess has
+            # none, and must leave the cache alone: recaching its resized
+            # output would compound resize_percent on every crop-box drag.
             if self.config.get('capture_mode', 'camera') == 'watch':
-                self._cached_raw_image = output_image.copy()
-                self._cached_raw_metadata = metadata
-                self._cached_raw_time = datetime.now(timezone.utc)
+                clean = self._last_clean_full_frame
+                if clean is not None or self._cached_raw_image is None:
+                    self._cached_raw_image = (clean if clean is not None else output_image).copy()
+                    self._cached_raw_metadata = metadata
+                    self._cached_raw_time = datetime.now(timezone.utc)
+                self._last_clean_full_frame = None
 
             # preview_image may carry the all-sky overlay (GUI only).
             # output_image is always clean — the watch-mode cache above and any

@@ -526,3 +526,126 @@ class TestAutoStretch:
         # If current is darker than target, midtone should be < 0.5
         midtone_stretch = _calculate_mtf_midtone(0.1, 0.25)
         assert midtone_stretch < 0.5
+
+
+class _StubConfig:
+    """Minimal stand-in for services.config.Config — process_image only calls
+    .get() and .get_overlays()."""
+
+    def __init__(self, values: dict):
+        self._values = values
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+    def get_overlays(self):
+        return self._values.get('overlays', [])
+
+
+class TestOutputCrop:
+    """Issue #12 — process_image cuts the OUTPUT down to the configured box."""
+
+    def _config(self, temp_dir, **crop_over):
+        crop = {'enabled': True, 'x': 40, 'y': 100, 'width': 200, 'height': 200,
+                'ref_width': 640, 'ref_height': 480}
+        crop.update(crop_over)
+        return _StubConfig({
+            'output_directory': temp_dir,
+            'output_pattern': 'cropped',
+            'output_format': 'PNG',
+            'overlays': [],
+            'resize_percent': 100,
+            'auto_stretch': {'enabled': False},
+            'ml_models': {'enabled': False},
+            'output_crop': crop,
+        })
+
+    def test_crop_produces_a_cropped_output_file(self, sample_image, temp_dir):
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's'}
+        ok, path, err, img = process_image(
+            sample_image, self._config(temp_dir), metadata_dict=metadata)
+
+        assert ok and err is None
+        assert img.size == (200, 200)
+        assert Image.open(path).size == (200, 200)
+        assert metadata['OUTPUT_CROP']['frame_width'] == 640
+        # Watch mode only receives the image, so the crop rides on img.info
+        # for the all-sky preview translation (ui/controllers/watch_controller.py).
+        assert img.info['OUTPUT_CROP'] == metadata['OUTPUT_CROP']
+
+    def test_clean_frame_is_not_the_object_overlays_are_drawn_on(self, temp_dir):
+        # RGBA + resize off + crop off: add_overlays skips convert() and draws
+        # straight onto the frame it is given, so clean_frame must be a copy.
+        src = Image.new('RGBA', (320, 240), (5, 5, 5, 255))
+        cfg = self._config(temp_dir, enabled=False)
+        cfg._values['overlays'] = [{'text': 'HELLO WORLD', 'anchor': 'Top-Left',
+                                  'x_offset': 10, 'y_offset': 10, 'font_size': 40,
+                                  'color': 'white', 'background': True}]
+        extras = {}
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's'}
+
+        ok, _path, err, out = process_image(src, cfg, metadata_dict=metadata, extras=extras)
+
+        assert ok and err is None
+        clean = extras['clean_frame']
+        assert clean is not out
+        assert clean.getextrema()[0] == (5, 5)        # no white text in the clean frame
+        assert out.getextrema()[0][1] > 5             # the output does carry the overlay
+
+    def test_disabled_crop_leaves_the_frame_alone(self, sample_image, temp_dir):
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's',
+                    'OUTPUT_CROP': {'x': 1, 'y': 1, 'width': 2, 'height': 2,
+                                    'frame_width': 3, 'frame_height': 3}}
+        ok, path, err, img = process_image(
+            sample_image, self._config(temp_dir, enabled=False),
+            metadata_dict=metadata)
+
+        assert ok and err is None
+        assert img.size == (640, 480)
+        assert 'OUTPUT_CROP' not in metadata
+
+    def test_extras_are_filled_with_metadata_native_size_and_clean_frame(
+            self, sample_image, temp_dir):
+        # Watch-mode "Calibrate Now" and reprocess (issue #12) need the frame
+        # BEFORE resize and crop — extras is how process_image hands it back.
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's'}
+        extras = {}
+        ok, path, err, img = process_image(
+            sample_image, self._config(temp_dir), metadata_dict=metadata, extras=extras)
+
+        assert ok and err is None
+        assert extras['metadata'] is metadata
+        assert extras['native_size'] == (640, 480)
+        assert extras['clean_frame'].size == (640, 480)
+        # The output itself is the cropped frame — extras must not alias it.
+        assert img.size == (200, 200)
+        assert extras['clean_frame'] is not img
+
+    def test_extras_native_size_is_captured_before_resize(self, sample_image, temp_dir):
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's'}
+        extras = {}
+        config = _StubConfig({
+            'output_directory': temp_dir,
+            'output_pattern': 'resized',
+            'output_format': 'PNG',
+            'overlays': [],
+            'resize_percent': 50,
+            'auto_stretch': {'enabled': False},
+            'ml_models': {'enabled': False},
+            'output_crop': {'enabled': False},
+        })
+
+        ok, path, err, img = process_image(
+            sample_image, config, metadata_dict=metadata, extras=extras)
+
+        assert ok and err is None
+        assert img.size == (320, 240)                    # resized output
+        assert extras['native_size'] == (640, 480)        # pre-resize
+        assert extras['clean_frame'].size == (640, 480)   # pre-resize, pre-crop
+
+    def test_extras_untouched_when_caller_passes_none(self, sample_image, temp_dir):
+        metadata = {'FILENAME': 'frame.png', 'SESSION': 's'}
+        ok, path, err, img = process_image(
+            sample_image, self._config(temp_dir), metadata_dict=metadata)
+
+        assert ok and err is None  # extras defaults to None and must not raise

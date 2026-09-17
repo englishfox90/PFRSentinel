@@ -18,6 +18,7 @@ from .config import Config
 from .camera import ZWOCamera
 from .camera.camera_utils import get_selected_camera_name
 from .capture_schedule_window import gate_for_config
+from .output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from .web_image_encode import encode_for_web
 from .web_output import WebOutputServer
 from .processor import add_overlays
@@ -461,7 +462,15 @@ class HeadlessRunner:
                     int(img.height * resize_percent / 100)
                 )
                 img = img.resize(new_size, Image.LANCZOS)
-            
+
+            # Output framing (issue #12) — cut the output down after capture and
+            # resize, before overlays anchor on the cropped edges.
+            img, crop_box = apply_output_crop(img, self.config.get('output_crop', {}))
+            if crop_box is not None:
+                metadata[CROP_METADATA_KEY] = crop_box.as_metadata()
+            else:
+                metadata.pop(CROP_METADATA_KEY, None)
+
             # Add overlays
             overlays = self.config.get('overlays', [])
             if overlays:

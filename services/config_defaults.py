@@ -9,6 +9,7 @@ import os
 from .utils_paths import resource_path, get_app_data_dir
 from .dev_mode_config import is_dev_mode_available
 from .app_config import DEFAULT_OUTPUT_SUBFOLDER
+from .output_crop import DEFAULT_OUTPUT_CROP
 
 DEFAULT_CAMERA_PROFILE = {
     "exposure_ms": 100.0,
@@ -45,6 +46,9 @@ DEFAULT_CONFIG = {
     "output_format": "jpg",
     "jpg_quality": 100,
     "resize_percent": 74,
+    # Output framing (issue #12): crop the rendered outputs to a box drawn on
+    # the frame. Analysis stages still see the full frame; see services/output_crop.py.
+    "output_crop": dict(DEFAULT_OUTPUT_CROP),
     "timestamp_corner": False,
     
     # Output mode settings

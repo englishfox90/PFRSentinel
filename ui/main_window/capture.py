@@ -275,6 +275,16 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
         self._ensure_camera_controller()
         self.camera_controller.start_capture()
 
+    def _on_watch_image_processed(self, preview, out, path, extras):
+        # The output may be cropped (issue #12); Calibrate Now and the crop
+        # editor need the frame it was cut from, which only process_image has.
+        clean = extras.get('clean_frame')
+        if clean is not None:
+            self._last_clean_full_frame = clean
+            self.output_crop_controller.on_preview_ready(
+                clean, {'native_size': extras.get('native_size')})
+        self._on_image_processed(preview, out, extras.get('metadata') or {}, path, out)
+
     def _start_watch_mode(self):
         from .controllers.watch_controller import WatchControllerQt
 
@@ -284,9 +294,7 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
             # renders the all-sky overlay into the saved file — burn_into_output
             # only applies to the camera-mode path through image_processor.py.
             # dispatch_image is the same clean frame until that gap is closed.
-            self.watch_controller.image_processed.connect(
-                lambda preview, out, path: self._on_image_processed(preview, out, {}, path, out)
-            )
+            self.watch_controller.image_processed.connect(self._on_watch_image_processed)
 
         watch_dir = self.config.get('watch_directory', '')
         if not watch_dir or not os.path.isdir(watch_dir):

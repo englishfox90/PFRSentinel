@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from services.logger import app_logger
 from services.watcher import FileWatcher
 from services.allsky.overlay_renderer import render_allsky_for_preview
+from services.output_crop import METADATA_KEY as CROP_METADATA_KEY
 
 
 class WatchControllerQt(QObject):
@@ -22,7 +23,8 @@ class WatchControllerQt(QObject):
     started = Signal()
     stopped = Signal()
     file_detected = Signal(str)  # File path
-    image_processed = Signal(object, object, str)  # (preview PIL Image, output PIL Image, output_path)
+    # (preview PIL Image, output PIL Image, output_path, extras from process_image)
+    image_processed = Signal(object, object, str, dict)
     error = Signal(str)
     
     def __init__(self, main_window, parent=None):
@@ -72,9 +74,15 @@ class WatchControllerQt(QObject):
         except Exception as e:
             app_logger.error(f"Error stopping watcher: {e}")
     
-    def _on_file_processed(self, output_path: str, processed_img):
+    def _on_file_processed(self, output_path: str, processed_img, extras=None):
         """Called by FileWatcher after a file has been processed and saved"""
         self.file_detected.emit(output_path)
         allsky_cfg = self.config.get('allsky_overlay', {})
-        preview_img = render_allsky_for_preview(processed_img, allsky_cfg, self.config, {})
-        self.image_processed.emit(preview_img, processed_img, output_path)
+        # The output crop (issue #12) rides on the image's info dict; the
+        # renderer needs it to translate the calibration model into output px.
+        metadata = {}
+        crop = processed_img.info.get(CROP_METADATA_KEY) if processed_img is not None else None
+        if crop:
+            metadata[CROP_METADATA_KEY] = crop
+        preview_img = render_allsky_for_preview(processed_img, allsky_cfg, self.config, metadata)
+        self.image_processed.emit(preview_img, processed_img, output_path, dict(extras or {}))
