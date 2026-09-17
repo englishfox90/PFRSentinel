@@ -35,12 +35,18 @@ name: Build
 # get a spec-parse smoke test instead — the packaging work for them
 # (BUNDLE/.icns/notarization, .deb, the udev rule, ARM wheels) is issue #41.
 
+# Docs-only changes skip the build on both triggers: on a PR there is no binary
+# change to review, and on main it would republish an identical binary and
+# notify everyone subscribed to the discussion for nothing. Safe to skip
+# because the "CI must pass" ruleset requires only ci.yml checks; a required
+# check from this workflow would sit at "Expected" forever on a docs-only PR.
 on:
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   push:
     branches: [main]
-    # A docs-only merge would republish an identical binary and notify
-    # everyone subscribed to the discussion for nothing.
     paths-ignore:
       - "docs/**"
       - "**/*.md"
