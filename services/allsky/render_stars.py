@@ -91,18 +91,18 @@ def render_bright_stars(
         x, y = int(xy[0]), int(xy[1])
         if not _is_sky_visible(gray, x, y):
             continue
-        visible.append((display, float(x), float(y)))
+        visible.append((display, float(x), float(y), star_uid(star)))
 
     # Reserve every star before placing any label, so an early label cannot
     # land on a star whose own label comes later. The radius stays under the
     # placement gap, so a star never blocks its own label.
     marker_r = default_gap(label_size * 1.2) * 0.75
-    for _, x, y in visible:
+    for _, x, y, _ in visible:
         label_grid.reserve_marker(x, y, marker_r)
 
-    for display, x, y in visible:
+    for display, x, y, uid in visible:
         tw, th = estimate_text_size(display, label_size)
-        pos = label_grid.try_place(x, y, tw, th)
+        pos = label_grid.try_place(x, y, tw, th, key=uid)
         if pos is not None:
             draw.text(pos, display, fill=label_color, font=font)
 

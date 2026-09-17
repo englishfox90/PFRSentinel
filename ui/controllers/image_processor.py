@@ -4,7 +4,6 @@ Handles image processing pipeline using services/processor.py functions
 """
 from PySide6.QtCore import QObject, Signal, QThread
 from PIL import Image, ImageEnhance, ImageDraw, ImageFont
-import gc
 import numpy as np
 import os
 import queue
@@ -14,6 +13,7 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from services.gc_scheduler import request_full_collect
 from services.logger import app_logger
 from services.notifications import ERROR, ROOF_CHANGED, NotificationEvent
 from services.preview_scaling import downscale_for_preview
@@ -113,7 +113,7 @@ class ImageProcessorWorker(QThread):
 
                 self._frame_count += 1
                 if self._frame_count % 100 == 0:
-                    gc.collect()
+                    request_full_collect()
                     self._trim_working_set()
                 
             except Exception as e:
