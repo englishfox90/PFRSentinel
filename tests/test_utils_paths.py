@@ -61,11 +61,26 @@ def windows_dirs(monkeypatch, tmp_path):
     return local_app_data
 
 
+def _set_home(monkeypatch, tmp_path):
+    """Point both POSIX and Windows home-lookup at tmp_path.
+
+    platformdirs' macOS/Unix classes resolve via os.path.expanduser("~"),
+    which is ntpath.expanduser on a Windows runner regardless of the
+    sys.platform monkeypatch (os.path binds to the real OS at interpreter
+    start). ntpath.expanduser reads USERPROFILE and never looks at HOME, so
+    setting HOME alone leaves it resolving the runner's real home directory.
+    posixpath.expanduser never looks at USERPROFILE, so setting both is safe
+    on every runner.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+
 @pytest.fixture
 def macos_dirs(monkeypatch, tmp_path):
     """Drive utils_paths through platformdirs' macOS class, rooted in tmp_path."""
     monkeypatch.setattr(utils_paths.sys, "platform", "darwin")
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.setattr(utils_paths, "user_data_dir", _platform_shim(pd_macos.MacOS))
     return tmp_path
@@ -75,7 +90,7 @@ def macos_dirs(monkeypatch, tmp_path):
 def linux_dirs(monkeypatch, tmp_path):
     """Drive utils_paths through platformdirs' Unix class, rooted in tmp_path."""
     monkeypatch.setattr(utils_paths.sys, "platform", "linux")
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.setattr(utils_paths, "user_data_dir", _platform_shim(pd_unix.Unix))
     return tmp_path
