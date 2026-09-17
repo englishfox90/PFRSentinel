@@ -1,4 +1,4 @@
-"""
+r"""
 Tests for services.utils_paths — the cross-platform app-data root.
 
 get_app_data_dir has two branches: the Windows LOCALAPPDATA environment
@@ -19,6 +19,9 @@ never calls the shim, and resolves the developer's real
 %LOCALAPPDATA%\PFRSentinel — creating files there and failing tmp_path
 assertions. That is a CI blocker, not a flake. The fixtures below do this;
 a test that does not use one has to do it itself.
+
+Setting $HOME alone does not redirect home on Windows — the fixtures below
+set USERPROFILE too.
 """
 import errno
 import os
