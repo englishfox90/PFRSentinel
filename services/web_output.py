@@ -34,10 +34,17 @@ _ABS_PATH_RE = re.compile(
 
 
 def _safe_image_label(path):
-    """Reduce an image path to a bare filename for the /status payload."""
+    """Reduce an image path to a bare filename for the /status payload.
+
+    Split on both separators rather than via ``os.path.basename``, which only
+    knows the host's own. A Windows path reaching a POSIX host — a config
+    carried between machines, or a sidecar written by a capture program on
+    another box — would otherwise pass through whole and leak the username and
+    directory layout this function exists to strip.
+    """
     if not path:
         return "None"
-    return os.path.basename(path) or "None"
+    return path.replace("\\", "/").rsplit("/", 1)[-1] or "None"
 
 
 def _scrub_metadata(metadata):

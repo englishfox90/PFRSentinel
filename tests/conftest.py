@@ -12,6 +12,30 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# Qt needs a platform plugin before the first QApplication, and CI is headless
+# on every runner. Set here rather than per-file so any test that reaches Qt
+# indirectly still works — including on a developer's own headless Linux box,
+# where the previous per-file setdefault calls left the rest of the suite
+# aborting at import. setdefault, so a real display still wins locally.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip `requires_windows` tests off Windows.
+
+    The marker exists so these are selectable (`-m requires_windows`), which an
+    inline skipif is not; skipping here keeps one pytest command line working
+    unchanged on all three CI runners.
+    """
+    if _IS_WINDOWS:
+        return
+    skip = pytest.mark.skip(reason="Windows-only behaviour")
+    for item in items:
+        if "requires_windows" in item.keywords:
+            item.add_marker(skip)
+
 
 @pytest.fixture
 def temp_dir():

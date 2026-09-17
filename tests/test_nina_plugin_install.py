@@ -288,6 +288,7 @@ def test_install_reports_nina_running_when_dll_locked(plugins_root, bundled_dll,
     assert "Close NINA" in result.message
 
 
+@pytest.mark.requires_windows
 def test_install_refuses_a_junctioned_version_folder(plugins_root, tmp_path, bundled_dll):
     """A junction named like a version must not take the copy out of the root."""
     outside = tmp_path / "Elsewhere"
@@ -466,6 +467,7 @@ def test_remove_matches_the_dll_name_case_insensitively(plugins_root):
     assert npi.check_removable(target, plugins_root) is None
 
 
+@pytest.mark.requires_windows
 def test_remove_refuses_a_junctioned_plugin_folder(plugins_root, tmp_path):
     """Junctions are the realistic Windows case — islink() alone misses them."""
     real = tmp_path / "Documents"
@@ -483,6 +485,7 @@ def test_remove_refuses_a_junctioned_plugin_folder(plugins_root, tmp_path):
     assert (real / npi.PLUGIN_DLL_NAME).exists()
 
 
+@pytest.mark.requires_windows
 def test_remove_refuses_a_name_match_directly_under_a_drive_root():
     """dirname() twice saturates at a drive root; the depth check must not."""
     refusal = npi.check_removable("C:\\" + npi.PLUGIN_FOLDER_NAME, "C:\\")
