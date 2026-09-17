@@ -13,6 +13,7 @@ Two production faults are pinned here:
   night, and a seed that could not be refined failed identically 33 times in
   a row with no back-off.
 """
+import math
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -117,7 +118,7 @@ class TestWorkerLifetime:
         svc = _service()
         baseline = len(svc.children())
         for _ in range(5):
-            svc._last_refine_time = 0.0     # bypass the cooldown
+            svc._last_refine_time = -math.inf   # bypass the cooldown
             _run_one_refinement(svc)
             assert svc._refine_worker is None, "worker was not retired"
             assert len(svc.children()) == baseline
@@ -272,7 +273,7 @@ class TestRefineBackoff:
         svc = _service()
         svc._maybe_refine()
         first = svc._refine_worker
-        svc._last_refine_time = 0.0
+        svc._last_refine_time = -math.inf
         svc._maybe_refine()
         assert svc._refine_worker is first, "started a second concurrent refinement"
         first.wait(5000)
@@ -375,7 +376,7 @@ class TestIncumbentCorroboration:
         svc._save_model = lambda m, **kw: saved.append(kw)
         self._corroborating_pole(monkeypatch, svc._model)
         _run_one_refinement(svc)
-        svc._last_refine_time = 0.0
+        svc._last_refine_time = -math.inf
         _run_one_refinement(svc)
         assert sum(1 for kw in saved if kw.get('stamp_time') is False) == 1
 
