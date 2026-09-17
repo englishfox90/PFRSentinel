@@ -64,29 +64,35 @@ def test_release_body_states_the_risks_the_source_and_the_changes():
     assert "### What's in this build\n\n**Changes**" in body
 
 
-def test_intro_carries_the_newest_changelog_and_asks_for_replies_per_build():
-    intro = load_notes().discussion_intro("3.7.7-dev.14", SHA, CHANGELOG)
+def test_intro_is_build_independent_and_asks_for_replies_per_build():
+    notes = load_notes()
+    intro = notes.discussion_intro("3.7.7-dev.14")
+    # Written once and never edited, so nothing in it may go stale per build.
+    assert intro == notes.discussion_intro("3.7.7-dev.99")
     assert "leading up to PFR Sentinel 3.7.7" in intro
-    assert f"newest build (3.7.7-dev.14, `{SHA[:7]}`)" in intro
-    assert "keep overlay labels stable (#35)" in intro
+    assert notes.RELEASE_URL in intro
     assert "Reply under the comment for the build you tested" in intro
     assert "SmartScreen" in intro
 
 
 def test_ref_stands_in_when_no_pr():
     body = load_notes().build_comment("3.7.7-dev.14", SHA, "my-branch", None,
-                                      "https://run.invalid", CHANGELOG)
+                                      "https://run.invalid", CHANGELOG, CHANGELOG)
     assert "`my-branch`" in body
     assert "PR #" not in body
 
 
-def test_comment_cli_reads_the_delta_and_treats_an_empty_pr_as_none(tmp_path, capsys):
+def test_comment_cli_carries_delta_and_full_list_and_treats_an_empty_pr_as_none(tmp_path, capsys):
     delta = tmp_path / "delta.md"
     delta.write_text(CHANGELOG, encoding="utf-8")
+    full = tmp_path / "changelog.md"
+    full.write_text("**Changes**\n\n- feat: everything so far (#44)\n", encoding="utf-8")
     assert load_notes().main(["comment", "--version", "3.7.7-dev.14", "--sha", SHA,
                               "--ref", "main", "--pr", "", "--run-url", "https://run.invalid",
-                              "--delta-file", str(delta)]) == 0
+                              "--delta-file", str(delta), "--changelog-file", str(full)]) == 0
     out = capsys.readouterr().out
+    assert "<details><summary>Everything since the last release</summary>" in out
+    assert "everything so far (#44)" in out
     assert "PR #" not in out
     assert "New dev build: 3.7.7-dev.14" in out
     assert "**New since the previous dev build**\n\n**Changes**" in out

@@ -1,4 +1,4 @@
-"""Keep the dev builds Discussions thread for the current release cycle current.
+"""Find or open the dev builds Discussions thread for the current release cycle.
 
 One thread per release line ("Dev builds: 3.7.7") collects every dev build
 leading up to that release, one comment per build. ``prepare`` runs before the
@@ -7,13 +7,15 @@ still downloadable:
 
 - finds this cycle's thread, or opens it; reopens it if it was closed (a
   dispatch from a branch on another release line closes it, see below)
-- rewrites the opening post, so the pinned post always describes the newest
-  build
+- never edits a post: GITHUB_TOKEN can create, comment on, close and reopen a
+  discussion, but updateDiscussion is refused for it (checked 2026-09-17: the
+  same mutation succeeds with a user token). So the opening post is fixed at
+  creation and each build comment carries the change lists
 - closes every other open dev builds thread the workflow opened, with a
   comment pointing at the current one. That is how the previous cycle's thread
   retires once its release ships, and how the original single thread retired.
 
-Only threads authored by the workflow are ever edited or closed. A person can
+Only threads authored by the workflow are ever commented on or closed. A person can
 post in the category, and a title starting "Dev builds:" does not make their
 thread the workflow's to close.
 
@@ -65,11 +67,6 @@ mutation($repo: ID!, $category: ID!, $title: String!, $body: String!) {
   }
 }"""
 
-_UPDATE = """
-mutation($id: ID!, $body: String!) {
-  updateDiscussion(input: {discussionId: $id, body: $body}) { discussion { id } }
-}"""
-
 _REOPEN = """
 mutation($id: ID!) {
   reopenDiscussion(input: {discussionId: $id}) { discussion { id } }
@@ -90,20 +87,29 @@ class CategoryMissing(RuntimeError):
     pass
 
 
+class GraphQLFailed(RuntimeError):
+    pass
+
+
 def gh_graphql(query: str, variables: dict[str, str]) -> dict:
     cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
     for key, value in variables.items():
         # -f, not -F: -F would turn a body of "true" or "42" into a non-string.
         cmd += ["-f", f"{key}={value}"]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-    return json.loads(out)["data"]
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    if done.returncode != 0:
+        # The failure reason is only in gh's output; CalledProcessError would
+        # print the whole command (every post body) and none of the reason.
+        operation = query.strip().splitlines()[0]
+        raise GraphQLFailed(f"{operation} -> {(done.stderr or done.stdout).strip()}")
+    return json.loads(done.stdout)["data"]
 
 
 def _is_ours(discussion: dict) -> bool:
     return (discussion.get("author") or {}).get("login") == BOT_LOGIN
 
 
-def prepare(version: str, sha: str, changelog: str, gql: GraphQL,
+def prepare(version: str, gql: GraphQL,
             repository: str = notes.REPO) -> dict:
     owner, name = repository.split("/", 1)
     repo = gql(_REPOSITORY, {"owner": owner, "name": name})["repository"]
@@ -118,17 +124,15 @@ def prepare(version: str, sha: str, changelog: str, gql: GraphQL,
     threads = [d for d in existing["repository"]["discussions"]["nodes"] if _is_ours(d)]
 
     title = notes.discussion_title(version)
-    body = notes.discussion_intro(version, sha, changelog)
+    body = notes.discussion_intro(version)
     current = next((d for d in threads if d["title"] == title), None)
     created = current is None
 
     if created:
         current = gql(_CREATE, {"repo": repo["id"], "category": category,
                                 "title": title, "body": body})["createDiscussion"]["discussion"]
-    else:
-        gql(_UPDATE, {"id": current["id"], "body": body})
-        if current["closed"]:
-            gql(_REOPEN, {"id": current["id"]})
+    elif current["closed"]:
+        gql(_REOPEN, {"id": current["id"]})
 
     retired = []
     for thread in threads:
@@ -162,10 +166,8 @@ def main(argv: list[str] | None = None, gql: GraphQL = gh_graphql) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    prep = sub.add_parser("prepare", help="Find/open this cycle's thread and refresh its post")
+    prep = sub.add_parser("prepare", help="Find or open this cycle's thread")
     prep.add_argument("--version", required=True)
-    prep.add_argument("--sha", required=True)
-    prep.add_argument("--changelog-file", required=True, type=Path)
 
     comment = sub.add_parser("comment", help="Post a build comment to a thread")
     comment.add_argument("--id", required=True)
@@ -176,8 +178,7 @@ def main(argv: list[str] | None = None, gql: GraphQL = gh_graphql) -> int:
 
     if args.command == "prepare":
         try:
-            result = prepare(args.version, args.sha,
-                             args.changelog_file.read_text(encoding="utf-8"), gql, repository)
+            result = prepare(args.version, gql, repository)
         except CategoryMissing as exc:
             print(f"::error::{exc}")
             return 1
