@@ -240,8 +240,10 @@ class _MainWindowSettingsMixin:
                     latitude=latitude if latitude else None,
                     longitude=longitude if longitude else None
                 )
-                loc_info = f"({latitude}, {longitude})" if has_coords else location
-                app_logger.info(f"Weather service initialized: {loc_info}, {units} units")
+                # Log the mode, never the values: the log ships in support
+                # bundles whose config copy redacts exactly these keys.
+                loc_info = "coordinates" if has_coords else "named location"
+                app_logger.info(f"Weather service initialized from {loc_info}, {units} units")
                 if from_settings_save:
                     from services.posthog_service import capture_event
                     capture_event('weather_configured', {'units': units})
