@@ -156,10 +156,62 @@ pytest
 ruff (syntax errors, undefined names, redefinitions — see `ruff.toml`), the
 file-size audit (`scripts/ci/check_file_sizes.py`; caps and frozen exceptions
 live in `scripts/ci/size_policy.py`, shared with the local size hook), `pip-audit` against the installed packages, and the default pytest
-run on a Windows runner with one pytest-xdist worker per core. Dev tooling is
-pinned in `requirements-dev.txt`.
+run with one pytest-xdist worker per core. The test job is a matrix over
+`windows-latest`, `macos-latest` and `ubuntu-latest` (issue #38) — Windows is
+still the shipping platform, the other two prove the port stays honest. Tests
+that only make sense on Windows carry `@pytest.mark.requires_windows` and are
+skipped elsewhere by `tests/conftest.py`, so the pytest command is identical on
+every runner. `pip-audit` runs on the Windows job alone; the dependency set is
+the same everywhere. Dev tooling is pinned in `requirements-dev.txt`.
+
+The Windows test job is named **`Tests and dependency audit (Windows)`** while
+the other two are `Tests (macOS)` / `Tests (Linux)`. That asymmetry is load-bearing:
+`main`'s branch protection requires the Windows job by that exact string, and
+renaming it leaves the required check stuck on "Expected — waiting for status to
+be reported", blocking every merge. **Don't regularise the names without changing
+branch protection in the same PR.** macOS and Linux are not required checks, so
+they report without gating merges — deliberate while the port in #1 is in flight.
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
 against that branch. CodeQL and Dependabot are enabled at the repo level.
+
+`.github/workflows/build.yml` produces **dev builds only**, on every pull
+request and on manual dispatch. Every artifact has `DEV_MODE_AVAILABLE=True`
+(raw FITS/TIFF exports, calibration JSON, ML prediction compiled in), written
+into `services/dev_mode_config.py` by `scripts/ci/set_build_channel.py` before
+PyInstaller runs. **The `PFRSENTINEL_DEV_MODE` environment variable cannot do
+this** — it is read when `dev_mode_config` is imported, which for a frozen app
+is on the user's machine at launch, so setting it in a CI job changes nothing
+about the artifact. PRs get the app folder; dispatch also builds the Inno Setup
+installer by default, which is the only regular exercise `installer/PFRSentinel.iss`
+gets.
+
+There is **no production build in CI, and no tag trigger on `build.yml`**.
+Release builds are signed, and signing cannot run on a hosted runner:
+`scripts/Connect-SimplySign.ps1` drives the SimplySign Desktop GUI with
+synthetic keystrokes (needs an interactive desktop session), and `CERTUM_OTP_URI`
+is the TOTP seed for the signing identity. An unsigned production artifact would
+be a release candidate nobody can release. **Cut releases locally with
+`build_sentinel_installer.bat`**, which signs `PFRSentinel.exe` *before* Inno
+Setup packages it and signs the installer afterwards — the order matters, so a
+CI-built installer cannot simply be signed after the fact. Use
+`python scripts/ci/set_build_channel.py production` there in place of the manual
+checklist.
+
+Tags still run `tag-pushed.yml`, which now asserts `version.py` matches the tag.
+`claude-release-notes.yml` chains off it and only fires on success, so a
+mismatched tag blocks the draft rather than producing notes for a version no
+artifact will carry.
+
+The Windows build job also compiles the NINA plugin with `dotnet` (its only
+automated check — there is no C# test suite) and asserts the exe's FileVersion
+matches `version.py`.
+
+macOS and Linux get `scripts/ci/check_spec_parses.py` instead of a build: it
+executes the spec with the PyInstaller classes stubbed, which catches a
+Windows-only import or a one-OS `datas` entry in seconds. Actual mac/Linux
+packaging is issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
+apart from `requirements-dev.txt` so the test matrix doesn't install it three
+times.
 
 Other Claude workflows: `claude-code-review.yml` reviews every non-draft PR
 (Dependabot PRs excluded); `claude-dependabot-assess.yml` reads the upstream

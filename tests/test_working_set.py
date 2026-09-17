@@ -34,7 +34,7 @@ class TestTrimWorkingSetNonWindows:
         assert trim_working_set() is False
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only working-set API")
+@pytest.mark.requires_windows
 class TestTrimWorkingSetWindows:
     def test_returns_true_on_success(self):
         assert trim_working_set() is True
@@ -185,7 +185,7 @@ class TestHeadlessStopTrimsWorkingSet:
         mock_trim.assert_not_called()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only working-set API")
+@pytest.mark.requires_windows
 def test_trim_does_not_poison_the_global_ctypes_kernel32_cache():
     # Regression: prototyping ctypes.windll.kernel32.GetCurrentProcess leaked a
     # 64-bit HANDLE restype into the process-wide cache, and the untyped call
