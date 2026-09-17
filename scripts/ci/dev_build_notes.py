@@ -108,7 +108,10 @@ def release_body(version: str, sha: str, ref: str, pr: str | None, run_url: str,
     ])
 
 
-def discussion_intro(version: str, sha: str, changelog: str) -> str:
+def discussion_intro(version: str) -> str:
+    """Written once when a cycle's thread opens, and never edited afterwards:
+    GITHUB_TOKEN can create a discussion but not update one. Anything that
+    changes per build belongs in the build comment instead."""
     line = release_line(version)
     return "\n".join([
         f"Dev builds leading up to PFR Sentinel {line}: test builds of changes that "
@@ -116,16 +119,13 @@ def discussion_intro(version: str, sha: str, changelog: str) -> str:
         "merges, and announced as a comment below, so subscribe to hear about them.",
         "",
         f"- **Download the newest build:** [{ASSET_NAME}]({ASSET_URL})",
-        f"- **Release notes:** [the dev prerelease]({RELEASE_URL})",
+        f"- **Everything in it:** [the dev prerelease notes]({RELEASE_URL}) list every "
+        f"pull request merged since the last release, and so does the newest comment below.",
         "",
         "**Reply under the comment for the build you tested**, so feedback stays with "
         "the build it is about. Only the newest build can be downloaded; the link "
         f"above always serves it. When {line} is released this thread closes and "
         "dev builds move to a new one.",
-        "",
-        f"### What's in the newest build ({version}, `{sha[:7]}`)",
-        "",
-        changelog.rstrip(),
         "",
         before_you_install(),
         "",
@@ -133,7 +133,7 @@ def discussion_intro(version: str, sha: str, changelog: str) -> str:
 
 
 def build_comment(version: str, sha: str, ref: str, pr: str | None, run_url: str,
-                  delta: str) -> str:
+                  delta: str, changelog: str) -> str:
     return "\n".join([
         f"**New dev build: {version}.** {_source_line(sha, ref, pr)}.",
         "",
@@ -142,6 +142,12 @@ def build_comment(version: str, sha: str, ref: str, pr: str | None, run_url: str
         "**New since the previous dev build**",
         "",
         delta.rstrip(),
+        "",
+        "<details><summary>Everything since the last release</summary>",
+        "",
+        changelog.rstrip(),
+        "",
+        "</details>",
         "",
         "Reply to this comment with what you found in this build. The download link "
         "serves the newest build, so after the next one is published it no longer "
@@ -186,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     release.add_argument("--changelog-file", required=True, type=Path)
     comment = sub.add_parser("comment", parents=[build_args], help="Per-build discussion comment")
     comment.add_argument("--delta-file", required=True, type=Path)
+    comment.add_argument("--changelog-file", required=True, type=Path)
 
     args = parser.parse_args(argv)
     pr = getattr(args, "pr", "") or None
@@ -200,7 +207,8 @@ def main(argv: list[str] | None = None) -> int:
                             args.changelog_file.read_text(encoding="utf-8"))
     else:
         text = build_comment(args.version, args.sha, args.ref, pr, args.run_url,
-                             args.delta_file.read_text(encoding="utf-8"))
+                             args.delta_file.read_text(encoding="utf-8"),
+                             args.changelog_file.read_text(encoding="utf-8"))
 
     sys.stdout.write(text)
     return 0

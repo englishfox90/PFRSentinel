@@ -266,7 +266,7 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
 | `test_dev_build_notes.py` | 9 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list |
 | `test_dev_build_changelog.py` | 6 | `scripts/ci/dev_build_changelog.py` — PRs since the last release via commits, grouping, delta since the previous dev build, API failure never blocks |
-| `test_dev_build_discussion.py` | 8 | `scripts/ci/dev_build_discussion.py` — one thread per release cycle, retire/reopen, never touches people's threads |
+| `test_dev_build_discussion.py` | 9 | `scripts/ci/dev_build_discussion.py` — one thread per release cycle, retire/reopen, never edits a post (GITHUB_TOKEN is refused updateDiscussion), never touches people's threads |
 | `test_set_dev_version.py` | 11 | `scripts/ci/set_dev_version.py` — dev version base/counter, Windows FileVersion, spec parses the same way |
 | `test_timelapse_window.py` | 13 | `timelapse_window` — sun window on the LOCAL calendar date (real astral, injected zones), fixed fallback, per-day cache |
 | `test_capture_schedule_window.py` | 39 | `capture_schedule_window` — timelapse-derived capture window ± margin, gate two-day logic, roof/always fallbacks, labels |

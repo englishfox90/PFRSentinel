@@ -322,8 +322,7 @@ jobs:
       - name: Refresh this release cycle's discussion
         id: discussion
         run: |
-          python3 scripts/ci/dev_build_discussion.py prepare \
-            --version "$DEV_VERSION" --sha "$GITHUB_SHA" --changelog-file changelog.md
+          python3 scripts/ci/dev_build_discussion.py prepare --version "$DEV_VERSION"
 
       - name: Replace the dev prerelease
         env:
@@ -355,7 +354,7 @@ jobs:
         run: |
           python3 scripts/ci/dev_build_notes.py comment \
             --version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" \
-            --run-url "$RUN_URL" --delta-file delta.md > comment.md
+            --run-url "$RUN_URL" --delta-file delta.md --changelog-file changelog.md > comment.md
           python3 scripts/ci/dev_build_discussion.py comment --id "$DISCUSSION_ID" --body-file comment.md
 
       - name: Summary

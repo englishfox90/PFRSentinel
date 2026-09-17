@@ -19,7 +19,13 @@ def _thread(number, title, closed=False, author="github-actions"):
 
 
 class FakeDiscussions:
-    """Records mutations; answers queries from a list of threads."""
+    """Records mutations; answers queries from a list of threads.
+
+    Any mutation it does not know fails the test, which is what keeps an
+    updateDiscussion call from creeping back in: GITHUB_TOKEN is refused it.
+    """
+
+    MUTATIONS = ("createDiscussion", "reopenDiscussion", "closeDiscussion", "addDiscussionComment")
 
     def __init__(self, threads, categories=("Announcements", "Dev builds")):
         self.threads = threads
@@ -34,8 +40,7 @@ class FakeDiscussions:
         if "discussions(first" in query:
             assert variables["category"] == CATEGORY_ID
             return {"repository": {"discussions": {"nodes": self.threads}}}
-        for name in ("createDiscussion", "updateDiscussion", "reopenDiscussion",
-                     "closeDiscussion", "addDiscussionComment"):
+        for name in self.MUTATIONS:
             if name in query:
                 self.calls.append((name, variables))
                 if name == "createDiscussion":
@@ -50,7 +55,7 @@ class FakeDiscussions:
 
 
 def _prepare(fake, version="3.7.7-dev.14"):
-    return load_discussion().prepare(version, SHA, "**Changes**\n\n- fix (#35)\n", fake)
+    return load_discussion().prepare(version, fake)
 
 
 def test_first_build_of_a_cycle_opens_its_thread_and_retires_the_old_one():
@@ -60,26 +65,25 @@ def test_first_build_of_a_cycle_opens_its_thread_and_retires_the_old_one():
     assert result["created"] and result["title"] == "Dev builds: 3.7.7"
     assert fake.names() == ["createDiscussion", "addDiscussionComment", "closeDiscussion"]
     create = fake.calls[0][1]
-    assert create["category"] == CATEGORY_ID and "- fix (#35)" in create["body"]
+    assert create["category"] == CATEGORY_ID and "leading up to PFR Sentinel 3.7.7" in create["body"]
     moved = fake.calls[1][1]
     assert moved["id"] == "D_55" and "[Dev builds: 3.7.7](https://discussions.invalid/99)" in moved["body"]
     assert result["retired"] == ["https://discussions.invalid/55"]
 
 
-def test_later_builds_rewrite_the_existing_post_without_opening_another():
+def test_later_builds_reuse_the_thread_without_writing_to_it():
     fake = FakeDiscussions([_thread(60, "Dev builds: 3.7.7")])
     result = _prepare(fake, "3.7.7-dev.15")
 
     assert not result["created"] and result["id"] == "D_60"
-    assert fake.names() == ["updateDiscussion"]
-    assert "3.7.7-dev.15" in fake.calls[0][1]["body"]
+    assert fake.names() == []
 
 
 def test_a_closed_thread_for_this_cycle_is_reopened():
     fake = FakeDiscussions([_thread(61, "Dev builds: 3.8.0"), _thread(60, "Dev builds: 3.7.7", closed=True)])
     _prepare(fake, "3.7.7-dev.16")
-    assert fake.names() == ["updateDiscussion", "reopenDiscussion", "addDiscussionComment", "closeDiscussion"]
-    assert fake.calls[1][1]["id"] == "D_60" and fake.calls[3][1]["id"] == "D_61"
+    assert fake.names() == ["reopenDiscussion", "addDiscussionComment", "closeDiscussion"]
+    assert fake.calls[0][1]["id"] == "D_60" and fake.calls[2][1]["id"] == "D_61"
 
 
 def test_threads_people_opened_are_never_touched():
@@ -93,13 +97,9 @@ def test_threads_people_opened_are_never_touched():
     assert fake.names() == ["createDiscussion"]
 
 
-def test_missing_category_fails_before_any_write(capsys, tmp_path):
+def test_missing_category_fails_before_any_write(capsys):
     fake = FakeDiscussions([], categories=("Announcements",))
-    changelog = tmp_path / "changelog.md"
-    changelog.write_text("x", encoding="utf-8")
-    code = load_discussion().main(["prepare", "--version", "3.7.7-dev.1", "--sha", SHA,
-                                   "--changelog-file", str(changelog)], gql=fake)
-    assert code == 1
+    assert load_discussion().main(["prepare", "--version", "3.7.7-dev.1"], gql=fake) == 1
     assert fake.calls == []
     assert "::error::No 'Dev builds' Discussions category" in capsys.readouterr().out
 
@@ -108,11 +108,8 @@ def test_prepare_cli_writes_step_outputs(tmp_path, monkeypatch):
     output = tmp_path / "github_output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("GITHUB_REPOSITORY", "englishfox90/PFRSentinel")
-    changelog = tmp_path / "changelog.md"
-    changelog.write_text("x", encoding="utf-8")
     fake = FakeDiscussions([_thread(60, "Dev builds: 3.7.7")])
-    assert load_discussion().main(["prepare", "--version", "3.7.7-dev.2", "--sha", SHA,
-                                   "--changelog-file", str(changelog)], gql=fake) == 0
+    assert load_discussion().main(["prepare", "--version", "3.7.7-dev.2"], gql=fake) == 0
     assert output.read_text(encoding="utf-8") == "id=D_60\nurl=https://discussions.invalid/60\n"
 
 
@@ -124,10 +121,28 @@ def test_bodies_are_sent_as_strings(body, monkeypatch):
         captured["cmd"] = cmd
 
         class Done:
+            returncode = 0
             stdout = '{"data": {}}'
+            stderr = ""
         return Done()
 
     module = load_discussion()
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     module.gh_graphql("mutation { x }", {"body": body})
     assert captured["cmd"][-2:] == ["-f", f"body={body}"]
+
+
+def test_a_failed_graphql_call_reports_the_reason_not_the_command(monkeypatch):
+    module = load_discussion()
+
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "GraphQL: Resource not accessible by integration (addDiscussionComment)"
+
+    monkeypatch.setattr(module.subprocess, "run", lambda cmd, **kw: Failed())
+    with pytest.raises(module.GraphQLFailed) as caught:
+        module.gh_graphql("mutation($id: ID!, $body: String!) {\n  addDiscussionComment",
+                          {"body": "long post"})
+    assert "Resource not accessible by integration" in str(caught.value)
+    assert "long post" not in str(caught.value)
