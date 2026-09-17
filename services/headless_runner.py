@@ -17,6 +17,7 @@ from .logger import app_logger
 from .config import Config
 from .camera import ZWOCamera
 from .camera.camera_utils import get_selected_camera_name
+from .capture_schedule_window import gate_for_config
 from .web_image_encode import encode_for_web
 from .web_output import WebOutputServer
 from .processor import add_overlays
@@ -261,6 +262,8 @@ class HeadlessRunner:
                 scheduled_window_interval=self.config.get('scheduled_window_interval', 5.0)
             )
             
+            self.zwo_camera.schedule_gate = gate_for_config(self.config)
+
             # Set capture interval
             self.zwo_camera.capture_interval = self.config.get('zwo_interval', 5.0)
             
@@ -425,23 +428,8 @@ class HeadlessRunner:
         try:
             from services import api_status
 
-            sched_mode = self.config.get('scheduled_capture_mode', 'always')
-            in_window = True
-            if sched_mode != 'always':
-                try:
-                    in_window = self.zwo_camera.is_in_time_window()
-                except Exception:
-                    in_window = True
-            schedule = {
-                "mode": sched_mode,
-                "start_time": self.config.get('scheduled_start_time', '17:00'),
-                "end_time": self.config.get('scheduled_end_time', '09:00'),
-                "in_window": in_window,
-                "window_interval_seconds": (
-                    self.config.get('scheduled_window_interval', 5.0)
-                    if sched_mode == 'variable' else None
-                ),
-            }
+            schedule = api_status.build_schedule(
+                self.config, getattr(self, 'zwo_camera', None))
             interval = self.config.get('zwo_interval', 5.0)
             try:
                 effective_interval = self.zwo_camera.effective_capture_interval

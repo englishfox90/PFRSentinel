@@ -6,6 +6,13 @@ the configured window mode, return the (start, end) datetimes of that day's
 recording window. Extracted from ``timelapse_writer`` so the writer keeps to
 session/process management; ``WindowCache`` exists because the sun modes run
 astral's solar geometry, which used to be recomputed twice per captured frame.
+
+astral clamps sunset/sunrise/dusk/dawn to the calendar date expressed in the
+``tzinfo`` it is given, which defaults to UTC. Asking for a UTC date therefore
+picks the wrong night away from the prime meridian — at UTC-7 local dusk falls
+on the next UTC date, so the previous evening's dusk came back and the window
+never closed at dawn (issue #14). Every call here passes the *local* zone so
+``day`` means the local calendar date.
 """
 from datetime import datetime, date, timedelta
 from typing import Tuple
@@ -13,19 +20,23 @@ from typing import Tuple
 from .logger import app_logger
 
 
-def to_local_naive(dt: datetime) -> datetime:
-    """Convert a tz-aware datetime to naive local time.
+def to_local_naive(dt: datetime, tzinfo=None) -> datetime:
+    """Convert a tz-aware datetime to naive wall-clock in ``tzinfo``.
 
-    astral returns tz-aware UTC; the rest of the writer compares against
+    astral returns tz-aware datetimes; the rest of the writer compares against
     datetime.now(), which is naive LOCAL. Stripping tzinfo without converting
     (the old bug) shifted the window by the host's UTC offset — hours wrong off
-    the prime meridian. astimezone() with no argument converts to the system's
-    local zone first, so the naive result lines up with datetime.now().
+    the prime meridian. ``tzinfo=None`` means the system zone, since
+    ``astimezone(None)`` converts to local.
     """
-    return dt.astimezone().replace(tzinfo=None)
+    return dt.astimezone(tzinfo).replace(tzinfo=None)
 
 
-def window_for_day(config: dict, day: date) -> Tuple[datetime, datetime]:
+def _local_tzinfo(tzinfo=None):
+    return tzinfo if tzinfo is not None else datetime.now().astimezone().tzinfo
+
+
+def window_for_day(config: dict, day: date, tzinfo=None) -> Tuple[datetime, datetime]:
     """
     Return (window_start, window_end) for the given day.
 
@@ -46,7 +57,7 @@ def window_for_day(config: dict, day: date) -> Tuple[datetime, datetime]:
         return fixed_window(config, day)
 
     # Default: sun-based
-    return sun_window(config, day)
+    return sun_window(config, day, tzinfo)
 
 
 def fixed_window(config: dict, day: date) -> Tuple[datetime, datetime]:
@@ -68,11 +79,15 @@ def fixed_window(config: dict, day: date) -> Tuple[datetime, datetime]:
     return start, end
 
 
-def sun_window(config: dict, day: date) -> Tuple[datetime, datetime]:
-    """Calculate sunset→sunrise window using the astral library."""
+def sun_window(config: dict, day: date, tzinfo=None) -> Tuple[datetime, datetime]:
+    """Calculate the night window for ``day`` using the astral library.
+
+    ``day`` is a LOCAL calendar date and the returned datetimes are naive
+    wall-clock in ``tzinfo`` (the system zone when None).
+    """
     try:
         from astral import LocationInfo
-        from astral.sun import sun, time_at_elevation, SunDirection
+        from astral.sun import sunset, sunrise, dusk, dawn
 
         lat = config.get('sun_latitude')
         lon = config.get('sun_longitude')
@@ -80,39 +95,29 @@ def sun_window(config: dict, day: date) -> Tuple[datetime, datetime]:
             raise ValueError("No coordinates configured for sun mode")
 
         loc = LocationInfo(latitude=float(lat), longitude=float(lon))
+        tz = _local_tzinfo(tzinfo)
         sun_mode = config.get('sun_mode', 'astronomical')
         tomorrow = day + timedelta(days=1)
 
         if sun_mode == 'sunset_sunrise':
-            s_today = sun(loc.observer, date=day)
-            s_tomorrow = sun(loc.observer, date=tomorrow)
-            window_start = to_local_naive(s_today['sunset'])
-            window_end = to_local_naive(s_tomorrow['sunrise'])
+            start = sunset(loc.observer, date=day, tzinfo=tz)
+            end = sunrise(loc.observer, date=tomorrow, tzinfo=tz)
+        else:
+            depression = {'civil': 6, 'nautical': 12}.get(sun_mode, 18)
+            start = dusk(loc.observer, date=day, depression=depression, tzinfo=tz)
+            end = dawn(loc.observer, date=tomorrow, depression=depression, tzinfo=tz)
 
-        elif sun_mode == 'civil':
-            s_today = sun(loc.observer, date=day)
-            s_tomorrow = sun(loc.observer, date=tomorrow)
-            window_start = to_local_naive(s_today['dusk'])
-            window_end = to_local_naive(s_tomorrow['dawn'])
-
-        elif sun_mode == 'nautical':
-            window_start = to_local_naive(time_at_elevation(
-                loc.observer, -12, date=day, direction=SunDirection.SETTING))
-            window_end = to_local_naive(time_at_elevation(
-                loc.observer, -12, date=tomorrow, direction=SunDirection.RISING))
-
-        else:  # astronomical
-            window_start = to_local_naive(time_at_elevation(
-                loc.observer, -18, date=day, direction=SunDirection.SETTING))
-            window_end = to_local_naive(time_at_elevation(
-                loc.observer, -18, date=tomorrow, direction=SunDirection.RISING))
-
-        return window_start, window_end
+        # In production tzinfo is None: the clamp above used the fixed offset in
+        # effect now, while astimezone(None) converts with the real zone, so a
+        # DST change on the night itself still lands on the right hour.
+        return to_local_naive(start, tzinfo), to_local_naive(end, tzinfo)
 
     except ImportError:
         app_logger.warning("Timelapse: astral not available, falling back to fixed window")
         return fixed_window(config, day)
     except Exception as e:
+        # astral raises ValueError when the sun never reaches the depression
+        # (high-latitude summer) — a fixed window is better than no timelapse.
         app_logger.warning(f"Timelapse: sun window error ({e}), falling back to fixed window")
         return fixed_window(config, day)
 

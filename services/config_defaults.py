@@ -112,6 +112,12 @@ DEFAULT_CONFIG = {
     "scheduled_start_time": "16:00",        # 4:00 PM — window start (24hr)
     "scheduled_end_time": "09:00",          # 9:00 AM — window end (next day for overnight)
     "scheduled_window_interval": 30.0,      # seconds between captures when inside the window (variable mode only)
+    # window source:
+    #   "fixed"     — use scheduled_start_time/scheduled_end_time above (default)
+    #   "timelapse" — follow the Timelapse recording window (Timelapse settings +
+    #                 weather coordinates), widened by the margin below
+    "scheduled_window_source": "fixed",
+    "scheduled_window_margin_min": 15,      # minutes before/after the timelapse window (0-180)
     
     # White Balance configuration
     "white_balance": {
