@@ -11,8 +11,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from .app_config import APP_DATA_FOLDER
 from .logger import app_logger
+from .utils_paths import get_app_data_dir
 
 # Default heartbeat interval in seconds
 DEFAULT_INTERVAL = 30
@@ -23,9 +23,7 @@ STALE_MULTIPLIER = 3
 
 def get_heartbeat_path():
     """Return the path to the heartbeat file."""
-    return os.path.join(
-        os.getenv('LOCALAPPDATA', ''), APP_DATA_FOLDER, 'heartbeat.json'
-    )
+    return os.path.join(get_app_data_dir(), 'heartbeat.json')
 
 
 def write_heartbeat(path=None):

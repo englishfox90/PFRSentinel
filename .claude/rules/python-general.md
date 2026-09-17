@@ -11,7 +11,7 @@ description: General Python rules for PFR Sentinel — applies to every .py file
   - From outside the package: absolute — `from services.module import X`
 - **Config access**: always go through `services.config`. Use `config.set()` / `config.save()`. Never read or write `config.json` directly.
 - **Config keys are nested** — `output_config.get('webserver_enabled')`, NOT `config.get('web_enabled')`.
-- **Config paths**: always resolve via `app_config.get_config_dir()`. Never hardcode `%APPDATA%` paths.
+- **Config paths**: always resolve through `services.utils_paths.get_app_data_dir()` (`services.app_config.get_app_data_dir()` delegates to it for existing callers). Never hardcode a platform path, and never read `LOCALAPPDATA` / `APPDATA` directly — the root differs per platform.
 - **File size**: target ≤600 lines, hard cap 750. The `check_file_size.py` hook blocks Edit/Write that would exceed the cap. Frozen exceptions are listed in that hook — they may not grow further.
 - **No new comments** that just describe what the code does. Save comments for non-obvious *why*: a constraint, a workaround, an invariant a reader would otherwise miss.
 

@@ -7,13 +7,15 @@ import os
 import sys
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from services.heartbeat import (
-    write_heartbeat, read_heartbeat, is_heartbeat_stale, HeartbeatWriter
+    write_heartbeat, read_heartbeat, is_heartbeat_stale, HeartbeatWriter,
+    get_heartbeat_path
 )
 
 
@@ -141,3 +143,35 @@ class TestHeartbeatWriter:
         writer.stop()
         # Should not hang — if it does, test will timeout
         assert writer._thread is None
+
+
+class TestHeartbeatPathResolution:
+    """get_heartbeat_path() must not read LOCALAPPDATA directly.
+
+    It used to, with an empty-string default — off Windows that produced a
+    relative 'PFRSentinel/heartbeat.json' and write_heartbeat() created it
+    under whatever the process working directory happened to be.
+    """
+
+    def test_path_is_absolute_without_localappdata(self, monkeypatch, tmp_path):
+        monkeypatch.delenv('LOCALAPPDATA', raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        path = get_heartbeat_path()
+
+        assert os.path.isabs(path)
+        assert os.path.basename(path) == 'heartbeat.json'
+        assert tmp_path not in Path(path).parents
+
+    def test_path_does_not_follow_the_working_directory(self, monkeypatch, tmp_path):
+        """Same resolver, two different cwds — the answer may not move."""
+        monkeypatch.delenv('LOCALAPPDATA', raising=False)
+
+        monkeypatch.chdir(tmp_path)
+        first = os.path.abspath(get_heartbeat_path())
+        nested = tmp_path / 'elsewhere'
+        nested.mkdir()
+        monkeypatch.chdir(nested)
+        second = os.path.abspath(get_heartbeat_path())
+
+        assert first == second

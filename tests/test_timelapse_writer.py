@@ -1,9 +1,9 @@
 """
 Tests for services.timelapse_writer.TimelapseWriter.
 
-Covers:
-- _build_ffmpeg_cmd even-dimension handling (libx264 + yuv420p require even
-  width AND height — odd dims used to crash ffmpeg on every frame).
+Covers the ffmpeg process lifecycle. Output path and frame-geometry resolution
+live in test_timelapse_output_target.py.
+
 - The crash-loop guard: a persistent ffmpeg failure must NOT mint a new video
   file on every captured frame; restarts back off and orphan files are removed.
 - The real ffmpeg error is surfaced at error level on an unexpected exit.
@@ -14,41 +14,6 @@ import pytest
 
 import services.timelapse_writer as tw_mod
 from services.timelapse_writer import TimelapseWriter
-
-
-# --------------------------------------------------------------------------- #
-#  _build_ffmpeg_cmd — even-dimension handling                                 #
-# --------------------------------------------------------------------------- #
-
-def _vf(writer, frame_size, max_dim):
-    writer._config = {'output_max_dim': max_dim}
-    cmd = writer._build_ffmpeg_cmd(frame_size, 'out.mp4')
-    return cmd[cmd.index('-vf') + 1] if '-vf' in cmd else None
-
-
-def test_even_native_no_filter():
-    """Already-even frames need no -vf — avoid pointless scaling overhead."""
-    assert _vf(TimelapseWriter(), (1920, 1080), 0) is None
-
-
-def test_odd_native_is_cropped_even():
-    """Odd source dims must be forced even or x264/yuv420p aborts."""
-    vf = _vf(TimelapseWriter(), (1937, 1097), 0)
-    assert vf == 'crop=trunc(iw/2)*2:trunc(ih/2)*2'
-
-
-def test_downscale_also_forces_even():
-    """The aspect-preserving downscale can land on odd dims, so crop follows it."""
-    vf = _vf(TimelapseWriter(), (4144, 2822), 1920)
-    assert vf == (
-        'scale=1920:1920:force_original_aspect_ratio=decrease,'
-        'crop=trunc(iw/2)*2:trunc(ih/2)*2'
-    )
-
-
-def test_downscale_skipped_when_smaller_than_max():
-    """No downscale and even source → no filter chain at all."""
-    assert _vf(TimelapseWriter(), (1280, 720), 1920) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -719,24 +684,3 @@ def test_status_snapshot_tracks_session_lifecycle(monkeypatch, temp_dir):
     assert stopped['recording'] is False
     assert stopped['elapsed_seconds'] == 0
     assert stopped['frame_count'] == 3           # last session's count is retained
-
-
-# --------------------------------------------------------------------------- #
-#  Default output resolution                                                   #
-# --------------------------------------------------------------------------- #
-
-def test_default_output_max_dim_downscales_to_1920():
-    """Without a default, a 2628x2628 sensor encoded at native resolution —
-    ~20MB per piped frame. The shipped default must cap the longest side, and
-    must be one of the panel dropdown's values."""
-    from services.config_defaults import DEFAULT_CONFIG
-
-    max_dim = DEFAULT_CONFIG['timelapse']['output_max_dim']
-    assert max_dim == 1920
-    assert max_dim in {0, 1920, 1440, 1280, 720}   # ui/panels/timelapse_panel _res_map
-
-    vf = _vf(TimelapseWriter(), (2628, 2628), max_dim)
-    assert vf == (
-        'scale=1920:1920:force_original_aspect_ratio=decrease,'
-        'crop=trunc(iw/2)*2:trunc(ih/2)*2'
-    )

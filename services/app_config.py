@@ -43,10 +43,14 @@ def get_user_agent() -> str:
 
 
 def get_app_data_dir() -> str:
-    """Canonical %LOCALAPPDATA%\\PFRSentinel directory (created if missing)."""
-    base = os.path.join(os.getenv('LOCALAPPDATA', ''), APP_DATA_FOLDER)
-    os.makedirs(base, exist_ok=True)
-    return base
+    """Canonical per-user application data directory (created if missing).
+
+    Delegates to services.utils_paths so there is one cross-platform
+    definition of the root. The import is function-level because
+    utils_paths imports APP_DATA_FOLDER from this module at import time.
+    """
+    from .utils_paths import get_app_data_dir as _get_app_data_dir
+    return _get_app_data_dir()
 
 
 def get_calibration_path() -> str:

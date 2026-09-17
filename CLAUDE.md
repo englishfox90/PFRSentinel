@@ -7,7 +7,7 @@ Stack: Python 3.13, PySide6 6.10.2 (pinned) + qfluentwidgets 1.11.1 (Windows 11 
 ## Capture modes
 
 1. **Directory Watch** — `services/watcher.py` (watchdog) detects new FITS/JPEG/PNG, waits for file stability, parses sidecar metadata, runs the processor.
-2. **ZWO Camera** — `services/zwo_camera.py` captures RAW8 Bayer frames, debayers (BGGR), and produces a PIL image + metadata dict for the processor.
+2. **ZWO Camera** — `services/camera/zwo_camera.py` captures RAW8 Bayer frames, debayers (BGGR), and produces a PIL image + metadata dict for the processor.
 
 ## Output sinks (run simultaneously)
 
@@ -15,29 +15,30 @@ Stack: Python 3.13, PySide6 6.10.2 (pinned) + qfluentwidgets 1.11.1 (Windows 11 
 - **Web** — HTTP server, `/latest` (image) and `/status` (JSON) endpoints
 - **Discord** — periodic webhook posts with weather embeds
 
-All output dispatch goes through `_push_to_output_servers()` in the processor.
+All output dispatch goes through `_push_to_output_servers()` in `ui/main_window/output.py`.
 
 ## Project structure
 
 ```
 PFRSentinel/
 ├── ui/                         # PySide6 + qfluentwidgets UI
-│   ├── main_window.py          # FluentWindow + QStackedWidget navigation
+│   ├── main_window/            # FluentWindow + QStackedWidget navigation (window.py, capture.py, output.py, lifecycle.py …)
 │   ├── system_tray_qt.py       # Qt system tray + notifications
 │   ├── components/             # Reusable widgets (header, monitoring panel, status indicator)
 │   ├── panels/                 # Pages (layout only) — monitoring, capture, output, overlays, timelapse, logs
 │   ├── controllers/            # Business logic — capture, output, overlay, timelapse, ML prediction
-│   └── theme/                  # colors.py, styles.py
+│   └── theme/                  # tokens.py, styles.py, accent_themes.py, icons.py
 ├── services/                   # Core processing modules
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
 │   ├── config_defaults.py      # DEFAULT_CONFIG + DEFAULT_CAMERA_PROFILE (data only)
+│   ├── utils_paths.py          # get_app_data_dir() — per-platform app-data root; resource paths
+│   ├── app_config.py           # App identity constants + canonical calibration paths
 │   ├── logger.py               # Thread-safe queue logger (app_logger singleton)
 │   ├── processor.py            # Image overlay engine — dual input: PIL Image OR file path
 │   ├── watcher.py              # watchdog FileSystemEventHandler
-│   ├── zwo_camera.py           # ZWO ASI SDK wrapper, BGGR debayer, auto-exposure
-│   ├── camera_connection.py    # SDK init, detection, USB reconnect
-│   ├── camera_calibration.py   # Auto-exposure algorithms
-│   ├── camera_utils.py         # Shared camera utilities
+│   ├── camera/                 # ZWO subpackage — zwo_camera.py (SDK wrapper, BGGR debayer, auto-exposure),
+│   │                             camera_connection.py (SDK init, detection, USB reconnect),
+│   │                             camera_calibration.py, camera_utils.py
 │   ├── cleanup.py              # Disk space management (files only, never folders)
 │   ├── gc_scheduler.py         # GUI-thread cyclic GC (automatic GC off, QTimer-driven)
 │   ├── discord_alerts.py       # Discord webhook client
@@ -52,7 +53,10 @@ PFRSentinel/
 │   ├── ffmpeg_utils.py         # Shared ffmpeg detection
 │   ├── diagnostics_bundle.py   # Support ZIP: logs + redacted config + frames (pure)
 │   ├── raw_frame_export.py     # Cached frame → Bayer FITS + unprocessed PNG + JSON
-│   └── allsky/                 # All-sky fisheye calibration + overlay
+│   ├── allsky/                 # All-sky fisheye calibration + overlay
+│   ├── meteor/                 # Meteor detection — see METEOR_DETECTION_PLAN.md
+│   ├── library/                # Image library index, sessions, retention
+│   └── notifications/          # Notification dispatcher + backends (Discord, Hermes)
 ├── ml/                         # Scene classifiers (roof, sky conditions, stars, moon) — ONNX inference
 ├── tests/                      # pytest suite — see "Testing" below
 ├── docs/                       # Plans, design docs, references
@@ -60,7 +64,6 @@ PFRSentinel/
 ├── nina-plugin/                # NINA plugin (C#/.NET 8 + WPF) — see below
 ├── installer/                  # Inno Setup packaging
 ├── main.py                     # Entry point
-├── app_config.py               # %APPDATA%\PFRSentinel path resolver, handles migration
 └── version.py                  # __version__
 ```
 
@@ -68,7 +71,7 @@ PFRSentinel/
 
 ### Data flow
 - **Watch mode**: `watcher.py` → file stable → parse sidecar → `processor.py` → `_push_to_output_servers()`
-- **Camera mode**: `zwo_camera.py` → debayer → PIL Image + metadata → `capture_controller.py` → `processor.py` → outputs
+- **Camera mode**: `camera/zwo_camera.py` → debayer → PIL Image + metadata → `camera_controller.py` → `processor.py` → outputs
 
 ### Threading
 - Camera capture, watcher observer, Discord poster, and web server all run on background threads.
@@ -88,7 +91,8 @@ Standard: `{CAMERA}`, `{EXPOSURE}`, `{GAIN}`, `{TEMP}`, `{RES}`, `{FILENAME}`, `
 Weather (requires `weather.api_key` + `weather.location` in config): `{WEATHER}`, `{WEATHER_ICON}`, `{TEMP}`, `{HUMIDITY}`, `{PRESSURE}`, `{WIND_SPEED}`
 
 ### Config
-- Lives in `%APPDATA%\PFRSentinel\config.json` — always resolve via `app_config.get_config_dir()`.
+- Lives at `<app-data root>/config.json`. Always resolve the root through `services.utils_paths.get_app_data_dir()` — never build a platform path or read `LOCALAPPDATA` / `APPDATA` yourself.
+- The root is per-platform (illustrative — the helper is the source of truth): `%LOCALAPPDATA%\PFRSentinel` on Windows, `~/Library/Application Support/PFRSentinel` on macOS, `~/.local/share/PFRSentinel` on Linux. Logs sit at `<app-data root>/logs` on every platform.
 - Loaded with a merge-against-`DEFAULT_CONFIG` pattern, so new keys land safely on old configs.
 - Keys are nested. Output flags live under `output_config.*`, camera settings under `camera_profiles[<clean_name>]`.
 
@@ -113,7 +117,7 @@ Detailed conventions are split by file type and live in `.claude/rules/`. **Read
 | `ui/panels/**` | [`.claude/rules/ui-panels.md`](.claude/rules/ui-panels.md) — UI only, no business logic |
 | `ui/controllers/**` | [`.claude/rules/ui-controllers.md`](.claude/rules/ui-controllers.md) — threading, signals/slots |
 | `services/**` | [`.claude/rules/services.md`](.claude/rules/services.md) — config, cleanup, processing pipeline order |
-| `services/zwo_camera.py`, `services/camera_*.py` | [`.claude/rules/services-camera.md`](.claude/rules/services-camera.md) — BGGR debayer, exposure units, disconnect cleanup, per-camera profiles |
+| `services/camera/**` | [`.claude/rules/services-camera.md`](.claude/rules/services-camera.md) — BGGR debayer, exposure units, disconnect cleanup, per-camera profiles |
 | `services/allsky/**` | [`.claude/rules/allsky.md`](.claude/rules/allsky.md) — calibration, coordinate frames |
 | `tests/**` | [`.claude/rules/tests.md`](.claude/rules/tests.md) — pytest markers, fixtures |
 | `ml/**` | [`.claude/rules/ml.md`](.claude/rules/ml.md) — ONNX inference conventions |

@@ -13,6 +13,7 @@ import faulthandler
 import sys
 import os
 import argparse
+import platform
 import threading
 import traceback
 
@@ -85,13 +86,16 @@ def _install_crash_handlers():
 
 
 def _check_admin_privileges():
-    """Check if running with Administrator privileges and log appropriately."""
+    """Check for elevated privileges and log platform-appropriate guidance."""
+    if sys.platform != 'win32':
+        return _check_root_privileges()
+
     try:
         import ctypes
         is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
         is_admin = False
-    
+
     if is_admin:
         app_logger.info("Running with Administrator privileges")
     else:
@@ -100,6 +104,48 @@ def _check_admin_privileges():
             "will not be available. To enable full camera recovery, run as Administrator."
         )
     return is_admin
+
+
+def _check_root_privileges():
+    """Report the real euid on macOS/Linux without advising elevation.
+
+    USB disable/enable recovery is a Windows Device Manager feature, so root
+    buys nothing here; ZWO camera access on Linux comes from the udev rule
+    shipped with the SDK, not from running the GUI as root.
+    """
+    try:
+        is_root = os.geteuid() == 0
+    except Exception:
+        return False
+
+    if is_root:
+        app_logger.warning(
+            "Running as root - not recommended. Camera access should come from "
+            "the ZWO udev rule, not elevated privileges."
+        )
+    else:
+        app_logger.info(
+            "Running as a normal user - USB disable/enable recovery is Windows-only."
+        )
+    return is_root
+
+
+def _platform_name():
+    """Value for the PostHog `os` person property.
+
+    Windows must keep returning exactly 'Windows' — existing dashboards and
+    saved queries filter on that literal, which was hardcoded before the
+    cross-platform port.
+    """
+    if sys.platform == 'win32':
+        return 'Windows'
+    try:
+        name = platform.system()
+    except Exception:
+        return 'Unknown'
+    if name == 'Darwin':
+        return 'macOS'
+    return name or 'Unknown'
 
 
 def main():
@@ -221,7 +267,7 @@ def main():
         _did = get_distinct_id()
         posthog.set_once(distinct_id=_did, properties={
             'first_seen_version': __version__,
-            'os': 'Windows',
+            'os': _platform_name(),
         })
         posthog.set(distinct_id=_did, properties={
             'app_version': __version__,

@@ -6,6 +6,8 @@ import os
 import sys
 import tempfile
 
+from platformdirs import user_data_dir
+
 # Import app configuration for centralized naming
 try:
     from .app_config import APP_DATA_FOLDER
@@ -38,22 +40,28 @@ def get_app_data_dir():
     Get application data directory (for logs, user config, etc.)
 
     Returns:
-        Path to %LOCALAPPDATA%\{APP_DATA_FOLDER} (Windows)
+        Windows: %LOCALAPPDATA%\{APP_DATA_FOLDER}
+        macOS:   ~/Library/Application Support/{APP_DATA_FOLDER}
+        Linux:   ~/.local/share/{APP_DATA_FOLDER} (honours $XDG_DATA_HOME)
     """
-    if sys.platform == 'win32':
-        # Use LOCALAPPDATA on Windows
-        local_app_data = os.environ.get('LOCALAPPDATA')
-        if not local_app_data:
-            # Fallback to APPDATA if LOCALAPPDATA not available
-            local_app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
+    # Windows reads the LOCALAPPDATA environment variable first, exactly as
+    # this function always has: platformdirs resolves the known folder through
+    # SHGetKnownFolderPath and ignores that variable, so rigs that relocated
+    # AppData by setting it would silently come up with an empty data root —
+    # no config, no camera profiles, no all-sky calibration. platformdirs is
+    # the fallback, and the only path off Windows.
+    local_app_data = os.environ.get('LOCALAPPDATA') if sys.platform == 'win32' else None
+    if local_app_data:
         app_dir = os.path.join(local_app_data, APP_DATA_FOLDER)
     else:
-        # Fallback for other platforms (though this is Windows-focused)
-        app_dir = os.path.join(os.path.expanduser('~'), f'.{APP_DATA_FOLDER}')
+        # appauthor=False is load-bearing: platformdirs otherwise falls back to
+        # `appauthor or appname` on Windows and returns
+        # %LOCALAPPDATA%\PFRSentinel\PFRSentinel, orphaning every existing config.
+        app_dir = user_data_dir(APP_DATA_FOLDER, appauthor=False)
 
     # Create directory if it doesn't exist. In sandboxed/dev environments the
-    # home fallback may be read-only; use the temp directory rather than failing
-    # module import. Windows production still uses %LOCALAPPDATA%.
+    # home directory may be read-only; use the temp directory rather than
+    # failing module import.
     try:
         os.makedirs(app_dir, exist_ok=True)
     except PermissionError:
@@ -68,9 +76,12 @@ def get_log_dir():
     Get log directory path
 
     Returns:
-        Path to %LOCALAPPDATA%\{APP_DATA_FOLDER}\Logs
+        Path to <app data dir>/logs
     """
-    log_dir = os.path.join(get_app_data_dir(), 'Logs')
+    # Lowercase 'logs', and built by hand rather than via
+    # platformdirs.user_log_dir: that helper appends 'Logs' on Windows and
+    # redirects to ~/Library/Logs on macOS, re-splitting the single root.
+    log_dir = os.path.join(get_app_data_dir(), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
 
@@ -80,7 +91,7 @@ def get_ml_contribution_dir():
     Get ML data contribution directory path.
 
     Returns:
-        Path to %LOCALAPPDATA%\{APP_DATA_FOLDER}\ml_contribution
+        Path to <app data dir>/ml_contribution
     """
     ml_dir = os.path.join(get_app_data_dir(), 'ml_contribution')
     os.makedirs(ml_dir, exist_ok=True)

@@ -18,23 +18,24 @@ You review **diffs against `main`** for correctness, threading safety, and archi
    - Files in `ui/panels/` should not import `requests`, `threading`, `subprocess`, `cv2.cvtColor`, `cv2.imread`, etc. Display-scaling `numpy` is OK.
    - Business logic in panels = relocate to `ui/controllers/`.
 
-3. **ZWO camera correctness** (if `services/zwo_camera.py` or `services/camera_*.py` changed)
+3. **ZWO camera correctness** (if `services/camera/**` changed — `zwo_camera.py`, `camera_connection.py`, etc. live in that subpackage)
    - Bayer pattern must be `COLOR_BayerBG2RGB` (BGGR), NOT RGGB.
    - Exposure unit conversion (ms ↔ s) at SDK boundary only.
-   - Disconnect/cleanup: `__del__`, `__enter__/__exit__`, and `_cleanup_lock` must all still be present. `stop_capture()` thread-join timeout must be 10s.
+   - Disconnect/cleanup: `__del__`, `__enter__/__exit__`, and `_cleanup_lock` must all still be present. `stop_capture()` aborts the exposure and any running calibration, then joins with a **3s** timeout — the aborts are what make the short join safe.
    - Per-camera profiles keyed by **clean camera name** (no index suffix). Missing keys must fall back to global, not crash.
    - Auto-exposure: target brightness 100, ±30% adjustment in 80–120 band. Flag any drift from these constants.
 
 4. **Config access**
    - All reads/writes via `services.config`. No direct `config.json` manipulation.
    - Nested keys (`output_config.get('webserver_enabled')`), not flat.
-   - Paths via `app_config.get_config_dir()`, not hardcoded `%APPDATA%`.
+   - App-data paths via `services.utils_paths.get_app_data_dir()`, never a hardcoded platform path and never a direct `LOCALAPPDATA` / `APPDATA` read — the root differs per platform.
 
 5. **Cleanup safety**
    - `cleanup.py` modifications must preserve the `os.path.isfile()` check. Folder deletion is forbidden.
 
 6. **Processing pipeline order**
-   - In `services/processor.py`: resize must happen **before** overlays. Resize filter stays `LANCZOS`. New outputs go through `_push_to_output_servers()`, not direct calls.
+   - In `services/processor.py`: resize must happen **before** overlays. Resize filter stays `LANCZOS`.
+   - Output dispatch is centralised in `_push_to_output_servers()` in `ui/main_window/output.py`. New outputs go there, not as direct calls from the processor.
    - Output filename patterns exclude the extension (set via Format dropdown). Flag any pattern containing `.jpg`/`.png`/etc.
 
 7. **All-sky calibration** (if `services/allsky/**` changed)

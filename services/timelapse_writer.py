@@ -15,6 +15,7 @@ from PIL import Image
 import numpy as np
 
 from .logger import app_logger
+from .utils_paths import get_app_data_dir
 from .ffmpeg_utils import is_ffmpeg_available, get_ffmpeg_path
 from .timelapse_finalizer import finalize_session, finalize_in_background, reap_in_background
 from .timelapse_frame_pump import FramePump
@@ -603,10 +604,7 @@ class TimelapseWriter:
         """
         output_dir = self._config.get('output_dir', '')
         if not output_dir:
-            from services.app_config import APP_DATA_FOLDER
-            output_dir = os.path.join(
-                os.getenv('LOCALAPPDATA', ''), APP_DATA_FOLDER, 'timelapse'
-            )
+            output_dir = os.path.join(get_app_data_dir(), 'timelapse')
         date_str = now.strftime('%Y%m%d')
         base = os.path.join(output_dir, f'timelapse_{date_str}.mp4')
         if not os.path.exists(base):

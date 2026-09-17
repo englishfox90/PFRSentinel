@@ -1,5 +1,5 @@
 ---
-globs: "services/zwo_camera.py,services/camera_*.py"
+globs: "services/camera/**/*.py,services/camera_profiles.py"
 description: ZWO ASI camera hardware constraints — easy to get wrong
 ---
 

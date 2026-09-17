@@ -26,6 +26,7 @@ from PIL import Image
 from PySide6.QtCore import QObject, Signal, QTimer
 
 from services.logger import app_logger
+from services.utils_paths import get_app_data_dir
 from services.meteor.detection_scale import DetectionScale, make_scale
 from services.meteor.diagnostics import MeteorDiagnostics
 from services.meteor.frame_stack import FrameStack
@@ -616,8 +617,7 @@ class MeteorController(QObject):
         return os.path.join(self._appdata_dir(), "meteor_thumbnails")
 
     def _appdata_dir(self) -> str:
-        from services.app_config import APP_DATA_FOLDER
-        return os.path.join(os.getenv("LOCALAPPDATA", ""), APP_DATA_FOLDER)
+        return get_app_data_dir()
 
     @staticmethod
     def _delete_file(path: str):

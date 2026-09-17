@@ -244,26 +244,26 @@ C:\Users\John\AppData\Local\ASIOverlayWatchDog\Logs\watchdog.log
 
 ## Troubleshooting
 
-### Build Fails - "ModuleNotFoundError: No module named 'ttkbootstrap'"
+### Build Fails - "ModuleNotFoundError" for a project dependency
 
-**Cause**: Building from system Python instead of virtual environment.
+**Cause**: Building from system Python instead of the virtual environment.
 
 **Solution**:
 ```batch
 # ALWAYS activate venv before building
 .\venv\Scripts\Activate.ps1
 
-# Verify ttkbootstrap is installed
-pip show ttkbootstrap
+# Verify the missing package is installed (e.g. PySide6)
+pip show PySide6
 
 # If not installed:
 pip install -r requirements.txt
 
 # Then rebuild
-pyinstaller --clean ASIOverlayWatchDog.spec
+pyinstaller --clean PFRSentinel.spec
 ```
 
-The build scripts (`build_exe.bat` and `build_installer.bat`) automatically activate the venv, so use those instead of running PyInstaller directly.
+The build scripts (`build_sentinel.bat` and `build_sentinel_installer.bat`) automatically activate the venv, so use those instead of running PyInstaller directly.
 
 ### Build Fails - Missing Dependencies
 ```batch
@@ -301,10 +301,13 @@ pip install pyinstaller
 - **Bundled Files**:
   - `ASICamera2.dll` - ZWO SDK
   - `version.py` - Version info
-  - ttkbootstrap data files (themes)
+  - `assets/` - App icons
+  - `ml/models/*.onnx` - ONNX classifiers
+  - `star_data/` - All-sky catalogue data
+  - `scripts/nina/` - NINA helper scripts (shipped loose, not frozen)
 
 ### Customization
-Edit `ASIOverlayWatchDog.spec` to:
+Edit `PFRSentinel.spec` to:
 - Add icon: `icon='path/to/icon.ico'`
 - Include additional data files
 - Adjust hidden imports
