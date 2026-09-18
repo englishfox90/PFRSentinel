@@ -70,6 +70,8 @@ from .calibration_validate import (
     validate_lens_polynomial,
     tol_scale,
 )
+from .chance_matches import check_above_chance
+from .bootstrap_selection import chance_excess, select_bootstrap_winner
 
 
 # ---------------------------------------------------------------------------
@@ -256,13 +258,13 @@ def refine_from_detections(
         )
 
     # --- Cold start: fit EVERY coarse orientation candidate through the joint
-    # fit + gates, then pick the one that retained the most matches. A correct
-    # orientation matches far more stars across frames than a degenerate basin
-    # that survives on coincidental alignments, so match count is the
-    # discriminator (returning merely the first that passes can lock onto a
-    # degenerate basin that happens to clear the gate). ---
+    # fit + gates, then pick a winner. Raw match count is NOT the
+    # discriminator: on a high-resolution rig the greedy matcher returns
+    # near-identical counts for every orientation (issue #33), so ranking by it
+    # chooses between contradictory basins at random. See bootstrap_selection
+    # for the ordering that replaced it. ---
     candidates = _coarse_orientation_candidates(frames, east_left_hint=east_left_hint)
-    passed = []   # (n_matches, model)
+    passed = []
     last_err = None
     for i, seed in enumerate(candidates):
         try:
@@ -270,9 +272,10 @@ def refine_from_detections(
                 frames, seed, min_matches_per_image,
                 min_total_matches, max_residual_px,
             )
-            passed.append((model.n_matches, model))
+            passed.append(model)
             log.info(f"Bootstrap candidate {i + 1}/{len(candidates)} passed: "
-                     f"n_matches={model.n_matches}, rms={model.rms_residual:.1f}px")
+                     f"n_matches={model.n_matches}, rms={model.rms_residual:.1f}px, "
+                     f"excess over chance={chance_excess(model):.0f}")
         except CalibrationError as e:
             last_err = e
             log.info(f"Bootstrap candidate {i + 1}/{len(candidates)} rejected: {e}")
@@ -283,10 +286,10 @@ def refine_from_detections(
             f"({last_err})."
         )
 
-    passed.sort(key=lambda t: -t[0])
-    best = passed[0][1]
+    best, why = select_bootstrap_winner(passed, frames)
     log.info(f"Cold-start bootstrap: selected best of {len(passed)} passing "
-             f"candidate(s) by match count (n_matches={best.n_matches})")
+             f"candidate(s) by excess over chance, then bright-anchor hits "
+             f"({why})")
     return best
 
 
@@ -332,6 +335,23 @@ def _fit_and_validate(
             f"Refinement matched only {model.n_matches} stars "
             f"(need >= {min_total_matches}) — likely a degenerate or wrong "
             "orientation."
+        )
+
+    # The floor above is absolute; this one is relative to what the greedy
+    # matcher hands out for free. On a high-resolution rig the tolerance disc
+    # covers enough of the sky that a wrong basin clears any fixed floor on
+    # coincidence alone (issue #33: ~686 matches at RMS 10.86px for every
+    # orientation between 60 and 90°, against 619 expected by chance).
+    chance_ok, chance_msg, est = check_above_chance(
+        model.n_matches, frames, model,
+        getattr(model, 'final_tol_px', 18.0 * _ts),
+        min_per_image=min_matches_per_image,
+    )
+    model.chance_expected = est.expected
+    if not chance_ok:
+        raise CalibrationError(
+            f"Refinement is at chance level: {chance_msg} — the match count "
+            "carries no orientation information at this resolution."
         )
 
     # Sanity checks — multi-image fits over a short span (minutes) can
@@ -583,6 +603,12 @@ def _joint_iterative_fit(
         max_vmag=_ANCH_MAX_VMAG, _log=False,
     )
 
+    # Tolerance `all_matches` currently reflects. Tracked rather than recomputed
+    # by the caller because the loop can break early (converged, or a failed
+    # least_squares), and the chance-match gate must be judged at the tolerance
+    # the surviving matches were actually built at.
+    final_tol = 50.0 * tol_scale_factor
+
     for iteration in range(10):
         params = np.array([
             model.cx, model.cy, model.a1, model.a3, model.a5,
@@ -656,6 +682,7 @@ def _joint_iterative_fit(
         # the match set populated so correct fits survive and degenerate ones
         # are still distinguished by far lower counts.
         tol = tol_scale_factor * max(18.0, 50.0 - iteration * 5.0)
+        final_tol = tol
         all_matches = _build_all_matches(frames, model, tol_px=tol,
                                          min_per_image=min_per_image)
         # Rebuild anchor matches with updated model (fixed large tolerance)
@@ -679,6 +706,7 @@ def _joint_iterative_fit(
 
     model.n_matches    = total
     model.rms_residual = float(rms)
+    model.final_tol_px = float(final_tol)
     model.matched_stars = _collect_diagnostics(all_matches, model, frames)
     return model, rms
 
