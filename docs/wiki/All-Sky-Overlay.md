@@ -88,13 +88,17 @@ When **Calibrate Now** or **Guided Calibration** succeeds, a notification is pos
 
 | Badge | Description | Requirements |
 |-------|-------------|--------------|
-| None | Not calibrated | No calibration. The overlay is not drawn. |
+| None | Not calibrated | No calibration, so the overlay is not drawn. Also shown for a saved automatic fit over fewer than 8 matched stars: that overlay is still drawn, but the model is not trusted and any later calibration replaces it. |
 | Preliminary | Single image — rough overlay | Any accepted calibration that does not meet a higher level, such as a single-frame or guided calibration. |
 | Acceptable | Multi-image — improving | 3+ frames, 30+ matched stars, RMS 15 px or better. |
 | Good | Multi-image — accurate | 10+ frames, 100+ matched stars, RMS 12 px or better. |
 | Excellent | Long baseline — best accuracy | 20+ frames spanning 60+ minutes, RMS 8 px or better. |
 
 RMS is the typical distance, in pixels, between where matched stars appear and where the model predicts them. Lower is better.
+
+> **New in the next release** — not available in version 3.7.6 or earlier.
+>
+> A lens model has eight unknowns, so a fit over only a handful of stars can report a flattering RMS while being badly wrong. Automatic calibration now needs at least 8 matched stars to succeed at all, and a saved model below that is rated **Not calibrated** so a better one can replace it. Guided Calibration is unaffected — the stars there are ones you identified yourself, and five is enough.
 
 ### Automatic calibration
 
