@@ -62,7 +62,7 @@ PFRSentinel/
 │   └── notifications/          # Notification dispatcher + backends (Discord, Hermes)
 ├── ml/                         # Scene classifiers (roof, sky conditions, stars, moon) — ONNX inference
 ├── tests/                      # pytest suite — see "Testing" below
-├── docs/                       # Plans, design docs, references
+├── docs/                       # Plans, design docs, references; docs/wiki/ is the user wiki source
 ├── archive/                    # Legacy Tkinter GUI (do not modify)
 ├── nina-plugin/                # NINA plugin (C#/.NET 8 + WPF) — see below
 ├── installer/                  # Inno Setup packaging
@@ -259,6 +259,22 @@ Two traps in the Claude workflows, both of which fail **green**:
   passing `claude-review` check is not evidence a review happened — look for
   the comment.
 
+### User wiki
+
+The GitHub wiki is published from `docs/wiki/`, which is the source of truth — the
+wiki itself has no pull requests, so edits are reviewed here. `wiki-publish.yml`
+mirrors `docs/wiki/` to the wiki on every push to `main` that touches it, using the
+`WIKI_TOKEN` secret (a fine-grained token with Contents: Read and write;
+`GITHUB_TOKEN` cannot push to a wiki). It refuses to run if the wiki was edited
+in the browser since the last sync, so copy such edits into `docs/wiki/` first.
+`claude-wiki-update.yml` chains off Tag Pushed and opens a PR updating `docs/wiki/`
+for what changed since the previous tag, branched from the tag so it documents
+the code that shipped. **Merging that PR publishes the wiki** — merge it when
+the release is published. When a change alters something users see, update the
+matching `docs/wiki/` page in the same PR — it goes live when the PR merges, so put
+`> **New in the next release** — not available in version X.Y.Z or earlier.`
+under the heading; the tag-time agent removes those notes once the feature ships.
+
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
@@ -325,7 +341,7 @@ Standalone (not in pytest suite):
 - [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
 - [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
 
-Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki.
+Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
