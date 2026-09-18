@@ -181,6 +181,11 @@ class CalibrationService(QObject):
             )
             log.info(f"CalibrationService loaded model: {model}, "
                      f"quality={self._quality}")
+            if self._quality == CalibrationQuality.NONE:
+                log.warning(
+                    f"CalibrationService: the saved model rests on only "
+                    f"{model.n_matches} matched stars and is not trusted — "
+                    "the next automatic or guided calibration replaces it")
 
     def clear_model(self) -> None:
         """Forget the current model (user-initiated reset).
