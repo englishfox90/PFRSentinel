@@ -41,10 +41,22 @@ Rules, in order:
    admitted having passed that same gate on those same frames. A model
    that cannot find the bright stars has no standing to veto on RMS one
    that can. Without this rule the guard below reads the incumbent's RMS
-   first and the escape can never land: on the #33 rig a single-image fit
-   to five stars (2.43 px, 8 parameters over 5 points) turned away a
-   726-match joint fit 41 times in one night. This does not reopen
-   2026-09-05 — that incumbent PASSED the anchor gate, so the escape was
+   first and the escape never reaches the question of the candidate's own
+   merit: on the #33 rig a single-image fit to five stars (2.43 px, 8
+   parameters over 5 points) turned away a 726-match joint fit 41 times in
+   one night, on a residual that was interpolation rather than
+   measurement. What this rule removes is that veto — not the scrutiny,
+   and not as a verdict that the #33 candidate deserved to be installed.
+   It did not: 10.96 px over 726 matches is exactly chance on that rig
+   (the 15.5 px final tolerance / sqrt(2), and ~10.35 chance matches per
+   frame over 53 frames is ~549 expected, so 726 is 1.3x chance), and
+   multi_calibrate's chance gate now judges it on its merit and rejects it
+   before should_replace is ever asked — the escape backs off and the user
+   is pointed at Guided Calibration. Rule 3 is for the rig where a
+   candidate is genuinely informative: one that clears the chance gate AND
+   hits the bright anchors on the recent frames must not be held off by
+   the RMS of a thin or wrong incumbent that misses them. This does not
+   reopen 2026-09-05 — that incumbent PASSED the anchor gate, so the escape was
    cancelled before any candidate existed. Anchor health is tri-state: an
    obstructed or cloudy buffer reports None, which is not a failure and
    changes nothing here.
