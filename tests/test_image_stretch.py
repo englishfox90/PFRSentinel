@@ -320,3 +320,46 @@ def test_0_02_target_gives_a_darker_sky_than_the_old_floor():
     new_floor = auto_stretch_image(_as_pil(raw), _config(target_median=0.02), raw_16bit=raw.copy())
 
     assert _luminance_median(new_floor) < _luminance_median(old_floor) * 0.6
+
+
+# --- Skip guard must not follow the target below the old floor ------------
+# A frame whose median is ~0.13 (moonlit / twilight sky, lit pier) was still
+# stretched *down* by a 0.05 target; a 0.02 target must not skip it.
+
+def twilight_frame(height, width, seed=6):
+    rng = np.random.default_rng(seed)
+    return rng.normal(8500, 400, (height, width, 3)).clip(0, 65535).astype(np.uint16)
+
+
+def test_skip_guard_floor_matches_the_old_engine_minimum():
+    assert stretch.SKIP_GUARD_TARGET_FLOOR == 0.05
+
+
+def test_low_target_still_stretches_a_twilight_frame():
+    raw = twilight_frame(64, 64)
+    img = _as_pil(raw)
+    assert 0.12 < _luminance_median(img) < 0.14
+
+    out = auto_stretch_image(img, _config(target_median=0.02), raw_16bit=raw)
+
+    assert out is not img
+    assert _luminance_median(out) < 0.05
+
+
+def test_output_median_is_monotonic_in_target_median():
+    raw = twilight_frame(64, 64)
+    medians = [
+        _luminance_median(auto_stretch_image(_as_pil(raw), _config(target_median=t), raw_16bit=raw.copy()))
+        for t in (0.02, 0.05, 0.10, 0.25)
+    ]
+
+    assert medians == sorted(medians)
+
+
+def test_bright_frame_is_still_skipped_below_the_old_floor():
+    """Targets at or below 0.05 keep the v3.7.1 skip threshold of 0.15."""
+    raw = midtone_frame(64, 64)
+    img = _as_pil(raw)
+    assert _luminance_median(img) > 0.15
+
+    assert auto_stretch_image(img, _config(target_median=0.02), raw_16bit=raw) is img

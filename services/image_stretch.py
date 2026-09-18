@@ -4,6 +4,11 @@ from PIL import Image
 from .logger import app_logger
 
 TARGET_MEDIAN_MIN = 0.02
+# The "already bright, skip" guard sits 0.1 above the target, floored at the
+# old 0.05 minimum. Deriving it from a 0.02 target would skip a 0.13-median
+# twilight frame that 0.05 still stretched down, so the darkest slider
+# positions would give the brightest output.
+SKIP_GUARD_TARGET_FLOOR = 0.05
 
 
 def mtf_stretch(value, midtone):
@@ -119,8 +124,9 @@ def auto_stretch_image(img, config, raw_16bit=None):
                     0.299 * img_array[:,:,0] + 0.587 * img_array[:,:,1] + 0.114 * img_array[:,:,2]
                 )
 
-        if current_brightness > target_median + 0.1:
-            app_logger.debug(f"Auto-stretch skipped ({bit_depth_str}): image already bright (median={current_brightness:.3f} > target={target_median:.3f})")
+        skip_above = max(target_median, SKIP_GUARD_TARGET_FLOOR) + 0.1
+        if current_brightness > skip_above:
+            app_logger.debug(f"Auto-stretch skipped ({bit_depth_str}): image already bright (median={current_brightness:.3f} > {skip_above:.3f}, target={target_median:.3f})")
             return img
 
         app_logger.debug(f"Auto-stretch starting ({bit_depth_str}): current_median={current_brightness:.3f}, target={target_median:.3f}, preserve_blacks={preserve_blacks}")
