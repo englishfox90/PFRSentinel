@@ -48,6 +48,15 @@ Rules, in order:
    cancelled before any candidate existed. Anchor health is tri-state: an
    obstructed or cloudy buffer reports None, which is not a failure and
    changes nothing here.
+   A GUIDED incumbent is excluded from this rule. It carries no rank and no
+   RMS check of any kind, so applied to a human-anchored model it would let
+   a 19 px 'preliminary' escape over 40 matches overwrite a 2.40 px guided
+   solve — and a guided basin outranks even the measured pole
+   (.claude/rules/allsky.md). The anchor gate is also the weakest evidence
+   against such a model: it is projected from the same clicked anchors, so a
+   partly obstructed or hazy horizon can fail it without the basin being
+   wrong. A guided incumbent that fails the gate still falls through to rule
+   4, where a genuine rank upgrade lets a joint fit supersede it.
 4. Guided single-solve incumbent vs a multi-image candidate: rank only. The
    guided solve's RMS is over a handful of clicked anchors, a joint fit's is
    over thousands of matches across the sky — not comparable — and the
@@ -107,7 +116,8 @@ def should_replace(
     escape; `evidence`: model_admission.admission_evidence for its admission;
     `incumbent_failed_anchors`: the incumbent failed the bright-anchor gate on
     the frames that licensed the escape (incumbent_evidence, tri-state — only
-    a definite failure counts).
+    a definite failure counts, and it buys nothing against a guided
+    incumbent).
     """
     if incumbent is None:
         return True, "no incumbent"
@@ -119,7 +129,7 @@ def should_replace(
             f"with the re-calibrated one (RMS {candidate.rms_residual:.1f}px) "
             "without the RMS guard")
 
-    if escape and incumbent_failed_anchors:
+    if escape and incumbent_failed_anchors and not is_guided(incumbent):
         return True, (
             "basin escape over a model that fails the bright-anchor check on "
             f"the recent frames (RMS {incumbent.rms_residual:.2f}px over "

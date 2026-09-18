@@ -595,6 +595,54 @@ class TestCalibrationError:
                           dt=datetime(2026, 1, 1, 22, 0, tzinfo=timezone.utc),
                           min_matches=8)
 
+    def test_triangle_fit_with_too_few_matches_raises(self, monkeypatch):
+        """Mirrors #33 for the triangle-hash fallback (calibrate() closed this
+        hole for the grid-search path in 8829083, but triangle_calibrate()
+        never rechecked n_matches after its own _iterative_fit): the
+        hypothesis search can clear min_matches before refinement, but a fit
+        that ENDS below the floor must still raise rather than be returned."""
+        pytest.importorskip('scipy')
+        from datetime import datetime, timezone
+        from services.allsky import triangle_match as tm
+
+        stars = [
+            {'name': f'S{i}', 'vmag': 1.0 + i,
+             'ra_deg': 10.0 * i, 'dec_deg': 40.0 + i}
+            for i in range(6)
+        ]
+        detected = [(960.0 + 40 * i, 540.0 + 30 * i, 200.0) for i in range(6)]
+        above_horizon = [(stars[i], 80.0 - 6.0 * i, 30.0 * i) for i in range(6)]
+
+        seed = FisheyeModel(cx=960.0, cy=540.0, a1=600.0)
+        seed_matches = [
+            ((detected[i][0], detected[i][1]), stars[i],
+             (above_horizon[i][1], above_horizon[i][2]))
+            for i in range(6)
+        ]
+        # Hypothesis search clears min_matches (6 >= 5 requested below).
+        monkeypatch.setattr(
+            tm, '_generate_and_score',
+            lambda *a, **kw: (seed, len(seed_matches), list(seed_matches), 1e-6),
+        )
+
+        # The refined fit drops to 4 matches — below the floor — while
+        # reporting a flattering RMS, exactly the #33 shape.
+        fit_model = FisheyeModel(cx=960.0, cy=540.0, a1=600.0)
+        fit_model.n_matches = 4
+        monkeypatch.setattr(
+            tm, '_iterative_fit',
+            lambda *a, **kw: (fit_model, 2.0),
+        )
+
+        with pytest.raises(tm.CalibrationError, match=r'matched only 4'):
+            tm.triangle_calibrate(
+                image=None, lat_deg=51.5, lon_deg=-0.1,
+                dt=datetime(2026, 1, 1, 22, 0, tzinfo=timezone.utc),
+                detected=detected, above_horizon=above_horizon,
+                sky_cx=960.0, sky_cy=540.0, sky_radius=500.0,
+                min_matches=5,
+            )
+
     def test_synthetic_bright_stars(self):
         """
         Plant synthetic Gaussian star blobs at known pixel positions and verify

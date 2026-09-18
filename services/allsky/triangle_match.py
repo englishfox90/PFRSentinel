@@ -576,6 +576,16 @@ def triangle_calibrate(
                  f"east_left={model.east_left}, a1={model.a1:.1f}, rms={rms:.1f}px")
         return model
 
+    # Same floor calibrate() enforces after its own _iterative_fit (#33): the
+    # hypothesis search can pass MIN_SCORE/min_matches before refinement, but
+    # the fit that comes out must still be corroborated by min_matches stars
+    # — the iterative fit can drop matches as it converges.
+    if model.n_matches < min_matches:
+        raise CalibrationError(
+            f"Triangle match: fit matched only {model.n_matches} stars "
+            f"(need >= {min_matches}) — too few to constrain the model."
+        )
+
     if rms > max_residual_px:
         raise CalibrationError(
             f"Triangle match: refined RMS {rms:.1f}px "
