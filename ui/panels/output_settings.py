@@ -10,9 +10,10 @@ from PySide6.QtCore import Qt, Signal
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel,
     PushButton, PrimaryPushButton, ComboBox, LineEdit,
-    SpinBox, DoubleSpinBox, SwitchButton,
+    SwitchButton,
     HyperlinkButton
 )
+from ..components.scroll_safe_spinbox import SpinBox, DoubleSpinBox
 from PySide6.QtGui import QColor
 
 import os

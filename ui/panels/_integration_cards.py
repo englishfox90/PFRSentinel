@@ -10,7 +10,9 @@ to `services.config`, same as every other card in output_settings.py.
 """
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
 from PySide6.QtGui import QColor
-from qfluentwidgets import CaptionLabel, PushButton, LineEdit, SpinBox, ColorPickerButton
+from qfluentwidgets import CaptionLabel, PushButton, LineEdit, ColorPickerButton
+
+from ..components.scroll_safe_spinbox import SpinBox
 
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi

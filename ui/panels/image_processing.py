@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel,
-    PushButton, ComboBox, SpinBox, DoubleSpinBox,
+    PushButton, ComboBox,
     SwitchButton, LineEdit, PrimaryPushButton
 )
 
@@ -19,6 +19,10 @@ from ..components.cards import SettingsCard, FormRow, SwitchRow, CollapsibleCard
 from .image_processing_ml import ImageProcessingMLSection
 from .output_crop_card import OutputCropCard
 from services.dev_mode_config import is_dev_mode_available
+from services.image_stretch import TARGET_MEDIAN_MIN
+
+# Slider units are target_median x 100, so the floor follows the engine's.
+TARGET_MEDIAN_SLIDER_MIN = round(TARGET_MEDIAN_MIN * 100)
 
 
 class ImageProcessingPanel(QScrollArea):
@@ -174,11 +178,14 @@ class ImageProcessingPanel(QScrollArea):
         target_row.setSpacing(Spacing.md)
 
         self.target_median_slider = ClickSlider(Qt.Horizontal)
-        self.target_median_slider.setRange(10, 50)
+        self.target_median_slider.setRange(TARGET_MEDIAN_SLIDER_MIN, 50)
         self.target_median_slider.setValue(25)
-        self.target_median_slider.setToolTip("Target median: 0.25")
+        self.target_median_slider.setToolTip(
+            "Brightness the stretch pulls the frame's median pixel to (0 = black, 1 = white).\n"
+            "When a pier or telescope fills the middle of the frame, that foreground is the\n"
+            "median and the sky lands several times higher, so go well below 0.10 for a dark sky."
+        )
         self.target_median_slider.valueChanged.connect(self._on_stretch_settings_changed)
-        self.target_median_slider.valueChanged.connect(lambda v: self.target_median_slider.setToolTip(f"Target median: {v/100.0:.2f}"))
         target_row.addWidget(self.target_median_slider, 1)
 
         self.target_median_label = BodyLabel("0.25")
@@ -188,7 +195,7 @@ class ImageProcessingPanel(QScrollArea):
 
         target_widget = QWidget()
         target_widget.setLayout(target_row)
-        stretch_card.add_row("Target Median", target_widget, "0.1 to 0.5")
+        stretch_card.add_row("Target Median", target_widget, "0.02 (darkest) to 0.5")
 
         self.linked_stretch_switch = SwitchRow(
             "Linked Channels",
@@ -211,7 +218,7 @@ class ImageProcessingPanel(QScrollArea):
             "Equalize R/G/B medians before stretch (fixes purple/magenta in dark images)"
         )
         self.normalize_channels_switch.set_checked(True)
-        self.normalize_channels_switch.toggled.connect(self._on_stretch_settings_changed)
+        self.normalize_channels_switch.toggled.connect(self._on_normalize_channels_changed)
         stretch_card.add_widget(self.normalize_channels_switch)
 
         threshold_row = QHBoxLayout()
@@ -220,9 +227,12 @@ class ImageProcessingPanel(QScrollArea):
         self.dark_threshold_slider = ClickSlider(Qt.Horizontal)
         self.dark_threshold_slider.setRange(1, 15)
         self.dark_threshold_slider.setValue(5)
-        self.dark_threshold_slider.setToolTip("Dark scene threshold: 0.05")
+        self.dark_threshold_slider.setToolTip(
+            "Only used by Dark Scene Color Fix: the fix runs when the frame's median is\n"
+            "below this value. It never changes brightness, so leave it unless the colour\n"
+            "fix is kicking in on frames that aren't dark."
+        )
         self.dark_threshold_slider.valueChanged.connect(self._on_stretch_settings_changed)
-        self.dark_threshold_slider.valueChanged.connect(lambda v: self.dark_threshold_slider.setToolTip(f"Dark scene threshold: {v/100.0:.2f}"))
         threshold_row.addWidget(self.dark_threshold_slider, 1)
 
         self.dark_threshold_label = BodyLabel("0.05")
@@ -232,7 +242,9 @@ class ImageProcessingPanel(QScrollArea):
 
         threshold_widget = QWidget()
         threshold_widget.setLayout(threshold_row)
-        stretch_card.add_row("Dark Threshold", threshold_widget, "Median below this enables color fix")
+        self.dark_threshold_row = stretch_card.add_row(
+            "Dark Threshold", threshold_widget, "Used by Dark Scene Color Fix only"
+        )
 
         shadow_row = QHBoxLayout()
         shadow_row.setSpacing(Spacing.md)
@@ -240,9 +252,12 @@ class ImageProcessingPanel(QScrollArea):
         self.shadow_slider = ClickSlider(Qt.Horizontal)
         self.shadow_slider.setRange(15, 40)
         self.shadow_slider.setValue(28)
-        self.shadow_slider.setToolTip("Shadow aggressiveness: 2.8")
+        self.shadow_slider.setToolTip(
+            "How far below the median the shadow clip sits, in MADs.\n"
+            "Lower clips more shadow, which drags the median down and makes the stretch lift\n"
+            "everything above it harder: a brighter sky. Higher clips less and keeps the sky dark."
+        )
         self.shadow_slider.valueChanged.connect(self._on_stretch_settings_changed)
-        self.shadow_slider.valueChanged.connect(lambda v: self.shadow_slider.setToolTip(f"Shadow aggressiveness: {v/10.0:.1f}"))
         shadow_row.addWidget(self.shadow_slider, 1)
 
         self.shadow_label = BodyLabel("2.8")
@@ -252,7 +267,7 @@ class ImageProcessingPanel(QScrollArea):
 
         shadow_widget = QWidget()
         shadow_widget.setLayout(shadow_row)
-        stretch_card.add_row("Shadow Aggressiveness", shadow_widget, "1.5 (aggressive) to 4.0 (gentle)")
+        stretch_card.add_row("Shadow Aggressiveness", shadow_widget, "Higher = darker sky (1.5 to 4.0)")
 
         boost_row = QHBoxLayout()
         boost_row.setSpacing(Spacing.md)
@@ -386,6 +401,10 @@ class ImageProcessingPanel(QScrollArea):
             stretch['enabled'] = checked
             self.main_window.config.set('auto_stretch', stretch)
             self.settings_changed.emit()
+
+    def _on_normalize_channels_changed(self, checked):
+        self.dark_threshold_row.setEnabled(checked)
+        self._on_stretch_settings_changed()
 
     def _on_stretch_settings_changed(self):
         self.target_median_label.setText(f"{self.target_median_slider.value() / 100:.2f}")
