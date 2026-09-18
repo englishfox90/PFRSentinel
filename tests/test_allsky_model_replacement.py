@@ -312,12 +312,15 @@ class TestGuidedIncumbentIsExemptFromTheAnchorRule:
 
 
 class TestAnchorFailureOutranksThe2026_09_05_Floor:
-    """The 2026-09-05 numbers DO replace once the incumbent definitely failed
-    the bright-anchor check — by design: three recent frames on which a
-    767-match model misses the bright stars is real evidence, not a 0.01 px
-    coin flip. The protection against that night no longer lives in this
-    module's material-gain floor; it lives in incumbent_evidence
-    .incumbent_anchor_health being strict about ever saying False."""
+    """Not a replay of 2026-09-05. That night's incumbent PASSED the anchor
+    gate, so the escape was cancelled before any candidate existed and the
+    material-gain floor below still refuses these numbers with the flag off.
+    With the flag ON the same numbers describe a different night: a
+    767-match model that definitely misses the bright stars on all three
+    recent frames while the candidate hits them. That is real evidence, not
+    a 0.01 px coin flip, and rule 3 replaces without an RMS comparison. The
+    guard against the 2026-09-05 case lives in incumbent_anchor_health being
+    strict about ever saying False (.claude/rules/allsky.md)."""
 
     # Review blocker 2: incumbent_anchor_health returns False only when the
     # whole recent window was testable and a majority failed. That night's
