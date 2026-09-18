@@ -12,8 +12,8 @@ from PySide6.QtCore import Qt, Signal, QTimer, QTime
 from qfluentwidgets import (
     CardWidget, BodyLabel, CaptionLabel,
     PushButton, PrimaryPushButton, ComboBox, LineEdit, TimePicker,
-    SpinBox
 )
+from ..components.scroll_safe_spinbox import SpinBox
 
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi

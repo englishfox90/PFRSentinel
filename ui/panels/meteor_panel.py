@@ -14,8 +14,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel,
-    PushButton, SpinBox, LineEdit, FluentIcon,
+    PushButton, LineEdit, FluentIcon,
 )
+from ..components.scroll_safe_spinbox import SpinBox
 
 from ..theme.tokens import Colors, Spacing, Layout
 from ..theme.icons import mdi

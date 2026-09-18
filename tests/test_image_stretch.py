@@ -281,3 +281,42 @@ def test_full_frame_peak_memory_and_runtime():
     assert new_time <= 1.5 * ref_time, (
         f"chunked run {new_time:.2f}s exceeds 1.5x the reference {ref_time:.2f}s"
     )
+
+
+# --- Target Median floor (issue #13) -------------------------------------
+# On an all-sky frame where the median pixel is the pier or telescope rather
+# than sky, the sky sits several times above the median; a 0.05 floor left it
+# at mid-grey however low the slider went.
+
+def _luminance_median(img):
+    arr = np.asarray(img.convert('RGB'), dtype=np.float32) / 255.0
+    lum = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+    return float(np.median(lum))
+
+
+def test_target_median_floor_is_0_02():
+    assert stretch.TARGET_MEDIAN_MIN == 0.02
+
+
+@pytest.mark.parametrize("target", [0.02, 0.03])
+def test_low_target_median_is_honoured(target):
+    raw = dark_sky_frame(64, 64)
+    out = auto_stretch_image(_as_pil(raw), _config(target_median=target), raw_16bit=raw)
+
+    assert abs(_luminance_median(out) - target) < 0.012
+
+
+def test_target_median_below_floor_clamps_to_floor():
+    raw = dark_sky_frame(64, 64)
+    at_floor = auto_stretch_image(_as_pil(raw), _config(target_median=0.02), raw_16bit=raw.copy())
+    below = auto_stretch_image(_as_pil(raw), _config(target_median=0.005), raw_16bit=raw.copy())
+
+    assert np.array_equal(np.asarray(at_floor), np.asarray(below))
+
+
+def test_0_02_target_gives_a_darker_sky_than_the_old_floor():
+    raw = dark_sky_frame(64, 64)
+    old_floor = auto_stretch_image(_as_pil(raw), _config(target_median=0.05), raw_16bit=raw.copy())
+    new_floor = auto_stretch_image(_as_pil(raw), _config(target_median=0.02), raw_16bit=raw.copy())
+
+    assert _luminance_median(new_floor) < _luminance_median(old_floor) * 0.6

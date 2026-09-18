@@ -6,7 +6,9 @@ come from ui/controllers/output_crop_controller.py through signals.
 """
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
 from PySide6.QtCore import Qt, Signal
-from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SpinBox, SwitchButton
+from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SwitchButton
+
+from ..components.scroll_safe_spinbox import SpinBox
 
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi

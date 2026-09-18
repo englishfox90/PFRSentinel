@@ -3,9 +3,9 @@ from PySide6.QtCore import Qt, Signal, QTime
 from qfluentwidgets import (
     BodyLabel, CaptionLabel,
     PushButton, ComboBox, LineEdit,
-    SpinBox, DoubleSpinBox,
     TimePicker
 )
+from ..components.scroll_safe_spinbox import SpinBox, DoubleSpinBox
 
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
@@ -227,12 +227,16 @@ class CameraSettingsWidget(QWidget):
         self.target_brightness_slider = ClickSlider(Qt.Horizontal)
         self.target_brightness_slider.setRange(20, 200)
         self.target_brightness_slider.setValue(100)
-        self.target_brightness_slider.setToolTip("Target image brightness: 100")
-        self.target_brightness_slider.valueChanged.connect(self._on_target_brightness_changed)
-        self.target_brightness_slider.valueChanged.connect(
-            lambda v: self.target_brightness_slider.setToolTip(f"Target image brightness: {v}")
+        self.target_brightness_slider.setToolTip(
+            "Raw-frame target for the auto-exposure loop (75th-percentile pixel, 0-255).\n"
+            "It only moves exposure, so it does nothing once exposure is pinned at Max Exposure\n"
+            "after dark. With Auto Stretch on, output brightness comes from Target Median, not here."
         )
-        auto_exp_layout.addWidget(FormRow("Target Brightness", self.target_brightness_slider, "20=dark, 200=bright"))
+        self.target_brightness_slider.valueChanged.connect(self._on_target_brightness_changed)
+        auto_exp_layout.addWidget(FormRow(
+            "Target Brightness", self.target_brightness_slider,
+            "Raw frame only (20 dark, 200 bright); output brightness is set by Auto Stretch",
+        ))
 
         self.max_exposure_spin = DoubleSpinBox()
         self.max_exposure_spin.setRange(0.1, 3600.0)
