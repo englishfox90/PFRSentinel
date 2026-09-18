@@ -558,42 +558,9 @@ class TestCalibrationError:
         with pytest.raises(CalibrationError, match="star"):
             calibrate(blank, lat_deg=51.5, lon_deg=-0.1, min_matches=20)
 
-    def test_fit_with_too_few_matches_raises(self, monkeypatch):
-        """Issue #33: the grid search may start from as few as
-        max(3, min_matches // 3) matches, but a fit that ENDS below
-        min_matches must raise rather than be saved — the reporter's rig
-        saved 8 free parameters fitted to 5 stars at a flattering 2.43px."""
-        pytest.importorskip('scipy')
-        from datetime import datetime, timezone
-        from PIL import Image as PILImage
-        from services.allsky import calibration as cal
-
-        rng = np.random.default_rng(7)
-        arr = np.zeros((1080, 1920), dtype=np.uint8)
-        for _ in range(30):
-            x, y = int(rng.integers(60, 1860)), int(rng.integers(60, 1020))
-            ys, xs = np.mgrid[y - 8:y + 9, x - 8:x + 9]
-            arr[ys, xs] = np.clip(
-                arr[ys, xs].astype(float)
-                + 220 * np.exp(-((xs - x) ** 2 + (ys - y) ** 2) / (2 * 2.5 ** 2)),
-                0, 255).astype(np.uint8)
-        image = PILImage.fromarray(arr, mode='L')
-
-        # Five matches: past the grid-search gate (3), short of min_matches (8).
-        seed = FisheyeModel(cx=960.0, cy=540.0, a1=600.0)
-        matches = [((960.0 + 40 * i, 540.0 + 30 * i),
-                    {'name': f'S{i}', 'vmag': 1.0 + i},
-                    (80.0 - 6.0 * i, 30.0 * i))
-                   for i in range(5)]
-        monkeypatch.setattr(cal, '_find_best_initial_model',
-                            lambda *a, **kw: (seed, list(matches)))
-        monkeypatch.setattr(cal, '_brightness_match',
-                            lambda *a, **kw: list(matches))
-
-        with pytest.raises(cal.CalibrationError, match=r'matched only 5'):
-            cal.calibrate(image, lat_deg=51.5, lon_deg=-0.1,
-                          dt=datetime(2026, 1, 1, 22, 0, tzinfo=timezone.utc),
-                          min_matches=8)
+    # A grid fit that ENDS below min_matches now falls through to the
+    # triangle-hash fallback (folded into the Step 6 sanity checks) instead
+    # of raising outright — see tests/test_allsky_calibration_floor.py.
 
     def test_triangle_fit_with_too_few_matches_raises(self, monkeypatch):
         """Mirrors #33 for the triangle-hash fallback (calibrate() closed this
