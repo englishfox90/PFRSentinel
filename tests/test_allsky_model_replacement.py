@@ -264,3 +264,73 @@ class TestIncomparableIncumbentRms:
         ok, why = _decide(inc, _m(**TestEscapeMaterialGain.ESCAPE),
                           escape=True, evidence=False)
         assert not ok and 'not a material improvement' in why
+
+
+class TestGuidedIncumbentIsExemptFromTheAnchorRule:
+    """Review blocker 1: rule 3 (basin escape over an anchor-failing
+    incumbent) applies no rank and no RMS check whatsoever, and it used to be
+    evaluated before the guided branch — so a 19 px 'preliminary' fit over 40
+    matches replaced a human-anchored 2.40 px solve. A guided model marks a
+    basin a person anchored; it outranks even the measured pole
+    (.claude/rules/allsky.md), and the anchor gate is the weakest thing that
+    could speak against it. Rule 3 now skips it and rule 4 (rank only)
+    decides."""
+    GUIDED = dict(rms=2.40, n_matches=9, n_images=1, span=0.0,
+                  provenance='guided')
+    ESCAPE = dict(rms=19.0, n_matches=40, n_images=3, span=20.0)
+
+    def test_the_reported_swap_is_refused(self):
+        ok, why = should_replace(_m(**self.GUIDED), 'good', _m(**self.ESCAPE),
+                                 'preliminary', escape=True, evidence=False,
+                                 incumbent_failed_anchors=True)
+        assert not ok and 'guided single solve' in why
+
+    def test_the_same_numbers_replace_an_unguided_incumbent(self):
+        """Nothing else about the case changed — only who drew the basin."""
+        unguided = {k: v for k, v in self.GUIDED.items() if k != 'provenance'}
+        ok, why = should_replace(_m(**unguided), 'good', _m(**self.ESCAPE),
+                                 'preliminary', escape=True, evidence=False,
+                                 incumbent_failed_anchors=True)
+        assert ok and 'does not get an RMS veto' in why
+
+    def test_a_better_ranked_joint_fit_still_supersedes_the_guided_solve(self):
+        """Rule 4 is not a lock: an anchor-failing guided single solve still
+        loses to a candidate that is genuinely better on rank."""
+        ok, why = _decide(_m(**self.GUIDED),
+                          _m(7.7, 4561, n_images=40, span=80.0),
+                          escape=True, evidence=False,
+                          incumbent_failed_anchors=True)
+        assert ok and 'guided single solve' in why
+
+    def test_an_escape_admitted_on_evidence_is_unaffected(self):
+        """Rule 2 sits above rule 3 and is untouched — model_admission has
+        already weighed the guided model by the time evidence is True."""
+        ok, _ = should_replace(_m(**self.GUIDED), 'good', _m(**self.ESCAPE),
+                               'preliminary', escape=True, evidence=True,
+                               incumbent_failed_anchors=True)
+        assert ok
+
+
+class TestAnchorFailureOutranksThe2026_09_05_Floor:
+    """The 2026-09-05 numbers DO replace once the incumbent definitely failed
+    the bright-anchor check — by design: three recent frames on which a
+    767-match model misses the bright stars is real evidence, not a 0.01 px
+    coin flip. The protection against that night no longer lives in this
+    module's material-gain floor; it lives in incumbent_evidence
+    .incumbent_anchor_health being strict about ever saying False."""
+
+    # Review blocker 2: incumbent_anchor_health returns False only when the
+    # whole recent window was testable and a majority failed. That night's
+    # incumbent PASSED the gate (the escape was cancelled before any
+    # candidate existed), and a cloudy 1-pass/1-fail buffer now reports None,
+    # which arrives here as incumbent_failed_anchors=False.
+    def test_the_incident_numbers_replace_only_on_a_definite_anchor_failure(self):
+        args = (_m(**TestEscapeMaterialGain.INCUMBENT),
+                _m(**TestEscapeMaterialGain.ESCAPE))
+        ok, why = _decide(*args, escape=True, evidence=False,
+                          incumbent_failed_anchors=True)
+        assert ok and 'does not get an RMS veto' in why
+
+        ok, why = _decide(*args, escape=True, evidence=False,
+                          incumbent_failed_anchors=False)
+        assert not ok and 'not a material improvement' in why

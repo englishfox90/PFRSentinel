@@ -170,3 +170,52 @@ class TestAnchorHealth:
         frames = [_frame(truth) for _ in range(3)]
         wrong = replace(truth, axis_alt=67.0, cx=truth.cx - 41.0, cy=truth.cy + 89.0)
         assert incumbent_anchor_health(wrong, frames) is False
+
+
+class TestAnchorHealthDefiniteVerdicts:
+    """Review blocker 2: False is no longer the default verdict of a thin
+    buffer. model_replacement rule 3 consumes `is False` as licence to
+    replace the model on disk with no RMS check at all, so a failure has to
+    be earned — the whole recent window testable and a majority of it
+    failing. A tie, or a window only one frame of which could be tested, is
+    None. True is unchanged (2 of 3), so nothing about cancelling an escape
+    moves."""
+
+    def _blank(self, m):
+        f = _frame(m)
+        f['detected'] = []
+        return f
+
+    def test_one_pass_one_fail_is_unknown_not_a_failure(self):
+        m = _model()
+        good, bad = _frame(m), _frame(m, shift=(200.0, 150.0))
+        assert incumbent_anchor_health(m, [good, bad]) is None
+        assert incumbent_anchor_health(m, [self._blank(m), good, bad]) is None
+
+    def test_a_lone_failing_frame_is_unknown(self):
+        m = _model()
+        assert incumbent_anchor_health(m, [_frame(m, shift=(200.0, 150.0))]) is None
+
+    def test_two_failing_frames_are_not_yet_a_verdict(self):
+        """One cloudy frame out of three is routine; it must not turn a
+        two-frame majority into a licence to overwrite the model."""
+        m = _model()
+        bad = [_frame(m, shift=(200.0, 150.0)) for _ in range(2)]
+        assert incumbent_anchor_health(m, [self._blank(m)] + bad) is None
+
+    def test_a_full_window_failing_is_a_definite_failure(self):
+        m = _model()
+        assert incumbent_anchor_health(
+            m, [_frame(m, shift=(200.0, 150.0)) for _ in range(3)]) is False
+
+    def test_two_of_three_failing_is_a_definite_failure(self):
+        m = _model()
+        good = _frame(m)
+        bad = [_frame(m, shift=(200.0, 150.0)) for _ in range(2)]
+        assert incumbent_anchor_health(m, [good] + bad) is False
+
+    def test_two_of_three_passing_is_still_healthy(self):
+        m = _model()
+        good = [_frame(m) for _ in range(2)]
+        assert incumbent_anchor_health(
+            m, [_frame(m, shift=(200.0, 150.0))] + good) is True
