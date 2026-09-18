@@ -152,6 +152,12 @@ def frame_pool(frame: dict, model, max_vmag: Optional[float] = None
     into the region the detections were found in. `search_radius_px` is 0.0
     when the frame carries no sky circle and no resolution — the caller then
     has no geometry to reason about and should fail open.
+
+    This is an approximation, not an exact mirror: `_brightness_match` keeps
+    every one of those entries that projects anywhere on the frame (`xy is
+    not None`), while this function keeps only the ones landing inside the
+    sky circle (or image bounds), so `n_cat` — and the chance expectation
+    built from it — is biased low, which is the fail-open direction.
     """
     det = frame.get('detected') or []
     n_det = len(det)

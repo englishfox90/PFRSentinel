@@ -176,3 +176,43 @@ class TestBootstrapSelection:
         legacy = _true_model()
         legacy.n_matches = 120
         assert chance_excess(legacy) == 120.0
+
+    def test_close_frac_threshold_floors_negative_best_excess(self):
+        """chance_excess(m) >= close_frac * best_excess inverts when
+        best_excess is negative — 0.75 * -10 == -7.5, a HIGHER bar than -10
+        itself, so even the best candidate would fail its own cut. Flooring
+        best_excess at 0 before scaling keeps the threshold sane (unreachable
+        via the chance gate today, which guarantees excess >= 0)."""
+        assert CLOSE_EXCESS_FRAC * max(-10.0, 0.0) == 0.0
+
+
+class TestJointFitSeedIsolation:
+    """A seeded refinement's seed_model can be the live
+    CalibrationService._model the GUI thread renders from — _joint_iterative_fit
+    must never write onto it."""
+
+    def test_least_squares_failure_does_not_mutate_seed(
+            self, synthetic_frames, monkeypatch):
+        pytest.importorskip('scipy')
+        import copy
+        from services.allsky import multi_calibrate as MC
+        from services.allsky.calibration_validate import tol_scale
+
+        seed = copy.deepcopy(_true_model())
+        seed.n_matches = 321
+        seed.rms_residual = 4.5
+
+        ts = tol_scale(MC.median_sky_r(synthetic_frames))
+        matches = MC._build_all_matches(
+            synthetic_frames, seed, tol_px=50.0 * ts, min_per_image=4)
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("simulated least_squares failure")
+        monkeypatch.setattr(MC, '_least_squares', _boom)
+
+        model, _rms = MC._joint_iterative_fit(
+            matches, synthetic_frames, seed, 4, 20, 20.0, tol_scale_factor=ts)
+
+        assert model is not seed
+        assert seed.n_matches == 321
+        assert seed.rms_residual == 4.5

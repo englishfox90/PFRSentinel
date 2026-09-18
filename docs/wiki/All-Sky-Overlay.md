@@ -120,7 +120,11 @@ A fisheye fit can settle on a solution that matches some stars but gets the orie
 
 If a **Calibrate Now** result disagrees with the measured pole, it is not saved and the status line reads "Calibration rejected — it disagrees with the measured celestial-pole position. Let capture run longer, then retry."
 
-If refinements are rejected three times in a row, PFR Sentinel first checks whether the current calibration still lines up with the bright stars in recent frames. If it does, the calibration is kept. If not, it tries a fresh calibration from scratch. That fresh result only replaces the current calibration when the pole check or a trusted calibration backs it up, or when it is clearly better — at least 15% lower RMS with at least as many matched stars. A near-identical score is not enough to swap one orientation for another.
+If refinements are rejected three times in a row, PFR Sentinel first checks whether the current calibration still lines up with the bright stars in recent frames. If it does, the calibration is kept. If not, it tries a fresh calibration from scratch.
+
+> **New in the next release** — not available in version 3.7.6 or earlier.
+>
+> Because the current calibration has just failed that same bright-star check, a fresh result that also lines up with the bright stars replaces it outright, whatever the RMS says — a model that cannot find the bright stars does not get to veto one that can on a flattering-but-meaningless residual. (This override does not apply to a Guided Calibration; see [Guided calibration is trusted over automatic calibration](#guided-calibration-is-trusted-over-automatic-calibration).) Short of that, a fresh result still only replaces the current calibration when the pole check or a trusted calibration backs it up, or when it is clearly better — at least 15% lower RMS with at least as many matched stars. A near-identical score is not enough to swap one orientation for another.
 
 > **New in the next release** — not available in version 3.7.6 or earlier.
 >

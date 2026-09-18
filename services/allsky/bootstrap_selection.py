@@ -70,7 +70,14 @@ def select_bootstrap_winner(passed: List, frames: List[dict],
     if not passed:
         return None, ''
     best_excess = max(chance_excess(m) for m in passed)
-    shortlist = [m for m in passed if chance_excess(m) >= close_frac * best_excess]
+    # A negative best_excess would flip the inequality below (>= a more
+    # negative threshold is easier to clear, not harder) and admit every
+    # candidate into the shortlist instead of just the close ones. Floor it
+    # at 0 — unreachable via the normal path since the chance gate already
+    # guarantees excess >= 0, but a caller bypassing that gate should still
+    # get a real "close to best" cut, not an inverted one.
+    shortlist = [m for m in passed
+                 if chance_excess(m) >= close_frac * max(best_excess, 0.0)]
     shortlist.sort(key=lambda m: (-recent_anchor_hits(m, frames),
                                   -chance_excess(m)))
     best = shortlist[0]
