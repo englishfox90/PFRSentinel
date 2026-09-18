@@ -118,6 +118,10 @@ If a **Calibrate Now** result disagrees with the measured pole, it is not saved 
 
 If refinements are rejected three times in a row, PFR Sentinel first checks whether the current calibration still lines up with the bright stars in recent frames. If it does, the calibration is kept. If not, it tries a fresh calibration from scratch. That fresh result only replaces the current calibration when the pole check or a trusted calibration backs it up, or when it is clearly better — at least 15% lower RMS with at least as many matched stars. A near-identical score is not enough to swap one orientation for another.
 
+> **New in the next release** — not available in version 3.7.6 or earlier.
+>
+> A fresh from-scratch attempt is expensive, so if it keeps getting rejected, PFR Sentinel waits longer before trying again each time (10, then 20, then 40, then 80 minutes). After four rejections in a row it stops trying and the status line reads **"Auto-calibration paused: 4 re-calibrations rejected — run Guided Calibration (All-Sky settings)"**. This means the current view can't be worked out automatically — most often a heavily obstructed, tilted, or hazy sky — and [Guided Calibration](#guided-calibration) is the way forward: it only needs you to identify a few stars by hand. Regular refinement of an existing calibration is unaffected and keeps running. The pause lifts on its own after about 12 hours, so a fresh attempt is made on a later night even if you don't act on it.
+
 ### Guided calibration is trusted over automatic calibration
 
 A calibration built with **Guided Calibration** comes from stars you identified yourself, so it outranks automatic results:

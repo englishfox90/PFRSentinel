@@ -45,6 +45,8 @@ from .calibration_quality import CalibrationQuality, model_quality  # re-exporte
 from .calibration_validate import median_frame_resolution
 from .calibration_workers import (  # re-exported for existing callers
     MAX_RESIDUAL_PX, _InitialCalWorker, _RefineWorker)
+from .escape_policy import (
+    ESCAPE_COOLDOWN_BASE_S, ESCAPE_EXHAUSTION_THRESHOLD, EscapeBackoff)
 from .incumbent_evidence import incumbent_anchor_health
 from .model_admission import admit_manual
 from .model_replacement import should_replace
@@ -90,7 +92,11 @@ REFINE_COOLDOWN_MAX_S = 1800
 # rejections the seed itself is suspect: run one cold-start bootstrap instead
 # and let a gate-passing result replace the model outright.
 BASIN_ESCAPE_FAILURES = 3
-ESCAPE_COOLDOWN_S = 600     # bootstrap fits are expensive; don't spam them
+# ESCAPE_COOLDOWN_S is the escape_policy base cooldown, re-exported here for
+# existing importers; the doubling/exhaustion policy itself lives in
+# escape_policy.EscapeBackoff (#33 — a flat cooldown re-ran the most
+# expensive fit every 10 min all night on a rig that could never pass it).
+ESCAPE_COOLDOWN_S = ESCAPE_COOLDOWN_BASE_S
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +149,10 @@ class CalibrationService(QObject):
         self._consecutive_refine_failures = 0
         self._last_escape_time = -math.inf
         self._escape_attempt = False
+        # Doubling cooldown + exhaustion after repeated fruitless escapes
+        # (#33). Owns its own state, separate from _last_escape_time (the
+        # trigger's "when did the last one run").
+        self._escape_backoff = EscapeBackoff()
         # Whether the incumbent definitely failed the bright-anchor check on
         # the frames that licensed that escape (model_replacement rule 3).
         self._escape_incumbent_failed_anchors = False
@@ -185,6 +195,7 @@ class CalibrationService(QObject):
         self._consecutive_refine_failures = 0
         self._refine_backoff_failures = 0
         self._escape_attempt = False
+        self._escape_backoff.reset()
         self._escape_incumbent_failed_anchors = False
         if self._quality != CalibrationQuality.NONE:
             self._quality = CalibrationQuality.NONE
@@ -201,6 +212,7 @@ class CalibrationService(QObject):
         self._consecutive_refine_failures = 0
         self._refine_backoff_failures = 0
         self._escape_attempt = False
+        self._escape_backoff.reset()
         self._escape_incumbent_failed_anchors = False
         new_q = model_quality(model, model.n_images, model.span_minutes)
         with self._lock:
@@ -413,7 +425,8 @@ class CalibrationService(QObject):
         # on-disk model is suspect and must not seed the fit.
         escape = (self._model is not None
                   and self._consecutive_refine_failures >= BASIN_ESCAPE_FAILURES
-                  and now - self._last_escape_time >= ESCAPE_COOLDOWN_S)
+                  and not self._escape_backoff.exhausted(now)
+                  and now - self._last_escape_time >= self._escape_backoff.cooldown())
         cold_start = self._model is None or escape
         min_frames = MIN_FRAMES_BOOTSTRAP if cold_start else MIN_FRAMES
         min_span = MIN_SPAN_BOOTSTRAP_MINUTES if cold_start else MIN_SPAN_MINUTES
@@ -505,6 +518,25 @@ class CalibrationService(QObject):
         n = min(self._refine_backoff_failures, REFINE_BACKOFF_MAX_DOUBLINGS)
         return min(float(REFINE_COOLDOWN_S * (2 ** n)),
                    float(REFINE_COOLDOWN_MAX_S))
+
+    def _warn_if_escape_exhausted(self) -> None:
+        """Surface the #33 exhaustion once — an empty-handed escape series
+        that keeps quietly retrying all night is exactly what wasn't caught
+        before."""
+        if not self._escape_backoff.should_warn():
+            return
+        hours = self._escape_backoff.hours_spent()
+        log.warning(
+            f"CalibrationService: {ESCAPE_EXHAUSTION_THRESHOLD} consecutive "
+            f"basin escapes rejected (~{hours:.1f}h of attempts) — pausing "
+            "automatic re-calibration. Run Guided Calibration (All-Sky "
+            "settings) to anchor a good model."
+        )
+        self.status_changed.emit(
+            f"Auto-calibration paused: {ESCAPE_EXHAUSTION_THRESHOLD} "
+            "re-calibrations rejected — run Guided Calibration (All-Sky "
+            "settings)"
+        )
 
     def _retire_worker(self, worker) -> None:
         """Free a finished worker and everything it pinned.
@@ -608,6 +640,7 @@ class CalibrationService(QObject):
 
         model.n_images = n_images
         model.span_minutes = round(span_min, 1)
+        was_escape = self._escape_attempt
 
         new_q = model_quality(model, n_images, span_min)
         improved, why = should_replace(
@@ -619,6 +652,11 @@ class CalibrationService(QObject):
 
         self._escape_attempt = False
         self._escape_incumbent_failed_anchors = False
+        if was_escape:
+            if improved:
+                self._escape_backoff.record_admitted()
+            else:
+                self._escape_backoff.record_fruitless(time.monotonic())
         if improved:
             self._consecutive_refine_failures = 0
             self._model = model
@@ -644,12 +682,17 @@ class CalibrationService(QObject):
                 f"Calibrated: {self._model.n_matches} stars, "
                 f"RMS={self._model.rms_residual:.1f}px ({self._quality})"
             )
+            # After the status restore, or the pause line is overwritten.
+            self._warn_if_escape_exhausted()
 
     def _on_refine_failed(self, error: str) -> None:
+        was_escape = self._escape_attempt
         self._escape_attempt = False
         self._escape_incumbent_failed_anchors = False
         self._last_refine_time = time.monotonic()
         self._refine_backoff_failures += 1
+        if was_escape:
+            self._escape_backoff.record_fruitless(time.monotonic())
         if self._model:
             # Only count failures of refinements seeded by the CURRENT model —
             # a late failure from a superseded seed says nothing about it.
@@ -668,6 +711,7 @@ class CalibrationService(QObject):
             # Cold-start bootstrap not yet successful — keep accumulating.
             log.info(f"Cold-start calibration not yet successful: {error}")
             self.status_changed.emit("Calibrating… (accumulating frames)")
+        self._warn_if_escape_exhausted()
 
     # ------------------------------------------------------------------
     # Persistence

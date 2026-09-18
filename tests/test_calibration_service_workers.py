@@ -488,3 +488,91 @@ class TestEscapeCarriesIncumbentAnchorHealth:
         _run_one_refinement(svc)
         assert calls and calls[-1]['escape'] is False
         assert calls[-1]['incumbent_failed_anchors'] is False
+
+
+# ---------------------------------------------------------------------------
+# #33 — escape retries back off, then stop and warn once
+# ---------------------------------------------------------------------------
+
+class TestEscapeExhaustion:
+    """A rig whose escapes can never be admitted must stop chasing them and
+    say so, instead of re-running the most expensive fit all night."""
+
+    def _rejecting(self, monkeypatch):
+        monkeypatch.setattr(cs, 'should_replace', lambda *a, **kw: (False, 'rejected'))
+
+    def _admitting(self, monkeypatch):
+        monkeypatch.setattr(cs, 'should_replace', lambda *a, **kw: (True, 'admitted'))
+
+    def _run_escape(self, svc, monkeypatch):
+        """Arm and run one basin escape to completion (unhealthy incumbent,
+        so it actually escapes rather than falling back to a refinement)."""
+        monkeypatch.setattr(cs, 'incumbent_anchor_health', lambda m, f: False)
+        svc._consecutive_refine_failures = cs.BASIN_ESCAPE_FAILURES
+        svc._last_refine_time = -svc._refine_cooldown()
+        svc._last_escape_time = -svc._escape_backoff.cooldown()
+        svc._maybe_refine()
+        worker = svc._refine_worker
+        assert worker is not None, "escape did not run"
+        assert worker._seed is None
+        _pump(svc, worker)
+
+    def test_escapes_double_the_gap_then_stop_after_the_threshold(
+            self, qapp, fast_refine, monkeypatch):
+        self._rejecting(monkeypatch)
+        svc = _service(frames=_frames(n=16, span_minutes=40.0))
+        for k in range(cs.ESCAPE_EXHAUSTION_THRESHOLD):
+            assert svc._escape_backoff.cooldown() == cs.ESCAPE_COOLDOWN_BASE_S * 2 ** k
+            self._run_escape(svc, monkeypatch)
+        assert svc._escape_backoff.fruitless_count == cs.ESCAPE_EXHAUSTION_THRESHOLD
+
+        # One more, fully re-armed attempt: the (threshold + 1)th trigger must
+        # not run as an escape — exhaustion falls back to seeded refinement
+        # (still useful; only the expensive seedless bootstrap is paused).
+        svc._consecutive_refine_failures = cs.BASIN_ESCAPE_FAILURES
+        svc._last_refine_time = -svc._refine_cooldown()
+        svc._last_escape_time = -svc._escape_backoff.cooldown()
+        svc._maybe_refine()
+        worker = svc._refine_worker
+        assert worker is not None
+        assert worker._seed is svc._model, "must not run a seedless escape"
+        assert svc._escape_attempt is False
+        _pump(svc, worker)
+
+    def test_warning_and_status_are_emitted_exactly_once(
+            self, qapp, fast_refine, monkeypatch):
+        self._rejecting(monkeypatch)
+        warnings = []
+        monkeypatch.setattr(cs.log, 'warning', lambda msg: warnings.append(msg))
+        statuses = []
+        svc = _service(frames=_frames(n=16, span_minutes=40.0))
+        svc.status_changed.connect(statuses.append)
+
+        for _ in range(cs.ESCAPE_EXHAUSTION_THRESHOLD):
+            self._run_escape(svc, monkeypatch)
+
+        exhaustion_warnings = [w for w in warnings if 'pausing automatic' in w]
+        assert len(exhaustion_warnings) == 1
+        paused = [s for s in statuses if s.startswith('Auto-calibration paused')]
+        assert len(paused) == 1
+
+        # Calling the guard again (e.g. a stray fruitless report) must not
+        # re-warn while still exhausted.
+        svc._escape_backoff.record_fruitless(0.0)
+        svc._warn_if_escape_exhausted()
+        assert len([w for w in warnings if 'pausing automatic' in w]) == 1
+
+    def test_an_admitted_escape_resets_the_backoff(
+            self, qapp, fast_refine, monkeypatch):
+        self._rejecting(monkeypatch)
+        svc = _service(frames=_frames(n=16, span_minutes=40.0))
+        for _ in range(cs.ESCAPE_EXHAUSTION_THRESHOLD - 1):
+            self._run_escape(svc, monkeypatch)
+        assert svc._escape_backoff.fruitless_count == cs.ESCAPE_EXHAUSTION_THRESHOLD - 1
+
+        self._admitting(monkeypatch)
+        self._run_escape(svc, monkeypatch)
+
+        assert svc._escape_backoff.fruitless_count == 0
+        assert svc._escape_backoff.cooldown() == cs.ESCAPE_COOLDOWN_BASE_S
+        assert svc._escape_backoff.exhausted(now=0.0) is False
