@@ -239,7 +239,10 @@ class TestIncomparableIncumbentRms:
         assert ok and 'not comparable' in why
 
     def test_no_rank_upgrade_still_loses(self):
-        ok, why = _decide(_m(2.43, 5, n_images=1, span=0.0),
+        # 8 matches, not 5: calibration_quality's MIN_AUTO_MATCHES floor (fix 3)
+        # rates anything thinner 'none', which would make the candidate a rank
+        # upgrade and decide the case before the no-upgrade path is reached.
+        ok, why = _decide(_m(2.43, 8, n_images=1, span=0.0),
                           _m(10.96, 20, n_images=1, span=0.0))
         assert not ok and 'not comparable' in why
 

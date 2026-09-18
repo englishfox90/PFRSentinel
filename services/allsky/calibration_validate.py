@@ -24,6 +24,8 @@ import numpy as np
 
 from services.logger import app_logger as log
 
+from .lens_polynomial import MONOTONIC_MAX_THETA_DEG, radial_monotonic
+
 
 # ---------------------------------------------------------------------------
 # Resolution-independent match tolerances (F10)
@@ -347,7 +349,20 @@ def validate_lens_polynomial(model) -> Tuple[bool, str]:
             f"[{A3_MIN:.0f}, {A3_MAX:.0f}] — the fit fought the clamp, which "
             "means it was bending the polynomial toward a wrong orientation"
         )
-    return True, f"lens polynomial a3={a3:.1f} within plausible range"
+    mono_ok, turnover = radial_monotonic(model)
+    if not mono_ok:
+        return False, (
+            f"lens polynomial r(θ) stops increasing at θ={turnover:.1f}° "
+            f"(a1={float(getattr(model, 'a1', 0.0)):.0f}, a3={a3:.1f}, "
+            f"a5={float(getattr(model, 'a5', 0.0)):.1f}) — it folds the sky "
+            f"below {90.0 - turnover:.1f}° altitude back on itself, inside the "
+            f"imaged field (limit {MONOTONIC_MAX_THETA_DEG:.0f}°)"
+        )
+    msg = f"lens polynomial a3={a3:.1f} within plausible range"
+    if turnover is not None:
+        msg += (f"; r(θ) turns over at {turnover:.1f}°, outside the "
+                f"{MONOTONIC_MAX_THETA_DEG:.0f}° monotonicity limit")
+    return True, msg
 
 
 # ---------------------------------------------------------------------------

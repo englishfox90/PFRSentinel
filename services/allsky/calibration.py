@@ -183,6 +183,20 @@ def calibrate(
         tol_scale=_tol_scale,
     )
 
+    # Same floor the multi-image path enforces (multi_calibrate). The grid
+    # search is allowed to start from as few as max(3, min_matches // 3)
+    # matches, but the fit that comes out must be corroborated by the full
+    # set: issue #33 saved 8 free parameters fitted to FIVE stars at a
+    # flattering 2.4px RMS. Raised rather than dropped into the triangle
+    # fallback — the fallback re-hypothesises the orientation, which is not
+    # what failed here, and it would run on the same detections against the
+    # same floor.
+    if model.n_matches < min_matches:
+        raise CalibrationError(
+            f"Fit matched only {model.n_matches} stars "
+            f"(need >= {min_matches}) — too few to constrain the model."
+        )
+
     if rms > max_residual_px:
         raise CalibrationError(
             f"Calibration residual {rms:.1f}px exceeds limit {max_residual_px}px. "

@@ -128,9 +128,11 @@ class _InitialCalWorker(QThread):
 
     def run(self):
         try:
+            # No min_matches override: the automatic path must not accept a
+            # thinner fit than Calibrate Now does. The old 6 let the grid
+            # search proceed on 3 matches and the fit finish on 5 (issue #33).
             model = calibrate(
                 self._image, self._lat, self._lon, dt=self._dt,
-                min_matches=6,
             )
             self.result_ready.emit(model)
         except Exception as e:
