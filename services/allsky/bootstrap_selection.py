@@ -78,8 +78,15 @@ def select_bootstrap_winner(passed: List, frames: List[dict],
     # get a real "close to best" cut, not an inverted one.
     shortlist = [m for m in passed
                  if chance_excess(m) >= close_frac * max(best_excess, 0.0)]
-    shortlist.sort(key=lambda m: (-recent_anchor_hits(m, frames),
-                                  -chance_excess(m)))
+    if shortlist:
+        shortlist.sort(key=lambda m: (-recent_anchor_hits(m, frames),
+                                      -chance_excess(m)))
+    else:
+        # The floor makes the cut unsatisfiable when every candidate is below
+        # chance: nothing clears 0.0. Same bypassing caller, so rank the whole
+        # list by excess and return the best of a bad lot — an anchor tie-break
+        # over candidates that are all at or under chance would be noise.
+        shortlist = sorted(passed, key=chance_excess, reverse=True)
     best = shortlist[0]
     return best, (f"n_matches={best.n_matches}, "
                   f"chance={float(getattr(best, 'chance_expected', 0.0)):.0f}, "

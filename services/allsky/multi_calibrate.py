@@ -349,7 +349,6 @@ def _fit_and_validate(
     chance_ok, chance_msg, est = check_above_chance(
         model.n_matches, frames, model,
         getattr(model, 'final_tol_px', 18.0 * _ts),
-        min_per_image=min_matches_per_image,
     )
     model.chance_expected = est.expected
     if not chance_ok:

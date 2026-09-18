@@ -29,6 +29,9 @@ from services.allsky.chance_matches import (
 
 # Reporter's rig (issue #33).
 N_DET, N_CAT, SKY_R = 200, 400, 1345.0
+# A rig detecting under ~78 objects per frame expects fewer than 4 chance
+# matches per frame — the regime the per-frame expectation filter wiped out.
+LOW_N_DET = 40
 N_FRAMES = 60
 MONTE_CARLO = {43.0: 3685, 26.0: 1595, 15.5: 619}
 
@@ -156,16 +159,23 @@ class TestEstimateOverFrames:
 
     def test_sums_over_frames(self):
         frames = [_frame() for _ in range(N_FRAMES)]
-        est = estimate_chance(frames, _AllInsideModel(), 15.5, min_per_image=4)
+        est = estimate_chance(frames, _AllInsideModel(), 15.5)
         assert est.n_frames == N_FRAMES
         assert est.expected == pytest.approx(MONTE_CARLO[15.5], rel=0.15)
         assert est.median_residual_px == pytest.approx(10.96, abs=0.05)
 
-    def test_frames_below_min_per_image_are_left_out(self):
-        """_build_all_matches discards them, so the expectation must too."""
-        frames = [_frame() for _ in range(3)]
-        est = estimate_chance(frames, _AllInsideModel(), 15.5, min_per_image=50)
-        assert est.n_frames == 0 and est.expected == 0.0
+    def test_low_expectation_frames_still_contribute(self):
+        """Every frame with geometry counts. `_build_all_matches` drops frames
+        by their ACTUAL match count, which is a different quantity — dropping
+        them by their EXPECTATION instead zeroed the estimate on any rig whose
+        per-frame chance sits under the floor."""
+        frames = [_frame(n_det=LOW_N_DET) for _ in range(N_FRAMES)]
+        per_frame = expected_frame_matches(
+            LOW_N_DET, LOW_N_DET * 5, SKY_R, 15.5)
+        assert per_frame < 4.0, "fixture must sit under a typical floor"
+        est = estimate_chance(frames, _AllInsideModel(), 15.5)
+        assert est.n_frames == N_FRAMES
+        assert est.expected == pytest.approx(per_frame * N_FRAMES, rel=1e-6)
 
     def test_frames_without_geometry_are_skipped(self):
         f = _frame()
@@ -199,8 +209,7 @@ class TestDecision:
 
     def test_check_above_chance_reports_the_numbers(self):
         frames = [_frame() for _ in range(N_FRAMES)]
-        ok, msg, est = check_above_chance(686, frames, _AllInsideModel(), 15.5,
-                                          min_per_image=4)
+        ok, msg, est = check_above_chance(686, frames, _AllInsideModel(), 15.5)
         assert not ok
         assert '686 matches' in msg and 'chance' in msg
         assert est.expected == pytest.approx(MONTE_CARLO[15.5], rel=0.15)
@@ -208,5 +217,28 @@ class TestDecision:
     def test_check_above_chance_passes_a_real_fit(self):
         frames = [_frame() for _ in range(N_FRAMES)]
         ok, _msg, _est = check_above_chance(2000, frames, _AllInsideModel(),
-                                            15.5, min_per_image=4)
+                                            15.5)
         assert ok
+
+    def test_low_detection_rig_does_not_fail_open(self):
+        """The reviewer's scenario: 60 frames at ~40 detections each. Every
+        frame's chance expectation is ~1, well under a 4-match floor, so the
+        old expectation-based drop zeroed `expected` and the gate passed
+        anything. A real fit (20 matches/frame) must be judged, not waved
+        through."""
+        frames = [_frame(n_det=LOW_N_DET) for _ in range(N_FRAMES)]
+        real_fit = 20 * N_FRAMES
+        ok, _msg, est = check_above_chance(real_fit, frames,
+                                           _AllInsideModel(), 15.5)
+        assert est.expected > 0
+        assert est.expected < real_fit / CHANCE_MARGIN
+        assert ok
+
+    def test_low_detection_rig_still_rejects_a_chance_level_fit(self):
+        """Same rig, a fit sitting at its chance expectation. With `expected`
+        pinned to 0 this passed on the fail-open branch; it must now fail."""
+        frames = [_frame(n_det=LOW_N_DET) for _ in range(N_FRAMES)]
+        est = estimate_chance(frames, _AllInsideModel(), 15.5)
+        ok, _msg, _est = check_above_chance(round(est.expected), frames,
+                                            _AllInsideModel(), 15.5)
+        assert not ok

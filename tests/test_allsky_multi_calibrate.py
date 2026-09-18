@@ -111,8 +111,8 @@ class TestChanceGate:
         schedule = {ts * max(18.0, 50.0 - 5.0 * i) for i in range(10)}
         assert any(abs(model.final_tol_px - t) < 1e-9 for t in schedule)
         assert model.chance_expected == pytest.approx(
-            expected_chance_matches(synthetic_frames, model, model.final_tol_px,
-                                    min_per_image=4))
+            expected_chance_matches(synthetic_frames, model,
+                                    model.final_tol_px))
 
 
 class TestBootstrapSelection:
@@ -184,6 +184,21 @@ class TestBootstrapSelection:
         best_excess at 0 before scaling keeps the threshold sane (unreachable
         via the chance gate today, which guarantees excess >= 0)."""
         assert CLOSE_EXCESS_FRAC * max(-10.0, 0.0) == 0.0
+
+    def test_all_below_chance_returns_the_least_bad_candidate(self,
+                                                              synthetic_frames):
+        """The 0.0 floor makes the shortlist cut unsatisfiable when every
+        candidate is below chance — nothing clears 0.0. The fallback must rank
+        the whole list by excess rather than indexing an empty shortlist."""
+        worst = self._candidate(300, 900.0)        # excess -600
+        least_bad = self._candidate(500, 560.0)    # excess -60
+        middle = self._candidate(400, 700.0)       # excess -300
+
+        best, why = select_bootstrap_winner([worst, least_bad, middle],
+                                            synthetic_frames)
+        assert best is least_bad, why
+        assert 'excess=-60' in why
+        assert 'tied=3' in why
 
 
 class TestJointFitSeedIsolation:

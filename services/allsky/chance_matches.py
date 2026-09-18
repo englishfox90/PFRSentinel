@@ -191,20 +191,23 @@ def frame_pool(frame: dict, model, max_vmag: Optional[float] = None
 
 
 def expected_chance_matches(frames: List[dict], model, tol_px: float,
-                            max_vmag: Optional[float] = None,
-                            min_per_image: int = 0) -> float:
+                            max_vmag: Optional[float] = None) -> float:
     """Total chance matches `model` earns across `frames` at `tol_px`.
 
-    `min_per_image` mirrors `_build_all_matches`, which drops a frame whose
-    match count falls below it: frames not expected to reach the floor are left
-    out of the sum, as they are left out of the real total.
+    Every frame with usable geometry contributes. `_build_all_matches` does
+    drop frames whose *actual* match count falls below its per-image floor, and
+    those frames' expectations are still summed here, so `expected` is biased
+    slightly high. That is the conservative direction for a gate that demands
+    `n_matches >= CHANCE_MARGIN * expected`. Filtering frames by their
+    *expectation* instead would not mirror that drop at all — it is a different
+    quantity, and on a rig detecting fewer than ~78 objects per frame it zeroes
+    the whole estimate and makes the gate fail open.
     """
-    return estimate_chance(frames, model, tol_px, max_vmag, min_per_image).expected
+    return estimate_chance(frames, model, tol_px, max_vmag).expected
 
 
 def estimate_chance(frames: List[dict], model, tol_px: float,
-                    max_vmag: Optional[float] = None,
-                    min_per_image: int = 0) -> ChanceEstimate:
+                    max_vmag: Optional[float] = None) -> ChanceEstimate:
     """`expected_chance_matches` with the supporting numbers attached."""
     total = 0.0
     used = 0
@@ -212,10 +215,7 @@ def estimate_chance(frames: List[dict], model, tol_px: float,
         n_det, n_cat, radius = frame_pool(f, model, max_vmag)
         if radius <= 0:
             continue
-        e = expected_frame_matches(n_det, n_cat, radius, tol_px)
-        if e < min_per_image:
-            continue
-        total += e
+        total += expected_frame_matches(n_det, n_cat, radius, tol_px)
         used += 1
     return ChanceEstimate(expected=total, tol_px=float(tol_px), n_frames=used,
                           median_residual_px=chance_median_residual(tol_px))
@@ -248,9 +248,8 @@ def is_above_chance(n_matches: int, expected: float,
 
 def check_above_chance(n_matches: int, frames: List[dict], model, tol_px: float,
                        max_vmag: Optional[float] = None,
-                       min_per_image: int = 0,
                        margin: float = CHANCE_MARGIN
                        ) -> Tuple[bool, str, ChanceEstimate]:
     """(ok, message, estimate) for a completed fit — the gate callers use."""
-    est = estimate_chance(frames, model, tol_px, max_vmag, min_per_image)
+    est = estimate_chance(frames, model, tol_px, max_vmag)
     return est.is_above_chance(n_matches, margin), est.describe(n_matches), est
