@@ -293,7 +293,7 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_watch_crop_cache.py` | 3 | `_on_watch_image_processed` — watch mode caches the pre-resize clean frame for Calibrate Now, not the cropped output |
 | `test_watcher.py` | 2 | `ImageFileHandler` — `process_image` extras reach the callback |
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
-| `test_scroll_safe_spinbox.py` | 8 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it (offscreen Qt) |
+| `test_scroll_safe_spinbox.py` | 10 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it, a click on the child line edit does (offscreen Qt) |
 | `test_image_processing_panel_stretch.py` | 4 | `ImageProcessingPanel` Auto Stretch rows — Target Median slider reaches the engine floor, Dark Threshold enabled only with Dark Scene Color Fix (offscreen Qt) |
 
 Standalone (not in pytest suite):

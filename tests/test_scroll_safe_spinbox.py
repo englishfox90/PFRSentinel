@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.components.scroll_safe_spinbox import (
@@ -55,6 +55,15 @@ def _wheel_up(box):
     )
     QApplication.sendEvent(box, event)
     return event
+
+
+def _click(widget):
+    centre = QPointF(widget.rect().center())
+    for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+        QApplication.sendEvent(widget, QMouseEvent(
+            kind, centre, widget.mapToGlobal(centre), Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        ))
 
 
 def test_drop_in_names_are_the_guarded_classes():
@@ -125,3 +134,35 @@ def test_double_spin_box_is_guarded_the_same_way(window, qapp):
     qapp.processEvents()
     _wheel_up(box)
     assert box.value() == 51.0
+
+
+def test_click_on_a_page_focused_box_arms_the_wheel(window, qapp):
+    """Focus handed over by the page, then a click on the line edit: no new
+    focusInEvent fires for that click, so the press itself must arm it."""
+    box = _spin(window)
+    box.setFocus(Qt.FocusReason.OtherFocusReason)
+    qapp.processEvents()
+    assert box.hasFocus()
+    _wheel_up(box)
+    assert box.value() == 50
+
+    _click(box.lineEdit())
+    qapp.processEvents()
+
+    _wheel_up(box)
+    assert box.value() == 51
+
+
+def test_click_on_an_unfocused_box_focuses_and_arms_it(window, qapp):
+    box = _spin(window)
+    other = _spin(window)
+    other.setFocus(Qt.FocusReason.OtherFocusReason)
+    qapp.processEvents()
+    assert not box.hasFocus()
+
+    _click(box.lineEdit())
+    qapp.processEvents()
+
+    assert box.hasFocus()
+    _wheel_up(box)
+    assert box.value() == 51

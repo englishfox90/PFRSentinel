@@ -10,14 +10,16 @@ drifting between nights). Sliders already guard against this with
 A wheel event is honoured only while the box holds focus the user gave it on
 purpose: a click, a Tab, or a keyboard shortcut. Focus a page hands over on
 its own when it is shown does not count, so landing on the Capture page with
-the pointer resting on Interval still scrolls the page. Ignored events
-propagate to the enclosing scroll area, which is what the user was trying
-to move.
+the pointer resting on Interval still scrolls the page. A click on a box that
+already holds such hand-me-down focus arms it too, since no focus event fires
+for that click. Ignored events propagate to the enclosing scroll area, which
+is what the user was trying to move.
 
 The classes keep the Fluent names so a panel swaps one import line and no
 call site changes.
 """
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QWidget
 from qfluentwidgets import DoubleSpinBox as _FluentDoubleSpinBox
 from qfluentwidgets import SpinBox as _FluentSpinBox
 
@@ -38,6 +40,25 @@ class _WheelGuard:
         # StrongFocus is WheelFocus minus the wheel, so hovering and scrolling
         # can never *acquire* focus and arm the box by accident.
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Clicks land on the line edit and the step buttons, not on the box, and
+        # a click on an already-focused box fires no focusInEvent; watch the
+        # children for the press that says "I am using this one".
+        for child in self.findChildren(QWidget):
+            child.installEventFilter(self)
+
+    def _arm_from_press(self):
+        self._wheel_armed = True
+        if not self.hasFocus():
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            self._arm_from_press()
+        return super().eventFilter(watched, event)
+
+    def mousePressEvent(self, event):
+        self._arm_from_press()
+        super().mousePressEvent(event)
 
     def focusInEvent(self, event):
         self._wheel_armed = event.reason() in DELIBERATE_FOCUS_REASONS
