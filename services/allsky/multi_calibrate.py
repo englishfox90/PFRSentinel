@@ -27,6 +27,7 @@ Algorithm
 
 Dependencies: scipy (same as single-image calibration).
 """
+import dataclasses
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
@@ -72,6 +73,9 @@ from .calibration_validate import (
 )
 from .chance_matches import check_above_chance
 from .bootstrap_selection import chance_excess, select_bootstrap_winner
+# Re-exported for existing callers in this module (extracted to
+# joint_fit_diagnostics.py to stay under the file-size cap).
+from .joint_fit_diagnostics import collect_diagnostics as _collect_diagnostics
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +564,7 @@ def _build_all_matches(frames, model, tol_px: float,
 
 
 def _joint_iterative_fit(
-    all_matches, frames, model, min_per_image, min_total, max_residual,
+    all_matches, frames, seed_model, min_per_image, min_total, max_residual,
     cx_range: float = 100.0,
     cy_range: float = 100.0,
     tol_scale_factor: float = 1.0,
@@ -580,6 +584,14 @@ def _joint_iterative_fit(
     """
     if _least_squares is None:
         raise CalibrationError("scipy is required for calibration.")
+
+    # Work on a copy from here on. For a seeded refinement, seed_model can be
+    # the live CalibrationService._model the GUI thread renders from — if
+    # least_squares throws on iteration 0 the loop below breaks with
+    # `model is seed_model`, and writing n_matches/rms_residual/etc onto that
+    # shared object (and should_replace comparing it with itself) would
+    # corrupt the incumbent in place instead of just failing the refinement.
+    model = dataclasses.replace(seed_model)
 
     # Anchor cx/cy within cx_range/cy_range of the seed model.
     # east_left is discrete — fixed from seed, not part of continuous optimisation.
@@ -720,25 +732,3 @@ def _joint_rms(all_matches, model) -> float:
             if xy is not None:
                 residuals.append(float(np.hypot(dx - xy[0], dy - xy[1])))
     return float(np.median(residuals)) if residuals else 999.0
-
-
-def _collect_diagnostics(all_matches, model, frames) -> list:
-    """Build per-match diagnostic list (same format as single-image calibration)."""
-    diag = []
-    for img_idx, img_matches in enumerate(all_matches):
-        dt_label = frames[img_idx]['dt'].isoformat() if img_idx < len(frames) else ''
-        for (dx, dy), star, (alt, az) in img_matches:
-            cat_px  = model.altaz_to_pixel(alt, az)
-            res_px  = float(np.hypot(dx - cat_px[0], dy - cat_px[1])) if cat_px else 999.0
-            diag.append({
-                'name':       star.get('name', ''),
-                'vmag':       float(star.get('vmag', 0.0)),
-                'alt':        float(alt),
-                'az':         float(az),
-                'frame_time': dt_label,
-                'detected_px': (float(dx), float(dy)),
-                'catalog_px':  (float(cat_px[0]), float(cat_px[1])) if cat_px else None,
-                'residual_px': res_px,
-            })
-    diag.sort(key=lambda s: s['residual_px'])
-    return diag
