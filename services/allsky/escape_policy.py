@@ -27,7 +27,7 @@ Policy:
     that is exhausted one night gets one more round on a later one,
     rather than being locked out until the app is restarted.
 """
-from typing import Optional
+from typing import Optional, Tuple
 
 # Base wait before the *first* retry after a fruitless escape. Matches the
 # previous flat ESCAPE_COOLDOWN_S so a rig that recovers after a single
@@ -123,3 +123,15 @@ class EscapeBackoff:
     @property
     def fruitless_count(self) -> int:
         return self._fruitless
+
+    def exhaustion_messages(self) -> Tuple[str, str]:
+        """(log line, status line) for the one-shot exhaustion warning."""
+        log_msg = (
+            f"CalibrationService: {self._threshold} consecutive basin escapes "
+            f"rejected (~{self.hours_spent():.1f}h of attempts) — pausing "
+            "automatic re-calibration. Run Guided Calibration (All-Sky "
+            "settings) to anchor a good model.")
+        status = (
+            f"Auto-calibration paused: {self._threshold} re-calibrations "
+            "rejected — run Guided Calibration (All-Sky settings)")
+        return log_msg, status

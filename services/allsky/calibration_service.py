@@ -45,8 +45,7 @@ from .calibration_quality import CalibrationQuality, model_quality  # re-exporte
 from .calibration_validate import median_frame_resolution
 from .calibration_workers import (  # re-exported for existing callers
     MAX_RESIDUAL_PX, _InitialCalWorker, _RefineWorker)
-from .escape_policy import (
-    ESCAPE_COOLDOWN_BASE_S, ESCAPE_EXHAUSTION_THRESHOLD, EscapeBackoff)
+from .escape_policy import ESCAPE_COOLDOWN_BASE_S, EscapeBackoff
 from .incumbent_evidence import incumbent_anchor_health
 from .model_admission import admit_manual
 from .model_replacement import should_replace
@@ -199,9 +198,8 @@ class CalibrationService(QObject):
         self._model_generation += 1
         self._consecutive_refine_failures = 0
         self._refine_backoff_failures = 0
-        self._escape_attempt = False
+        self._clear_escape_state()
         self._escape_backoff.reset()
-        self._escape_incumbent_failed_anchors = False
         if self._quality != CalibrationQuality.NONE:
             self._quality = CalibrationQuality.NONE
         log.info("CalibrationService: model cleared (user reset); "
@@ -216,9 +214,8 @@ class CalibrationService(QObject):
         self._model_generation += 1
         self._consecutive_refine_failures = 0
         self._refine_backoff_failures = 0
-        self._escape_attempt = False
+        self._clear_escape_state()
         self._escape_backoff.reset()
-        self._escape_incumbent_failed_anchors = False
         new_q = model_quality(model, model.n_images, model.span_minutes)
         with self._lock:
             self._frames.clear()
@@ -525,23 +522,15 @@ class CalibrationService(QObject):
                    float(REFINE_COOLDOWN_MAX_S))
 
     def _warn_if_escape_exhausted(self) -> None:
-        """Surface the #33 exhaustion once — an empty-handed escape series
-        that keeps quietly retrying all night is exactly what wasn't caught
-        before."""
         if not self._escape_backoff.should_warn():
             return
-        hours = self._escape_backoff.hours_spent()
-        log.warning(
-            f"CalibrationService: {ESCAPE_EXHAUSTION_THRESHOLD} consecutive "
-            f"basin escapes rejected (~{hours:.1f}h of attempts) — pausing "
-            "automatic re-calibration. Run Guided Calibration (All-Sky "
-            "settings) to anchor a good model."
-        )
-        self.status_changed.emit(
-            f"Auto-calibration paused: {ESCAPE_EXHAUSTION_THRESHOLD} "
-            "re-calibrations rejected — run Guided Calibration (All-Sky "
-            "settings)"
-        )
+        log_msg, status = self._escape_backoff.exhaustion_messages()
+        log.warning(log_msg)
+        self.status_changed.emit(status)
+
+    def _clear_escape_state(self) -> None:
+        self._escape_attempt = False
+        self._escape_incumbent_failed_anchors = False
 
     def _retire_worker(self, worker) -> None:
         """Free a finished worker and everything it pinned.
@@ -641,6 +630,7 @@ class CalibrationService(QObject):
         # Discard if Calibrate Now replaced the model while the worker was running.
         if self._refine_gen != self._model_generation:
             log.info("Discarding stale refinement — model was replaced during calibration")
+            self._clear_escape_state()
             return
 
         model.n_images = n_images
@@ -655,8 +645,7 @@ class CalibrationService(QObject):
         if self._escape_attempt:
             (log.warning if improved else log.info)(f"Basin escape result: {why}")
 
-        self._escape_attempt = False
-        self._escape_incumbent_failed_anchors = False
+        self._clear_escape_state()
         if was_escape:
             if improved:
                 self._escape_backoff.record_admitted()
@@ -692,8 +681,7 @@ class CalibrationService(QObject):
 
     def _on_refine_failed(self, error: str) -> None:
         was_escape = self._escape_attempt
-        self._escape_attempt = False
-        self._escape_incumbent_failed_anchors = False
+        self._clear_escape_state()
         self._last_refine_time = time.monotonic()
         self._refine_backoff_failures += 1
         if was_escape:

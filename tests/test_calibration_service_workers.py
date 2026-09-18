@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication
 from services.allsky import calibration_service as cs
 from services.allsky import calibration_workers as cw
 from services.allsky.fisheye import FisheyeModel
+from services.allsky.escape_policy import ESCAPE_EXHAUSTION_THRESHOLD
 
 
 @pytest.fixture(scope="module")
@@ -389,6 +390,17 @@ class TestIncumbentCorroboration:
         svc._on_incumbent_corroborated("late")
         assert saved == []
 
+    def test_stale_escape_result_clears_its_flags_without_counting(self, qapp):
+        svc = _service(model=_model())
+        svc._escape_attempt = True
+        svc._escape_incumbent_failed_anchors = True
+        svc._refine_gen = svc._model_generation
+        svc._model_generation += 1
+        svc._on_refine_done(_model(rms=1.0), 30, 60.0)
+        assert svc._escape_attempt is False
+        assert svc._escape_incumbent_failed_anchors is False
+        assert svc._escape_backoff.fruitless_count == 0
+
 
 class TestSaveBackup:
 
@@ -521,10 +533,10 @@ class TestEscapeExhaustion:
             self, qapp, fast_refine, monkeypatch):
         self._rejecting(monkeypatch)
         svc = _service(frames=_frames(n=16, span_minutes=40.0))
-        for k in range(cs.ESCAPE_EXHAUSTION_THRESHOLD):
+        for k in range(ESCAPE_EXHAUSTION_THRESHOLD):
             assert svc._escape_backoff.cooldown() == cs.ESCAPE_COOLDOWN_BASE_S * 2 ** k
             self._run_escape(svc, monkeypatch)
-        assert svc._escape_backoff.fruitless_count == cs.ESCAPE_EXHAUSTION_THRESHOLD
+        assert svc._escape_backoff.fruitless_count == ESCAPE_EXHAUSTION_THRESHOLD
 
         # One more, fully re-armed attempt: the (threshold + 1)th trigger must
         # not run as an escape — exhaustion falls back to seeded refinement
@@ -548,7 +560,7 @@ class TestEscapeExhaustion:
         svc = _service(frames=_frames(n=16, span_minutes=40.0))
         svc.status_changed.connect(statuses.append)
 
-        for _ in range(cs.ESCAPE_EXHAUSTION_THRESHOLD):
+        for _ in range(ESCAPE_EXHAUSTION_THRESHOLD):
             self._run_escape(svc, monkeypatch)
 
         exhaustion_warnings = [w for w in warnings if 'pausing automatic' in w]
@@ -566,9 +578,9 @@ class TestEscapeExhaustion:
             self, qapp, fast_refine, monkeypatch):
         self._rejecting(monkeypatch)
         svc = _service(frames=_frames(n=16, span_minutes=40.0))
-        for _ in range(cs.ESCAPE_EXHAUSTION_THRESHOLD - 1):
+        for _ in range(ESCAPE_EXHAUSTION_THRESHOLD - 1):
             self._run_escape(svc, monkeypatch)
-        assert svc._escape_backoff.fruitless_count == cs.ESCAPE_EXHAUSTION_THRESHOLD - 1
+        assert svc._escape_backoff.fruitless_count == ESCAPE_EXHAUSTION_THRESHOLD - 1
 
         self._admitting(monkeypatch)
         self._run_escape(svc, monkeypatch)
