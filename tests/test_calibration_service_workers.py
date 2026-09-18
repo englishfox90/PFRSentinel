@@ -444,3 +444,47 @@ class TestFreshMonotonicClock:
             QCoreApplication.processEvents()
             if svc._refine_worker is None:
                 break
+
+
+class TestEscapeCarriesIncumbentAnchorHealth:
+    """#33: the escape ran only because the incumbent failed the bright-anchor
+    check, but nothing carried that fact past _maybe_refine, so the replacement
+    decision still weighed the failing model's RMS and refused every candidate
+    the escape produced — 41 of them in one night."""
+
+    def _record(self, monkeypatch):
+        calls = []
+
+        def fake_should_replace(*a, **kw):
+            calls.append(kw)
+            return False, 'recorded'
+
+        monkeypatch.setattr(cs, 'should_replace', fake_should_replace)
+        return calls
+
+    def _escape(self, monkeypatch, health):
+        monkeypatch.setattr(cs, 'incumbent_anchor_health', lambda m, f: health)
+        calls = self._record(monkeypatch)
+        svc = _service(frames=_frames(n=16, span_minutes=40.0))
+        _arm_escape(svc)
+        svc._maybe_refine()
+        _pump(svc, svc._refine_worker)
+        return svc, calls
+
+    def test_an_anchor_failing_incumbent_is_reported(self, qapp, fast_refine, monkeypatch):
+        svc, calls = self._escape(monkeypatch, False)
+        assert calls and calls[-1]['escape'] is True
+        assert calls[-1]['incumbent_failed_anchors'] is True
+        assert svc._escape_incumbent_failed_anchors is False
+
+    def test_unknown_health_reports_no_failure(self, qapp, fast_refine, monkeypatch):
+        _svc, calls = self._escape(monkeypatch, None)
+        assert calls and calls[-1]['escape'] is True
+        assert calls[-1]['incumbent_failed_anchors'] is False
+
+    def test_a_plain_refinement_reports_no_failure(self, qapp, fast_refine, monkeypatch):
+        calls = self._record(monkeypatch)
+        svc = _service()
+        _run_one_refinement(svc)
+        assert calls and calls[-1]['escape'] is False
+        assert calls[-1]['incumbent_failed_anchors'] is False

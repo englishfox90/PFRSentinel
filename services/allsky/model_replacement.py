@@ -34,18 +34,38 @@ Rules, in order:
    matches), a margin that is noise between two fits of one lens. Two
    uncorroborated fits are symmetric ignorance and a coin-flip RMS must
    not decide between them.
-3. Guided single-solve incumbent vs a multi-image candidate: rank only. The
+3. Basin escape over an incumbent that FAILED the bright-anchor gate:
+   replace, whatever the RMS says. CalibrationService only lets an escape
+   run when the incumbent misses the bright stars on the recent frames — a
+   healthy incumbent cancels it in _maybe_refine — and the candidate was
+   admitted having passed that same gate on those same frames. A model
+   that cannot find the bright stars has no standing to veto on RMS one
+   that can. Without this rule the guard below reads the incumbent's RMS
+   first and the escape can never land: on the #33 rig a single-image fit
+   to five stars (2.43 px, 8 parameters over 5 points) turned away a
+   726-match joint fit 41 times in one night. This does not reopen
+   2026-09-05 — that incumbent PASSED the anchor gate, so the escape was
+   cancelled before any candidate existed. Anchor health is tri-state: an
+   obstructed or cloudy buffer reports None, which is not a failure and
+   changes nothing here.
+4. Guided single-solve incumbent vs a multi-image candidate: rank only. The
    guided solve's RMS is over a handful of clicked anchors, a joint fit's is
    over thousands of matches across the sky — not comparable — and the
    joint fit is the better whole-sky model (ALLSKY_CALIBRATION_PLAN:
    multi-3h beat the 9-anchor V5 fit despite the higher reported RMS). The
    candidate was admitted as the same basin, so a rank upgrade is enough.
-   Once replaced, both sides carry joint RMS and rule 4 applies again.
-4. Otherwise the RMS guard: reject if more than 15 % worse by RMS — a
-   quality-rank upgrade is not sufficient justification for overwriting a
-   precise model (a 15–20 px model used to overwrite a 3 px one just by
-   accumulating frames) — and then require either a rank upgrade or a
-   strict improvement (lower RMS with at least as many matches).
+   Once replaced, both sides carry joint RMS and rule 5 applies again.
+5. Otherwise the RMS guard, but only where the incumbent's RMS is a
+   measurement: reject if more than 15 % worse by RMS — a quality-rank
+   upgrade is not sufficient justification for overwriting a precise model
+   (a 15–20 px model used to overwrite a 3 px one just by accumulating
+   frames) — and then require either a rank upgrade or a strict improvement
+   (lower RMS with at least as many matches). An incumbent fitted to a
+   handful of matches in a single image reports a residual that is
+   interpolation rather than measurement (see COMPARABLE_MIN_MATCHES), and
+   such a number binds nothing: the guard and the escape floor are skipped
+   and rank or strict improvement decides. 2026-09-05's incumbent had 767
+   matches over 40 images, so the guard still binds there.
 """
 from typing import Tuple
 
@@ -59,6 +79,20 @@ RMS_REGRESSION_TOLERANCE = 1.15
 # of one lens are indistinguishable on RMS alone.
 ESCAPE_MIN_RMS_GAIN = 0.85
 
+# Below these an incumbent's RMS is not a measurement of the lens and cannot
+# veto a candidate (rule 5). The lens model fits 8 parameters, so a
+# single-image solve over 5 matched stars has 2 residual degrees of freedom
+# — its 2.43 px is what the arithmetic must produce, not how well the model
+# predicts the sky (#33). Either enough frames or enough matches restores
+# the meaning; both are far short of what a healthy refinement reports.
+COMPARABLE_MIN_IMAGES = 3
+COMPARABLE_MIN_MATCHES = 30
+
+
+def _rms_is_comparable(model) -> bool:
+    return (model.n_images >= COMPARABLE_MIN_IMAGES
+            or model.n_matches >= COMPARABLE_MIN_MATCHES)
+
 
 def should_replace(
     incumbent,
@@ -67,9 +101,13 @@ def should_replace(
     candidate_quality: str,
     escape: bool = False,
     evidence: bool = False,
+    incumbent_failed_anchors: bool = False,
 ) -> Tuple[bool, str]:
     """(replace?, reason). `escape`: the candidate came from a seedless basin
-    escape; `evidence`: model_admission.admission_evidence for its admission.
+    escape; `evidence`: model_admission.admission_evidence for its admission;
+    `incumbent_failed_anchors`: the incumbent failed the bright-anchor gate on
+    the frames that licensed the escape (incumbent_evidence, tri-state — only
+    a definite failure counts).
     """
     if incumbent is None:
         return True, "no incumbent"
@@ -81,6 +119,15 @@ def should_replace(
             f"with the re-calibrated one (RMS {candidate.rms_residual:.1f}px) "
             "without the RMS guard")
 
+    if escape and incumbent_failed_anchors:
+        return True, (
+            "basin escape over a model that fails the bright-anchor check on "
+            f"the recent frames (RMS {incumbent.rms_residual:.2f}px over "
+            f"{incumbent.n_matches} matches) — the candidate passed the same "
+            f"check (RMS {candidate.rms_residual:.2f}px over "
+            f"{candidate.n_matches} matches); a model that misses the bright "
+            "stars does not get an RMS veto")
+
     rank_up = (CalibrationQuality.rank(candidate_quality)
                > CalibrationQuality.rank(incumbent_quality))
 
@@ -90,31 +137,38 @@ def should_replace(
             return True, "multi-image refinement supersedes the guided single solve"
         return False, "no rank upgrade over the guided single solve"
 
+    comparable = _rms_is_comparable(incumbent)
+    note = "" if comparable else (
+        f"the incumbent's RMS {incumbent.rms_residual:.2f}px is not "
+        f"comparable ({incumbent.n_matches} matches over "
+        f"{incumbent.n_images} image(s)) — ")
     prefix = ("basin escape without evidence (uncorroborated incumbent, no "
               "trusted pole) — held to the normal comparison with a "
               "material-gain floor: "
               if escape else "")
-    if candidate.rms_residual > incumbent.rms_residual * RMS_REGRESSION_TOLERANCE:
-        return False, (prefix + f"RMS {candidate.rms_residual:.2f}px is more than "
-                       f"{RMS_REGRESSION_TOLERANCE - 1:.0%} worse than "
-                       f"{incumbent.rms_residual:.2f}px")
-    if escape:
-        floor = incumbent.rms_residual * ESCAPE_MIN_RMS_GAIN
-        if (candidate.rms_residual <= floor
-                and candidate.n_matches >= incumbent.n_matches):
-            return True, (prefix + f"RMS {candidate.rms_residual:.2f}px beats "
-                          f"{incumbent.rms_residual:.2f}px by at least "
-                          f"{1 - ESCAPE_MIN_RMS_GAIN:.0%} with at least as many matches")
-        return False, (prefix + f"RMS {candidate.rms_residual:.2f}px vs "
-                       f"{incumbent.rms_residual:.2f}px ({candidate.n_matches} vs "
-                       f"{incumbent.n_matches} matches) is not a material "
-                       f"improvement — a different basin is not adopted on "
-                       f"fit numbers within {1 - ESCAPE_MIN_RMS_GAIN:.0%}")
+    if comparable:
+        if candidate.rms_residual > incumbent.rms_residual * RMS_REGRESSION_TOLERANCE:
+            return False, (prefix + f"RMS {candidate.rms_residual:.2f}px is more than "
+                           f"{RMS_REGRESSION_TOLERANCE - 1:.0%} worse than "
+                           f"{incumbent.rms_residual:.2f}px")
+        if escape:
+            floor = incumbent.rms_residual * ESCAPE_MIN_RMS_GAIN
+            if (candidate.rms_residual <= floor
+                    and candidate.n_matches >= incumbent.n_matches):
+                return True, (prefix + f"RMS {candidate.rms_residual:.2f}px beats "
+                              f"{incumbent.rms_residual:.2f}px by at least "
+                              f"{1 - ESCAPE_MIN_RMS_GAIN:.0%} with at least as many matches")
+            return False, (prefix + f"RMS {candidate.rms_residual:.2f}px vs "
+                           f"{incumbent.rms_residual:.2f}px ({candidate.n_matches} vs "
+                           f"{incumbent.n_matches} matches) is not a material "
+                           f"improvement — a different basin is not adopted on "
+                           f"fit numbers within {1 - ESCAPE_MIN_RMS_GAIN:.0%}")
     if rank_up:
-        return True, "quality rank upgrade within the RMS guard"
+        return True, note + ("quality rank upgrade within the RMS guard"
+                             if comparable else "quality rank upgrade")
     if (candidate.rms_residual < incumbent.rms_residual
             and candidate.n_matches >= incumbent.n_matches):
-        return True, "lower RMS with at least as many matches"
-    return False, (f"not better (RMS {candidate.rms_residual:.2f}px vs "
+        return True, note + "lower RMS with at least as many matches"
+    return False, (note + f"not better (RMS {candidate.rms_residual:.2f}px vs "
                    f"{incumbent.rms_residual:.2f}px, {candidate.n_matches} vs "
                    f"{incumbent.n_matches} matches)")

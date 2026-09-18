@@ -143,6 +143,9 @@ class CalibrationService(QObject):
         self._consecutive_refine_failures = 0
         self._last_escape_time = -math.inf
         self._escape_attempt = False
+        # Whether the incumbent definitely failed the bright-anchor check on
+        # the frames that licensed that escape (model_replacement rule 3).
+        self._escape_incumbent_failed_anchors = False
         # Back-off counter, separate from _consecutive_refine_failures: that
         # one drives basin escape and deliberately ignores cold-start and
         # stale-seed failures. Back-off must count every fruitless run.
@@ -182,6 +185,7 @@ class CalibrationService(QObject):
         self._consecutive_refine_failures = 0
         self._refine_backoff_failures = 0
         self._escape_attempt = False
+        self._escape_incumbent_failed_anchors = False
         if self._quality != CalibrationQuality.NONE:
             self._quality = CalibrationQuality.NONE
         log.info("CalibrationService: model cleared (user reset); "
@@ -197,6 +201,7 @@ class CalibrationService(QObject):
         self._consecutive_refine_failures = 0
         self._refine_backoff_failures = 0
         self._escape_attempt = False
+        self._escape_incumbent_failed_anchors = False
         new_q = model_quality(model, model.n_images, model.span_minutes)
         with self._lock:
             self._frames.clear()
@@ -437,6 +442,7 @@ class CalibrationService(QObject):
         # (2026-09-05: 26 rejections while the incumbent drew a correct
         # overlay; the escape installed a wrong-basin model). Refine as
         # usual instead and re-ask after the escape cooldown.
+        health = None
         if escape:
             self._last_escape_time = now
             health = incumbent_anchor_health(self._model, frames_copy)
@@ -450,6 +456,7 @@ class CalibrationService(QObject):
                 escape = False
                 cold_start = False
         self._escape_attempt = escape
+        self._escape_incumbent_failed_anchors = escape and health is False
 
         # seed=None -> _RefineWorker bootstraps a coarse orientation seed
         # (cold start / basin escape). Otherwise it refines the existing model.
@@ -605,11 +612,13 @@ class CalibrationService(QObject):
         new_q = model_quality(model, n_images, span_min)
         improved, why = should_replace(
             self._model, self._quality, model, new_q,
-            escape=self._escape_attempt, evidence=evidence)
+            escape=self._escape_attempt, evidence=evidence,
+            incumbent_failed_anchors=self._escape_incumbent_failed_anchors)
         if self._escape_attempt:
             (log.warning if improved else log.info)(f"Basin escape result: {why}")
 
         self._escape_attempt = False
+        self._escape_incumbent_failed_anchors = False
         if improved:
             self._consecutive_refine_failures = 0
             self._model = model
@@ -638,6 +647,7 @@ class CalibrationService(QObject):
 
     def _on_refine_failed(self, error: str) -> None:
         self._escape_attempt = False
+        self._escape_incumbent_failed_anchors = False
         self._last_refine_time = time.monotonic()
         self._refine_backoff_failures += 1
         if self._model:
