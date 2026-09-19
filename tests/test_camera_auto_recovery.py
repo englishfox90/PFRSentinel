@@ -266,6 +266,25 @@ class TestControllerWithRecoveryOff:
         assert ctrl.recovery_state()['in_progress'] is False
 
 
+    @pytest.mark.parametrize("reset_ok", [True, False])
+    def test_usb_reset_finishing_after_switch_off_is_ignored(self, qt_app, reset_ok):
+        """A reset already in flight can't be recalled. Its failure branch goes
+        straight to the app relaunch, not through _schedule_auto_recovery."""
+        ctrl = _controller(False)
+        ctrl._last_successful_frame_ts = 123.0
+        ctrl._on_usb_reset_done(reset_ok)
+        ctrl.main_window.restart_application.assert_not_called()
+        assert ctrl._unrecoverable_mode is False
+        assert ctrl._auto_recovery_timer is None
+
+
+def test_failed_usb_reset_still_escalates_with_recovery_on(qt_app):
+    ctrl = _controller(True)
+    ctrl._escalate_to_restart_or_alert = MagicMock()
+    ctrl._on_usb_reset_done(False)
+    ctrl._escalate_to_restart_or_alert.assert_called_once()
+
+
 def test_controller_still_schedules_restart_with_recovery_on(qt_app):
     ctrl = _controller(True)
     ctrl._schedule_auto_recovery()
