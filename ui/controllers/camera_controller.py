@@ -477,8 +477,9 @@ class CameraControllerQt(QObject):
             self._auto_recovery_attempts = 0
 
     def _schedule_auto_recovery(self):
-        # Every controller-level recovery step (restart timer, USB toggle, app
-        # relaunch) is reached through here, so this one gate covers them all.
+        # The restart timer, and everything it leads to, starts here. The two
+        # paths that don't — a failed start and a finished USB reset — carry
+        # their own gate (_on_capture_start_done, _on_usb_reset_done).
         if not self._auto_recovery_enabled():
             app_logger.warning(
                 "Automatic recovery is off — capture stays stopped until "
@@ -628,6 +629,11 @@ class CameraControllerQt(QObject):
         )
 
     def _on_usb_reset_done(self, success: bool):
+        # The switch can't recall a reset already in flight when it was turned
+        # off; drop the result so a failure can't go on to relaunch the app.
+        if not self._auto_recovery_enabled():
+            app_logger.info("USB reset finished after automatic recovery was turned off — ignored")
+            return
         if success:
             # The toggle may have freed a wedged capture thread; re-run
             # recovery, which re-joins the dying thread before any new SDK call.
