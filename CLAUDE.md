@@ -65,7 +65,7 @@ PFRSentinel/
 │   └── notifications/          # Notification dispatcher + backends (Discord, Hermes)
 ├── ml/                         # Scene classifiers (roof, sky conditions, stars, moon) — ONNX inference
 ├── tests/                      # pytest suite — see "Testing" below
-├── docs/                       # Plans, design docs, references
+├── docs/                       # Plans, design docs, references; docs/wiki/ is the user wiki source
 ├── archive/                    # Legacy Tkinter GUI (do not modify)
 ├── nina-plugin/                # NINA plugin (C#/.NET 8 + WPF) — see below
 ├── installer/                  # Inno Setup packaging
@@ -263,6 +263,22 @@ Two traps in the Claude workflows, both of which fail **green**:
   passing `claude-review` check is not evidence a review happened — look for
   the comment.
 
+### User wiki
+
+The GitHub wiki is published from `docs/wiki/`, which is the source of truth — the
+wiki itself has no pull requests, so edits are reviewed here. `wiki-publish.yml`
+mirrors `docs/wiki/` to the wiki on every push to `main` that touches it, using the
+`WIKI_TOKEN` secret (a fine-grained token with Contents: Read and write;
+`GITHUB_TOKEN` cannot push to a wiki). It refuses to run if the wiki was edited
+in the browser since the last sync, so copy such edits into `docs/wiki/` first.
+`claude-wiki-update.yml` chains off Tag Pushed and opens a PR updating `docs/wiki/`
+for what changed since the previous tag, branched from the tag so it documents
+the code that shipped. **Merging that PR publishes the wiki** — merge it when
+the release is published. When a change alters something users see, update the
+matching `docs/wiki/` page in the same PR — it goes live when the PR merges, so put
+`> **New in the next release** — not available in version X.Y.Z or earlier.`
+under the heading; the tag-time agent removes those notes once the feature ships.
+
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
@@ -303,6 +319,8 @@ Two traps in the Claude workflows, both of which fail **green**:
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
 | `test_windows_only_ui.py` | 5 | `FfmpegInstallCard` copyable install command off Windows; `MissingCameraNotice` hides Revive where there is no USB reset API (offscreen Qt) |
 | `test_update_dialog_platform.py` | 3 | `UpdateDialog` — download hidden and GitHub made primary off Windows; installer launch is a no-op there (offscreen Qt) |
+| `test_scroll_safe_spinbox.py` | 10 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it, a click on the child line edit does (offscreen Qt) |
+| `test_image_processing_panel_stretch.py` | 4 | `ImageProcessingPanel` Auto Stretch rows — Target Median slider reaches the engine floor, Dark Threshold enabled only with Dark Scene Color Fix (offscreen Qt) |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
@@ -333,7 +351,7 @@ Standalone (not in pytest suite):
 - [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
 - [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
 
-Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki.
+Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph

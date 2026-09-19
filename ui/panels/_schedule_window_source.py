@@ -7,7 +7,9 @@ all the actual schedule maths.
 """
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtCore import Signal
-from qfluentwidgets import CaptionLabel, ComboBox, SpinBox
+from qfluentwidgets import CaptionLabel, ComboBox
+
+from ..components.scroll_safe_spinbox import SpinBox
 
 from ..theme.tokens import Colors, Spacing
 from ..components.cards import FormRow

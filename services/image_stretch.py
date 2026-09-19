@@ -3,6 +3,13 @@ import numpy as np
 from PIL import Image
 from .logger import app_logger
 
+TARGET_MEDIAN_MIN = 0.02
+# The "already bright, skip" guard sits 0.1 above the target, floored at the
+# old 0.05 minimum. Deriving it from a 0.02 target would skip a 0.13-median
+# twilight frame that 0.05 still stretched down, so the darkest slider
+# positions would give the brightest output.
+SKIP_GUARD_TARGET_FLOOR = 0.05
+
 
 def mtf_stretch(value, midtone):
     """
@@ -59,7 +66,7 @@ def auto_stretch_image(img, config, raw_16bit=None):
     Args:
         img: PIL Image object (8-bit)
         config: Dictionary with stretch settings:
-               - target_median: Target median brightness (0.0-1.0)
+               - target_median: Target median brightness (0.02-0.95)
                - linked_stretch: Apply same stretch to all channels (prevents color shifts)
                - preserve_blacks: Keep true blacks dark instead of lifting to grey
                - black_point: Manual black point (0.0-0.1) - pixels below this stay black
@@ -91,7 +98,11 @@ def auto_stretch_image(img, config, raw_16bit=None):
         dark_scene_threshold = config.get('dark_scene_threshold', 0.05)
         scnr_amount = config.get('scnr_amount', 0.0)
 
-        target_median = np.clip(target_median, 0.05, 0.95)
+        # Floor is 0.02, not 0.05: on an all-sky frame with a pier or telescope
+        # in the field the median pixel is that foreground, and the sky sits
+        # several times above it. 0.05 left the sky at mid-grey however low the
+        # slider went (issue #13).
+        target_median = np.clip(target_median, TARGET_MEDIAN_MIN, 0.95)
         black_point = np.clip(black_point, 0.0, 0.1)
         shadow_aggressiveness = np.clip(shadow_aggressiveness, 1.0, 5.0)
 
@@ -113,8 +124,9 @@ def auto_stretch_image(img, config, raw_16bit=None):
                     0.299 * img_array[:,:,0] + 0.587 * img_array[:,:,1] + 0.114 * img_array[:,:,2]
                 )
 
-        if current_brightness > target_median + 0.1:
-            app_logger.debug(f"Auto-stretch skipped ({bit_depth_str}): image already bright (median={current_brightness:.3f} > target={target_median:.3f})")
+        skip_above = max(target_median, SKIP_GUARD_TARGET_FLOOR) + 0.1
+        if current_brightness > skip_above:
+            app_logger.debug(f"Auto-stretch skipped ({bit_depth_str}): image already bright (median={current_brightness:.3f} > {skip_above:.3f}, target={target_median:.3f})")
             return img
 
         app_logger.debug(f"Auto-stretch starting ({bit_depth_str}): current_median={current_brightness:.3f}, target={target_median:.3f}, preserve_blacks={preserve_blacks}")

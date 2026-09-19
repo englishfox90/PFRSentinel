@@ -14,10 +14,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from qfluentwidgets import (
-    PushButton, SwitchButton, SpinBox,
+    PushButton, SwitchButton,
     CardWidget, CaptionLabel, BodyLabel, SubtitleLabel,
     MessageBox,
 )
+from ..components.scroll_safe_spinbox import SpinBox
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
