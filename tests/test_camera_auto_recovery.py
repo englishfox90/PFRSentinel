@@ -162,21 +162,45 @@ class TestCaptureLoopWithRecoveryOff:
         assert is_fatal is True
         assert "automatic recovery is off" in msg
 
-    def test_second_fault_after_a_good_reconnect_stops_capture(self, run_loop):
-        cam = _FakeCamera(False, frames=[Exception("a"), Exception("b")],
-                          reconnects=[True])
+    def test_cold_open_quirk_after_the_reconnect_is_absorbed(self, run_loop):
+        """The frame after a reopen often fails once with "Camera closed"; the
+        silent warm-up reopen belongs to the one reconnect, so capture resumes."""
+        cam = _FakeCamera(
+            False,
+            frames=[Exception("USB gone"), Exception("Camera closed"), True],
+            reconnects=[True, True],
+        )
+        cam.on_frame_callback = lambda *_a: setattr(cam, 'is_capturing', False)
         run_loop(cam)
-        assert cam.reconnect_calls == 1
+        assert cam.reconnect_calls == 2
+        assert not any(is_fatal for _msg, is_fatal in cam.errors)
+
+    def test_fault_that_outlives_the_warm_up_stops_capture(self, run_loop):
+        cam = _FakeCamera(False, frames=[Exception("a"), Exception("b"), Exception("c")],
+                          reconnects=[True, True])
+        run_loop(cam)
+        assert cam.reconnect_calls == 2  # the reconnect + its warm-up reopen
         assert cam.errors[-1][1] is True
+        assert "automatic recovery is off" in cam.errors[-1][0]
+
+    def test_fatal_exit_releases_the_camera_handle(self, run_loop):
+        """stop_capture() never runs on a fatal exit and nothing will reopen the
+        handle, so the loop must not leave the USB device claimed."""
+        cam = _FakeCamera(False, frames=[Exception("a"), Exception("b"), Exception("c")],
+                          reconnects=[True, True])
+        run_loop(cam)
+        # Once before the reconnect, once inside the warm-up reopen, then the
+        # final release of the still-open handle.
+        assert cam._connection.disconnect.call_count == 3
 
     def test_a_good_frame_renews_the_single_reconnect(self, run_loop):
         cam = _FakeCamera(
             False,
-            frames=[Exception("a"), True, Exception("b"), Exception("c")],
-            reconnects=[True, True],
+            frames=[Exception("a"), True, Exception("b"), Exception("c"), Exception("d")],
+            reconnects=[True, True, True],
         )
         run_loop(cam)
-        assert cam.reconnect_calls == 2
+        assert cam.reconnect_calls == 3  # fault 1; fault 2 + its warm-up reopen
         assert cam.errors[-1][1] is True
 
 

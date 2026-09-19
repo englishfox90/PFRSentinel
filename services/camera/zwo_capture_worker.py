@@ -308,8 +308,7 @@ def capture_loop(camera: "ZWOCamera"):
     # (the SDK can't take that churn — it recommends 10-15s between ops).
     # See also the 2026-06-02 16:00 scheduled-reconnect incident.
     warmup_pending = False
-    # With config 'camera_auto_recovery' off, a fault gets ONE reconnect; this
-    # stays set until a frame lands, so a second failure stops capture instead.
+    # 'camera_auto_recovery' off: a fault gets ONE reconnect; cleared by a good frame.
     reconnect_spent = False
     fatal_reason = "Capture loop terminated unexpectedly"
     # Heartbeat + state flags observed by the UI watchdog. _last_frame_time
@@ -544,10 +543,10 @@ def capture_loop(camera: "ZWOCamera"):
                     break
 
                 auto_recovery = getattr(camera, 'auto_recovery_enabled', True)
-                if not auto_recovery and reconnect_spent:
+                # The cold-open quirk below belongs to that one reconnect, not a 2nd fault.
+                if not auto_recovery and reconnect_spent and not warmup_pending:
                     fatal_reason = (f"Capture failed again after the single reconnect ({e}); "
                                     "automatic recovery is off — capture stopped")
-                    camera.log(f"✗ {fatal_reason}")
                     break
 
                 # First frame after a scheduled-window reconnect: absorb a
@@ -718,9 +717,15 @@ def capture_loop(camera: "ZWOCamera"):
                     consecutive_errors = 0
     finally:
         camera.log("Capture loop exiting - cleaning up...")
-        # Note: snapshot mode (start_exposure/get_data_after_exposure),
-        # NOT video mode. Camera cleanup handled by disconnect_camera()
-        # via stop_capture().
+        # Snapshot mode, not video: nothing to stop here, and stop_capture() owns
+        # the disconnect. It never runs on a fatal exit though, and with recovery
+        # off nothing reopens the handle — release the USB device ourselves.
+        if camera.is_capturing and not getattr(camera, 'auto_recovery_enabled', True):
+            camera.log(f"✗ {fatal_reason}")
+            try:
+                camera._connection.disconnect()
+            except Exception:
+                pass
 
         # If capture is exiting while is_capturing is still True, something
         # fatal (unhandled exception) forced us out — tell the UI so it can
