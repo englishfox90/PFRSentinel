@@ -74,12 +74,7 @@ class AppBar(QFrame):
         layout.addWidget(self.app_icon)
 
         self.app_name = QLabel("PFR Sentinel")
-        self.app_name.setStyleSheet(f"""
-            font-size: {Typography.size_subtitle}px;
-            font-weight: {Typography.weight_bold};
-            color: {Colors.text_primary};
-            border: none;
-        """)
+        self._style_app_name()
         layout.addWidget(self.app_name)
 
         # Spacer
@@ -89,7 +84,8 @@ class AppBar(QFrame):
         # Fixed size: its policy is Expanding, which otherwise stretches it across
         # the whole bar so the centered animation gets lost in dead space.
         self.status_sprite = StatusSpriteWidget()
-        self.status_sprite.setFixedSize(44, 44)
+        # Wider than it is tall: the waiting speech bubble needs the room.
+        self.status_sprite.setFixedSize(112, 44)
         self.status_sprite.hide()
         layout.addWidget(self.status_sprite, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -115,12 +111,7 @@ class AppBar(QFrame):
         self.primary_btn.setMinimumWidth(150)
         self.primary_btn.setCursor(Qt.PointingHandCursor)
         self.primary_btn.clicked.connect(self._on_primary_clicked)
-        # Force white label so it matches the white icon (the iris accent is light
-        # enough that qfluent would otherwise pick a darker text colour).
-        # setCustomStyleSheet merges with the theme sheet, so icon padding + radius
-        # are preserved and it survives accent/theme changes.
-        _white = "PrimaryPushButton { color: white; font-weight: bold; }"
-        setCustomStyleSheet(self.primary_btn, _white, _white)
+        self._style_primary_btn()
         layout.addWidget(self.primary_btn)
 
         self.stop_btn = PushButton("Stop")
@@ -139,6 +130,40 @@ class AppBar(QFrame):
         layout.addWidget(self.stop_btn)
 
         self.update_primary_action(False, False)
+
+    # =========================================================================
+    # THEME
+    # =========================================================================
+
+    def _style_app_name(self):
+        from ..theme.special_themes import display_font_active
+        themed = display_font_active()
+        family = f"font-family: {Typography.family_display};" if themed else ""
+        self.app_name.setStyleSheet(f"""
+            {family}
+            font-size: {Typography.size_title if themed else Typography.size_subtitle}px;
+            font-weight: {Typography.weight_regular if themed else Typography.weight_bold};
+            color: {Colors.accent_text if themed else Colors.text_primary};
+            border: none;
+        """)
+
+    def _style_primary_btn(self):
+        # Force the label colour so it matches the icon (the iris accent is light
+        # enough that qfluent would otherwise pick a darker text colour).
+        # setCustomStyleSheet merges with the theme sheet, so icon padding + radius
+        # are preserved and it survives accent/theme changes.
+        qss = f"PrimaryPushButton {{ color: {Colors.text_on_accent}; font-weight: bold; }}"
+        setCustomStyleSheet(self.primary_btn, qss, qss)
+
+    def refresh_styles(self):
+        """Re-apply inline styles from the current tokens after an accent or
+        special theme change."""
+        self.setStyleSheet(f"AppBar {{ background-color: {Colors.bg_surface}; }}")
+        self._style_app_name()
+        self._style_primary_btn()
+        self._action_key = None
+        self.update_primary_action(self._is_capturing, self._camera_connected)
+        self.update()
 
     # =========================================================================
     # PRIMARY ACTION
@@ -167,13 +192,13 @@ class AppBar(QFrame):
         if camera_connected:
             self._action_mode = 'start'
             self.primary_btn.setText("Start Capture")
-            self.primary_btn.setIcon(mdi('play', 'white'))
+            self.primary_btn.setIcon(mdi('play', Colors.text_on_accent))
             self.primary_btn.setEnabled(self._start_enabled)
             self.primary_btn.setToolTip(self._start_tooltip)
         else:
             self._action_mode = 'connect'
             self.primary_btn.setText("Connect Camera")
-            self.primary_btn.setIcon(mdi('camera-plus-outline', 'white'))
+            self.primary_btn.setIcon(mdi('camera-plus-outline', Colors.text_on_accent))
             self.primary_btn.setEnabled(True)
             self.primary_btn.setToolTip("")
 
@@ -294,6 +319,20 @@ class AppBar(QFrame):
         else:
             self.status_sprite.set_state(None)
             self.status_sprite.hide()
+
+    def show_sending(self, next_status, hold_ms: int = 1100):
+        """Show 'sending', then move to next_status() after the hold.
+
+        The hold is sprite-only. 'sending' is deferred 250 ms after a stretch, so
+        the old 300 ms hold left it ~50 ms on screen. Any later set_status() —
+        a newer frame at a fast cadence — bumps the generation and cancels this
+        one, and next_status is a callable so it reads the capture state then,
+        not now.
+        """
+        from PySide6.QtCore import QTimer as _QTimer
+        self.set_status('sending')
+        gen = self._status_generation
+        _QTimer.singleShot(hold_ms, lambda: gen == self._status_generation and self.set_status(next_status()))
 
     def set_processing(self, is_processing: bool):
         """Legacy method for backward compatibility"""

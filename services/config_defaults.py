@@ -26,6 +26,7 @@ DEFAULT_CAMERA_PROFILE = {
 DEFAULT_CONFIG = {
     # UI appearance
     "ui_accent": "iris",   # accent theme: iris | nebula | aurora | solar | nova | forest
+    "ui_special_theme": "",   # special theme pack ("" = off): halloween
     "ui_log_level": "Info+",
 
     # Window settings

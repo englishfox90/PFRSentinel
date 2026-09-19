@@ -1,6 +1,6 @@
 # Settings
 
-The Settings tab holds application-wide options: the accent colour, how PFR Sentinel runs in the background and at Windows logon, anonymous usage data, the OpenWeatherMap connection, and update checking. It opens full width (the live preview is hidden while it is open). Settings are saved as you change them.
+The Settings tab holds application-wide options: the accent colour and special themes, how PFR Sentinel runs in the background and at Windows logon, anonymous usage data, the OpenWeatherMap connection, and update checking. It opens full width (the live preview is hidden while it is open). Settings are saved as you change them.
 
 ---
 
@@ -8,7 +8,12 @@ The Settings tab holds application-wide options: the accent colour, how PFR Sent
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Accent** | Iris | Six colour swatches (hover one to see its name): **Iris**, **Nebula**, **Aurora**, **Solar**, **Nova**, and **Forest**. The accent colours buttons, switches, the selected navigation item, and other highlights. The change applies immediately. The app always uses its dark theme. |
+| **Theme** (accent swatches) | Iris | Six colour swatches (hover one to see its name): **Iris**, **Nebula**, **Aurora**, **Solar**, **Nova**, and **Forest**. The accent colours buttons, switches, the selected navigation item, and other highlights. The change applies immediately. The app always uses its dark theme. |
+| **Theme** (special themes) | Off | The chips after the divider are special themes. **Halloween** changes more than the colour: a pumpkin accent on purple-black backgrounds, card headings in a display font, themed icons in the navigation rail, and spooky versions of the pipeline status animations. Click the chip again to switch it off, or click any accent swatch; your accent comes back as you left it. |
+
+> **New in the next release** — special themes are not available in version 3.7.6 or earlier.
+
+A special theme only restyles the app window. It never changes your images, overlays, or anything sent to the web server or Discord, and the status colours (green for live, amber for connecting, red for errors) stay the same. Page names do not change, so every page is where you expect it. Headings, icons and animations switch straight away; some panels keep their previous colours until you restart the app, after which everything matches.
 
 ---
 

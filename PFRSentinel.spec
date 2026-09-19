@@ -240,6 +240,9 @@ added_files = [
     # (services/font_loader.py). OFL-licensed; the licence ships beside it.
     ('assets/fonts/SpaceGrotesk-Medium.ttf', 'assets/fonts'),
     ('assets/fonts/OFL-SpaceGrotesk.txt', 'assets/fonts'),
+    # Heading font for the Halloween special theme (ui/theme/special_themes.py)
+    ('assets/fonts/Creepster-Regular.ttf', 'assets/fonts'),
+    ('assets/fonts/OFL-Creepster.txt', 'assets/fonts'),
     # ML models (ONNX format for production)
     ('ml/models/roof_classifier_v1.onnx', 'ml/models'),
     ('ml/models/sky_classifier_v1.onnx', 'ml/models'),

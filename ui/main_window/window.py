@@ -22,7 +22,7 @@ from services.library import ImageLibrary
 from services.notifications import NotificationDispatcher
 from version import __version__
 
-from ..theme import apply_theme, apply_accent_theme, get_stylesheet
+from ..theme import apply_theme, apply_appearance
 from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..components.app_bar import AppBar
 from ..components.nav_rail import NavRail
@@ -51,6 +51,7 @@ from .capture import _MainWindowCaptureMixin
 from .output import _MainWindowOutputMixin
 from .settings import _MainWindowSettingsMixin
 from .lifecycle import _MainWindowLifecycleMixin
+from .appearance import apply_window_appearance
 
 
 class MainWindow(
@@ -73,6 +74,9 @@ class MainWindow(
         apply_theme()
 
         self.config = Config()
+        # Before any widget exists: panels bake token colours into inline
+        # stylesheets as they are built, so the saved theme must already be in.
+        apply_appearance(self.config.get('ui_accent', 'iris'), self.config.get('ui_special_theme', ''))
 
         self.is_capturing = False
         self.image_count = 0
@@ -332,6 +336,7 @@ class MainWindow(
         self.processing_panel.settings_changed.connect(self.reprocess_last_frame)
         self.overlay_panel.settings_changed.connect(self.reprocess_last_frame)
         self.settings_panel.accent_changed.connect(self.set_accent_theme)
+        self.settings_panel.special_theme_changed.connect(self.set_accent_theme)
 
         self.image_processor.processing_time.connect(
             self.live_panel.update_processing_time
@@ -381,20 +386,11 @@ class MainWindow(
         self.image_processor.error_occurred.connect(self._on_processing_error)
 
     def _apply_styles(self):
-        saved_accent = self.config.get('ui_accent', 'iris')
-        apply_accent_theme(saved_accent)
-        self.setStyleSheet(get_stylesheet())
-        self.nav_rail.refresh_styles()
-        self.status_strip.refresh_styles()
+        apply_window_appearance(self)
 
-    def set_accent_theme(self, name: str) -> None:
-        """Switch accent colour at runtime and refresh all styled widgets."""
-        apply_accent_theme(name)
-        self.setStyleSheet(get_stylesheet())
-        if hasattr(self, 'nav_rail'):
-            self.nav_rail.refresh_styles()
-        if hasattr(self, 'status_strip'):
-            self.status_strip.refresh_styles()
+    def set_accent_theme(self, _name: str = '') -> None:
+        """Accent or special theme changed (already saved to config): restyle live."""
+        apply_window_appearance(self)
 
     def _start_timers(self):
         self.status_timer = QTimer(self)
