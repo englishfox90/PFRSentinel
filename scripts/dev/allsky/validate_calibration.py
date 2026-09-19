@@ -81,7 +81,7 @@ print(f"Image: {os.path.basename(test_image)}, UTC={dt}")
 
 t0 = time.monotonic()
 try:
-    model = calibrate(img, LAT, LON, dt=dt, min_matches=6)
+    model = calibrate(img, LAT, LON, dt=dt)
     elapsed = time.monotonic() - t0
     print(f"  SUCCESS: {model.n_matches} matches, RMS={model.rms_residual:.2f}px")
     print(f"  cx={model.cx:.1f}  cy={model.cy:.1f}  a1={model.a1:.1f}")

@@ -190,22 +190,35 @@ def calibrate(
         )
 
     # --- Step 6: Sanity-check the fit ---
-    # Three independent guards — all must pass, or we fall through to the
+    # Four independent guards — all must pass, or we fall through to the
     # triangle-hash fallback:
-    #   (a) lens polynomial within physical range (and not pinned at a bound)
+    #   (a) enough matches survived the iterative fit — issue #33 saved 8
+    #       free parameters fitted to FIVE stars at a flattering 2.4px RMS.
+    #       A thin grid fit is not evidence the frame can't be solved: the
+    #       fallback re-hypothesises the orientation from scratch (a
+    #       triangle-hash index + Wahba SVD solve, not the grid search's
+    #       orientation) and carries its own post-fit floor, so an
+    #       underdetermined model still can't come back through it.
+    #   (b) lens polynomial within physical range (and not pinned at a bound)
     #       — rejects cases where the optimiser bent the radial curve to fit
     #       a wrong orientation.
-    #   (b) a1 consistent with the measured sky circle — rejects fits that
+    #   (c) a1 consistent with the measured sky circle — rejects fits that
     #       converged at the wrong plate scale.
-    #   (c) the brightest N anchors actually land on detected stars —
+    #   (d) the brightest N anchors actually land on detected stars —
     #       rejects spurious density-noise fits that look fine on average
     #       but miss Sirius/Vega/etc. by 100+ px.
+    match_ok = model.n_matches >= min_matches
+    match_msg = (
+        f"{model.n_matches} matches >= {min_matches}" if match_ok else
+        f"fit matched only {model.n_matches} stars (need >= {min_matches})"
+    )
     poly_ok, poly_msg = validate_lens_polynomial(model)
     scale_ok, scale_msg = validate_a1_scale(model, _sky_r_ref)
     anch_ok, anch_msg = validate_bright_anchors(
         model, above_horizon, detected, sky_r=_sky_r_ref)
-    if not (poly_ok and scale_ok and anch_ok):
-        reason = "; ".join(m for ok, m in ((poly_ok, poly_msg),
+    if not (match_ok and poly_ok and scale_ok and anch_ok):
+        reason = "; ".join(m for ok, m in ((match_ok, match_msg),
+                                           (poly_ok, poly_msg),
                                            (scale_ok, scale_msg),
                                            (anch_ok, anch_msg)) if not ok)
         log.warning(
@@ -225,7 +238,7 @@ def calibrate(
                 f"Grid fit failed sanity check ({reason}); "
                 f"triangle-hash fallback also failed: {e}"
             )
-    log.info(f"Sanity checks passed: {poly_msg}; {scale_msg}; {anch_msg}")
+    log.info(f"Sanity checks passed: {match_msg}; {poly_msg}; {scale_msg}; {anch_msg}")
 
     warn_sky_coverage(model)
 

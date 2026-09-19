@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from services.allsky.calibration_quality import model_quality
 from services.allsky.fisheye import FisheyeModel
 from services.allsky.model_replacement import (
-    ESCAPE_MIN_RMS_GAIN, RMS_REGRESSION_TOLERANCE, should_replace)
+    COMPARABLE_MIN_IMAGES, COMPARABLE_MIN_MATCHES, ESCAPE_MIN_RMS_GAIN,
+    RMS_REGRESSION_TOLERANCE, _rms_is_comparable, should_replace)
 
 
 def _m(rms, n_matches, n_images=20, span=60.0, **over):
@@ -171,3 +172,168 @@ class TestEscapeMaterialGain:
     def test_fewer_matches_never_win_an_escape(self):
         ok, _ = _decide(_m(10.0, 1000), _m(5.0, 400), escape=True, evidence=False)
         assert not ok
+
+
+class TestEscapeOverAnUnhealthyIncumbent:
+    """#33, 19:58:17 on the reporter's rig: the model on disk is a single
+    image fitted to five matched stars. It misses the bright anchors on every
+    recent frame — the only reason an escape runs at all — yet its 2.43 px
+    turned away a 726-match joint fit that passed that same anchor check, 41
+    times in one night."""
+    DISK = dict(rms=2.43, n_matches=5, n_images=1, span=0.0)
+    ESCAPE = dict(rms=10.96, n_matches=726, n_images=53, span=90.0)
+
+    def test_the_reported_escape_lands(self):
+        ok, why = _decide(_m(**self.DISK), _m(**self.ESCAPE),
+                          escape=True, evidence=False,
+                          incumbent_failed_anchors=True)
+        assert ok and 'bright-anchor check' in why
+
+    def test_it_lands_over_a_comparable_incumbent_too(self):
+        """Rule 3 on its own: an anchor-failing incumbent gets no RMS veto
+        even when its RMS is over enough data to mean something."""
+        healthy_looking = _m(2.43, 100, n_images=5, span=30.0)
+        ok, why = _decide(healthy_looking, _m(**self.ESCAPE),
+                          escape=True, evidence=False,
+                          incumbent_failed_anchors=True)
+        assert ok and 'does not get an RMS veto' in why
+
+    def test_a_comparable_incumbent_that_passed_keeps_its_veto(self):
+        """Health True never reaches here (the service cancels the escape),
+        and health None passes False — either way the guard is unchanged."""
+        healthy_looking = _m(2.43, 100, n_images=5, span=30.0)
+        ok, why = _decide(healthy_looking, _m(**self.ESCAPE),
+                          escape=True, evidence=False,
+                          incumbent_failed_anchors=False)
+        assert not ok and 'worse' in why
+
+    def test_unknown_health_is_the_default(self):
+        """The service passes False for an obstructed buffer, which must be
+        exactly the pre-#33 call."""
+        args = (_m(2.43, 100, n_images=5, span=30.0), _m(**self.ESCAPE))
+        assert (_decide(*args, escape=True, evidence=False,
+                        incumbent_failed_anchors=False)
+                == _decide(*args, escape=True, evidence=False))
+
+    def test_the_flag_does_nothing_without_an_escape(self):
+        ok, _ = _decide(_m(2.43, 100, n_images=5, span=30.0), _m(**self.ESCAPE),
+                        incumbent_failed_anchors=True)
+        assert not ok
+
+
+class TestIncomparableIncumbentRms:
+    """Fix 2: 8 lens parameters fitted to 5 matched stars leave 2 residual
+    degrees of freedom. The RMS such a solve reports is interpolation, and it
+    must not veto a fit over hundreds of matches."""
+
+    def test_the_five_match_incumbent_loses_on_rank(self):
+        ok, why = _decide(_m(2.43, 5, n_images=1, span=0.0),
+                          _m(10.96, 726, n_images=53, span=90.0),
+                          escape=True, evidence=False)
+        assert ok
+        assert 'not comparable' in why and 'rank upgrade' in why
+
+    def test_a_seeded_refinement_wins_the_same_way(self):
+        ok, why = _decide(_m(2.43, 5, n_images=1, span=0.0),
+                          _m(10.96, 726, n_images=53, span=90.0))
+        assert ok and 'not comparable' in why
+
+    def test_no_rank_upgrade_still_loses(self):
+        # 8 matches, not 5: calibration_quality's MIN_AUTO_MATCHES floor (fix 3)
+        # rates anything thinner 'none', which would make the candidate a rank
+        # upgrade and decide the case before the no-upgrade path is reached.
+        ok, why = _decide(_m(2.43, 8, n_images=1, span=0.0),
+                          _m(10.96, 20, n_images=1, span=0.0))
+        assert not ok and 'not comparable' in why
+
+    def test_enough_matches_alone_makes_it_comparable(self):
+        inc = _m(2.43, COMPARABLE_MIN_MATCHES, n_images=1, span=0.0)
+        ok, why = _decide(inc, _m(10.96, 726, n_images=53, span=90.0))
+        assert not ok and 'worse' in why
+
+    def test_enough_images_alone_makes_it_comparable(self):
+        inc = _m(2.43, 5, n_images=COMPARABLE_MIN_IMAGES, span=10.0)
+        ok, why = _decide(inc, _m(10.96, 726, n_images=53, span=90.0))
+        assert not ok and 'worse' in why
+
+    def test_the_2026_09_05_incumbent_stays_comparable(self):
+        """767 matches over 40 images: the material-gain floor still binds on
+        the incident numbers, so fix 2 cannot reopen it."""
+        inc = _m(**TestEscapeMaterialGain.INCUMBENT)
+        assert _rms_is_comparable(inc)
+        ok, why = _decide(inc, _m(**TestEscapeMaterialGain.ESCAPE),
+                          escape=True, evidence=False)
+        assert not ok and 'not a material improvement' in why
+
+
+class TestGuidedIncumbentIsExemptFromTheAnchorRule:
+    """Review blocker 1: rule 3 (basin escape over an anchor-failing
+    incumbent) applies no rank and no RMS check whatsoever, and it used to be
+    evaluated before the guided branch — so a 19 px 'preliminary' fit over 40
+    matches replaced a human-anchored 2.40 px solve. A guided model marks a
+    basin a person anchored; it outranks even the measured pole
+    (.claude/rules/allsky.md), and the anchor gate is the weakest thing that
+    could speak against it. Rule 3 now skips it and rule 4 (rank only)
+    decides."""
+    GUIDED = dict(rms=2.40, n_matches=9, n_images=1, span=0.0,
+                  provenance='guided')
+    ESCAPE = dict(rms=19.0, n_matches=40, n_images=3, span=20.0)
+
+    def test_the_reported_swap_is_refused(self):
+        ok, why = should_replace(_m(**self.GUIDED), 'good', _m(**self.ESCAPE),
+                                 'preliminary', escape=True, evidence=False,
+                                 incumbent_failed_anchors=True)
+        assert not ok and 'guided single solve' in why
+
+    def test_the_same_numbers_replace_an_unguided_incumbent(self):
+        """Nothing else about the case changed — only who drew the basin."""
+        unguided = {k: v for k, v in self.GUIDED.items() if k != 'provenance'}
+        ok, why = should_replace(_m(**unguided), 'good', _m(**self.ESCAPE),
+                                 'preliminary', escape=True, evidence=False,
+                                 incumbent_failed_anchors=True)
+        assert ok and 'does not get an RMS veto' in why
+
+    def test_a_better_ranked_joint_fit_still_supersedes_the_guided_solve(self):
+        """Rule 4 is not a lock: an anchor-failing guided single solve still
+        loses to a candidate that is genuinely better on rank."""
+        ok, why = _decide(_m(**self.GUIDED),
+                          _m(7.7, 4561, n_images=40, span=80.0),
+                          escape=True, evidence=False,
+                          incumbent_failed_anchors=True)
+        assert ok and 'guided single solve' in why
+
+    def test_an_escape_admitted_on_evidence_is_unaffected(self):
+        """Rule 2 sits above rule 3 and is untouched — model_admission has
+        already weighed the guided model by the time evidence is True."""
+        ok, _ = should_replace(_m(**self.GUIDED), 'good', _m(**self.ESCAPE),
+                               'preliminary', escape=True, evidence=True,
+                               incumbent_failed_anchors=True)
+        assert ok
+
+
+class TestAnchorFailureOutranksThe2026_09_05_Floor:
+    """Not a replay of 2026-09-05. That night's incumbent PASSED the anchor
+    gate, so the escape was cancelled before any candidate existed and the
+    material-gain floor below still refuses these numbers with the flag off.
+    With the flag ON the same numbers describe a different night: a
+    767-match model that definitely misses the bright stars on all three
+    recent frames while the candidate hits them. That is real evidence, not
+    a 0.01 px coin flip, and rule 3 replaces without an RMS comparison. The
+    guard against the 2026-09-05 case lives in incumbent_anchor_health being
+    strict about ever saying False (.claude/rules/allsky.md)."""
+
+    # Review blocker 2: incumbent_anchor_health returns False only when the
+    # whole recent window was testable and a majority failed. That night's
+    # incumbent PASSED the gate (the escape was cancelled before any
+    # candidate existed), and a cloudy 1-pass/1-fail buffer now reports None,
+    # which arrives here as incumbent_failed_anchors=False.
+    def test_the_incident_numbers_replace_only_on_a_definite_anchor_failure(self):
+        args = (_m(**TestEscapeMaterialGain.INCUMBENT),
+                _m(**TestEscapeMaterialGain.ESCAPE))
+        ok, why = _decide(*args, escape=True, evidence=False,
+                          incumbent_failed_anchors=True)
+        assert ok and 'does not get an RMS veto' in why
+
+        ok, why = _decide(*args, escape=True, evidence=False,
+                          incumbent_failed_anchors=False)
+        assert not ok and 'not a material improvement' in why

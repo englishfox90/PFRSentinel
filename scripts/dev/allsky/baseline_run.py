@@ -125,7 +125,7 @@ def main():
 
         t0 = time.monotonic()
         try:
-            model = calibrate(img, LAT, LON, dt=dt, min_matches=6)
+            model = calibrate(img, LAT, LON, dt=dt)
             elapsed = time.monotonic() - t0
             anchors = None
             if fname == REF_FRAME:

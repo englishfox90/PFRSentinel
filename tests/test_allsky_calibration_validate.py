@@ -345,6 +345,36 @@ class TestValidateLensPolynomial:
 
 
 # ===================================================================
+# validate_lens_polynomial — radial fold-over gate (#33)
+# ===================================================================
+# The pure helper (radial_monotonic / radial_turnover_deg, including why the
+# limit stops short of the horizon) is covered in test_allsky_lens_polynomial.py.
+
+
+class TestLensPolynomialMonotonicity:
+    def test_validate_names_the_turnover_angle_when_rejecting(self):
+        ok, msg = validate_lens_polynomial(
+            FisheyeModel(a1=800.0, a3=-60.0, a5=-100.0))
+        assert not ok
+        assert '60.0°' in msg and 'folds' in msg
+
+    def test_validate_reports_an_out_of_field_turnover_on_success(self):
+        ok, msg = validate_lens_polynomial(_reference_model())
+        assert ok
+        assert '78.0°' in msg and 'outside' in msg
+
+    def test_reporter_model_passes_the_gate(self):
+        """The #33 model folds at 82.5°, beyond the imaged field and later
+        than the known-good reference model's own 78.0° turnover — see
+        test_allsky_lens_polynomial.py. It is caught by the match-count
+        floors, not here."""
+        ok, _msg = validate_lens_polynomial(
+            FisheyeModel(cx=1843.7, cy=1670.7, a1=1269.1, a3=-10.1559,
+                         a5=-56.231751, rms_residual=2.43, n_matches=5))
+        assert ok
+
+
+# ===================================================================
 # validate_a1_scale — plate scale vs measured sky circle
 # ===================================================================
 

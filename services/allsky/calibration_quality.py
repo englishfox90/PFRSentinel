@@ -7,6 +7,7 @@ existing callers). Pure: no Qt, no I/O.
 from typing import Optional
 
 from .fisheye import FisheyeModel
+from .model_admission import is_guided
 
 
 class CalibrationQuality:
@@ -55,6 +56,18 @@ class CalibrationQuality:
         return entry[2], entry[3]
 
 
+# An automatic fit below this many matches is not a calibration, it is an
+# underdetermined solve: the model has 8 free parameters, and issue #33 rated a
+# five-star fit 'preliminary' — rank 1, enough to be kept and rendered. Equal to
+# calibrate()'s own min_matches, so every model the single-image path can now
+# return still rates 'preliminary' or better.
+#
+# Guided solves are exempt: guided_calibration.MIN_ANCHORS is 5 by construction
+# (cx/cy come from the sky circle, and a human identified every anchor), so the
+# floor would permanently rate a legitimate guided model 'none'.
+MIN_AUTO_MATCHES = 8
+
+
 def model_quality(
     model: Optional[FisheyeModel],
     n_images: int = 1,
@@ -70,6 +83,8 @@ def model_quality(
         return CalibrationQuality.NONE
     rms = model.rms_residual
     n = model.n_matches
+    if n < MIN_AUTO_MATCHES and not is_guided(model):
+        return CalibrationQuality.NONE
     if n_images >= 20 and span_minutes >= 60 and rms <= 8.0:
         return CalibrationQuality.EXCELLENT
     if n_images >= 10 and n >= 100 and rms <= 12.0:

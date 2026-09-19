@@ -88,13 +88,17 @@ When **Calibrate Now** or **Guided Calibration** succeeds, a notification is pos
 
 | Badge | Description | Requirements |
 |-------|-------------|--------------|
-| None | Not calibrated | No calibration. The overlay is not drawn. |
+| None | Not calibrated | No calibration, so the overlay is not drawn. Also shown for a saved automatic fit over fewer than 8 matched stars: that overlay is still drawn, but the model is not trusted and any later calibration replaces it. |
 | Preliminary | Single image — rough overlay | Any accepted calibration that does not meet a higher level, such as a single-frame or guided calibration. |
 | Acceptable | Multi-image — improving | 3+ frames, 30+ matched stars, RMS 15 px or better. |
 | Good | Multi-image — accurate | 10+ frames, 100+ matched stars, RMS 12 px or better. |
 | Excellent | Long baseline — best accuracy | 20+ frames spanning 60+ minutes, RMS 8 px or better. |
 
 RMS is the typical distance, in pixels, between where matched stars appear and where the model predicts them. Lower is better.
+
+> **New in the next release** — not available in version 3.7.6 or earlier.
+>
+> A lens model has eight unknowns, so a fit over only a handful of stars can report a flattering RMS while being badly wrong. Automatic calibration now needs at least 8 matched stars to succeed at all, and a saved model below that is rated **Not calibrated** so a better one can replace it. Guided Calibration is unaffected — the stars there are ones you identified yourself, and five is enough.
 
 ### Automatic calibration
 
@@ -116,7 +120,15 @@ A fisheye fit can settle on a solution that matches some stars but gets the orie
 
 If a **Calibrate Now** result disagrees with the measured pole, it is not saved and the status line reads "Calibration rejected — it disagrees with the measured celestial-pole position. Let capture run longer, then retry."
 
-If refinements are rejected three times in a row, PFR Sentinel first checks whether the current calibration still lines up with the bright stars in recent frames. If it does, the calibration is kept. If not, it tries a fresh calibration from scratch. That fresh result only replaces the current calibration when the pole check or a trusted calibration backs it up, or when it is clearly better — at least 15% lower RMS with at least as many matched stars. A near-identical score is not enough to swap one orientation for another.
+If refinements are rejected three times in a row, PFR Sentinel first checks whether the current calibration still lines up with the bright stars in recent frames. If it does, the calibration is kept. If not, it tries a fresh calibration from scratch.
+
+> **New in the next release** — not available in version 3.7.6 or earlier.
+>
+> Because the current calibration has just failed that same bright-star check, a fresh result that also lines up with the bright stars replaces it outright, whatever the RMS says — a model that cannot find the bright stars does not get to veto one that can on a flattering-but-meaningless residual. (This override does not apply to a Guided Calibration; see [Guided calibration is trusted over automatic calibration](#guided-calibration-is-trusted-over-automatic-calibration).) Short of that, a fresh result still only replaces the current calibration when the pole check or a trusted calibration backs it up, or when it is clearly better — at least 15% lower RMS with at least as many matched stars. A near-identical score is not enough to swap one orientation for another.
+
+> **New in the next release** — not available in version 3.7.6 or earlier.
+>
+> A fresh from-scratch attempt is expensive, so if it keeps getting rejected, PFR Sentinel waits longer before trying again each time (10, then 20, then 40, then 80 minutes). After four rejections in a row it stops trying and the status line reads **"Auto-calibration paused: 4 re-calibrations rejected — run Guided Calibration (All-Sky settings)"**. This means the current view can't be worked out automatically — most often a heavily obstructed, tilted, or hazy sky — and [Guided Calibration](#guided-calibration) is the way forward: it only needs you to identify a few stars by hand. Regular refinement of an existing calibration is unaffected and keeps running. The pause lifts on its own after about 12 hours, so a fresh attempt is made on a later night even if you don't act on it.
 
 ### Guided calibration is trusted over automatic calibration
 

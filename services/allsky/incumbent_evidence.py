@@ -31,9 +31,13 @@ corroborate_incumbent — does a trusted measured pole confirm where the
 incumbent_anchor_health — does the incumbent hit its bright anchors on
     the most recent frames, the same test every candidate must pass? A
     healthy seed means repeated refinement failures are a refinement
-    problem, and a seedless escape has no premise. Tri-state: None when the
+    problem, and a seedless escape has no premise. Tri-state, and BOTH
+    definite verdicts have to be earned because both are now acted on:
+    True cancels the escape, and False licenses model_replacement rule 3,
+    which replaces the incumbent with no RMS check at all. None when the
     frames cannot support the test (too few anchors above the altitude
-    floor, no detections), so an obstructed or cloudy buffer neither
+    floor, no detections) and equally when they cannot settle it — a single
+    testable frame, or a tie — so an obstructed or cloudy buffer neither
     licenses nor blocks an escape on its own.
 """
 from typing import List, Optional, Tuple
@@ -56,6 +60,14 @@ ANCHOR_MIN_HITS = 5
 ANCHOR_MAX_MISS_REF_PX = 40.0
 ANCHOR_MIN_ALT_DEG = 40.0
 RECENT_FRAMES = 3
+
+# A definite FAILURE verdict needs the whole recent window testable. False is
+# strong positive evidence to replace the model on disk without any RMS check
+# (model_replacement rule 3), so one cloudy frame out of two must not be able
+# to produce it: on 2026-09-05 a 0.01 px margin between two fits of one lens
+# was enough to install the wrong basin, and a 1-pass/1-fail buffer would hand
+# that swap back.
+DEFINITE_FAIL_MIN_TESTED = RECENT_FRAMES
 
 
 def corroborate_incumbent(
@@ -97,9 +109,13 @@ def incumbent_anchor_health(model, frames: List[dict],
                             recent_n: int = RECENT_FRAMES) -> Optional[bool]:
     """Does `model` pass the bright-anchor gate on the last `recent_n` frames?
 
-    True when it passes on a majority (the candidate rule: 2 of 3), False
-    when it fails on a majority, None when fewer than half the frames can
-    support the test. Frames are buffer dicts as built by
+    True when it passes on a majority (the candidate rule: 2 of 3). False
+    only when a majority fails AND the whole recent window was testable
+    (DEFINITE_FAIL_MIN_TESTED) — a tie, or too few testable frames to settle
+    it, is None, not a failure. The asymmetry is deliberate: True merely
+    cancels an escape, while False now licenses a replacement that skips the
+    RMS guard entirely. None also when fewer than half the frames can support
+    the test at all. Frames are buffer dicts as built by
     CalibrationService._detect_frame; the model is rescaled into each
     frame's resolution first (model_in_frame).
     """
@@ -123,5 +139,9 @@ def incumbent_anchor_health(model, frames: List[dict],
     tested = passed + failed
     if tested == 0 or tested < (len(recent) + 1) // 2:
         return None
+    if failed > passed and tested >= DEFINITE_FAIL_MIN_TESTED:
+        return False
     need = max(1, tested - 1) if tested >= 3 else tested
-    return passed >= need
+    if passed >= need:
+        return True
+    return None
