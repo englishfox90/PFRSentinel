@@ -89,11 +89,6 @@ class ImageProcessingPanel(QScrollArea):
 
         layout.addWidget(resize_card)
 
-        # === OUTPUT FRAMING (issue #12) ===
-        self.crop_card = OutputCropCard(self.main_window)
-        self.crop_card.settings_changed.connect(self.settings_changed)
-        layout.addWidget(self.crop_card)
-
         # === ADJUSTMENTS ===
         adjust_card = SettingsCard(
             "Adjustments",
@@ -163,6 +158,11 @@ class ImageProcessingPanel(QScrollArea):
         timestamp_card.add_widget(self.timestamp_switch)
 
         layout.addWidget(timestamp_card)
+
+        # === OUTPUT FRAMING (issue #12) ===
+        self.crop_card = OutputCropCard(self.main_window)
+        self.crop_card.settings_changed.connect(self.settings_changed)
+        layout.addWidget(self.crop_card)
 
         # === AUTO STRETCH ===
         stretch_card = CollapsibleCard("Auto Stretch (MTF)", mdi('image-auto-adjust'))

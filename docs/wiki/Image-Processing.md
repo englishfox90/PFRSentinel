@@ -32,6 +32,24 @@ In Directory Watch mode the order differs: the stretch runs before the resize, t
 
 ---
 
+## Adjustments
+
+| Setting | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Auto Brightness** | Toggle | Off | Scales brightness so the average pixel value moves towards mid-grey. The automatic factor is limited to between 0.5x and 4.0x. |
+| **Brightness** | 0.5x–2.0x | 1.0x | A trim multiplied onto the Auto Brightness factor. It only has an effect while **Auto Brightness** is on; with Auto Brightness off, this slider does nothing. |
+| **Saturation** | 0.0x–2.0x | 0.98x | Colour saturation multiplier. 0 produces greyscale, 1.0 is unchanged, 2.0 is heavily saturated. The label rounds to one decimal place, so the default shows as 1.0x. |
+
+---
+
+## Timestamp Overlay
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Show Timestamp** | Off | Draws the current date and time (`YYYY-MM-DD HH:MM:SS`, PC local time) in white near the top-right corner. This is a fixed, simple stamp. For control over position, size and colour, use a text overlay containing the `{DATETIME}` token instead (see [Overlay Tokens](Overlay-Tokens)). ZWO Camera mode only. |
+
+---
+
 ## Output Framing
 
 > **New in the next release** — not available in version 3.7.6 or earlier.
@@ -59,7 +77,7 @@ The crop applies in both ZWO Camera and Directory Watch modes.
 |---------|---------|-------------|
 | **Crop outputs to a region** | Off | Turns the crop on. While it is off the box is still shown (dimmed and dashed) and can be edited, but outputs use the full frame. |
 | Crop editor | 80% of the frame, centred | Shows the last captured frame with the box drawn over it; the area outside the box is shaded. Drag inside the box to move it, and drag a corner handle to resize it. With **Keep square** off, handles on the edges let you change the width and height separately. The size and position are shown under the box. Before the first frame arrives it reads "Start capture to see a frame here". |
-| **X**, **Y**, **W**, **H** | | Left edge, top edge, width and height of the box. Values are pixels of the full camera frame, whatever the **Scale** setting, so the same numbers keep the same part of the sky. Width and height are rounded down to even numbers, and the box is at least 64 pixels on each side. |
+| **Offset** (**X**, **Y**) and **Size** (**W**, **H**) | | The offset is the box's left and top edge measured from the top-left corner of the frame; the size is its width and height. Values are pixels of the full camera frame, whatever the **Scale** setting, so the same numbers keep the same part of the sky. Width and height are rounded down to even numbers, and the box is at least 64 pixels on each side. |
 | **Keep square** | On | Locks the box to a square, the natural shape for an all-sky circle. When you turn it on, the shorter side wins. |
 
 | Button | What it does |
@@ -71,24 +89,6 @@ The crop applies in both ZWO Camera and Directory Watch modes.
 The status line under the buttons summarises the result, for example "Outputs: 2880×2880 at (80, 320) of the 3552 × 3552 frame.", or "Crop off — outputs use the full 3552 × 3552 frame."
 
 If frames change size later (for example you switch to a camera with a different sensor, or Directory Watch files arrive at a different resolution), the box is scaled in proportion so it keeps the same part of the image.
-
----
-
-## Adjustments
-
-| Setting | Range | Default | Description |
-|---------|-------|---------|-------------|
-| **Auto Brightness** | Toggle | Off | Scales brightness so the average pixel value moves towards mid-grey. The automatic factor is limited to between 0.5x and 4.0x. |
-| **Brightness** | 0.5x–2.0x | 1.0x | A trim multiplied onto the Auto Brightness factor. It only has an effect while **Auto Brightness** is on; with Auto Brightness off, this slider does nothing. |
-| **Saturation** | 0.0x–2.0x | 0.98x | Colour saturation multiplier. 0 produces greyscale, 1.0 is unchanged, 2.0 is heavily saturated. The label rounds to one decimal place, so the default shows as 1.0x. |
-
----
-
-## Timestamp Overlay
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Show Timestamp** | Off | Draws the current date and time (`YYYY-MM-DD HH:MM:SS`, PC local time) in white near the top-right corner. This is a fixed, simple stamp. For control over position, size and colour, use a text overlay containing the `{DATETIME}` token instead (see [Overlay Tokens](Overlay-Tokens)). ZWO Camera mode only. |
 
 ---
 
