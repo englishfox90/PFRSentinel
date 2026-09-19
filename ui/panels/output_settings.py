@@ -23,6 +23,7 @@ from ..theme.icons import mdi
 from ..components.cards import SettingsCard, SwitchRow, CollapsibleCard
 from ._integration_cards import IntegrationCardsMixin
 from ._nina_plugin_card import NinaPluginCardMixin
+from services.host_platform import IS_WINDOWS
 
 
 class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollArea):
@@ -188,8 +189,11 @@ class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollAre
 
         # === NINA PLUGIN ===
         # Built by NinaPluginCardMixin (ui/panels/_nina_plugin_card.py) — sits
-        # next to the control API it pairs with.
-        self._build_nina_plugin_card(layout)
+        # next to the control API it pairs with. NINA itself is Windows-only
+        # (the plugin DLL and its install service both target the Windows PE
+        # format), so the card is skipped elsewhere.
+        if IS_WINDOWS:
+            self._build_nina_plugin_card(layout)
 
         # === DISCORD + HERMES ===
         # Built by IntegrationCardsMixin (ui/panels/_integration_cards.py) —

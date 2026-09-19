@@ -38,14 +38,13 @@ jobs:
       fail-fast: false
       matrix:
         # Job names are spelled out per entry rather than built from a suffix,
-        # because main's ruleset requires the Windows one by its exact string.
-        # Renaming it to match the others left that required check
-        # "Expected — waiting for status to be reported" forever, which blocks
-        # every merge. Don't regularise these names without updating the
-        # ruleset in the same change.
+        # because main's ruleset requires all three by their exact strings.
+        # Renaming one leaves that required check "Expected — waiting for
+        # status to be reported" forever, which blocks every merge. Don't
+        # rename these without updating the ruleset in the same change.
         #
-        # The asymmetry is honest rather than merely historical: pip-audit runs
-        # on the Windows job alone, so it is the only one auditing dependencies.
+        # The Windows name is longer because pip-audit runs on that job alone,
+        # so it is the only one auditing dependencies.
         include:
           - os: windows-latest
             name: Tests and dependency audit (Windows)

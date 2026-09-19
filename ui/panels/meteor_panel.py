@@ -21,6 +21,7 @@ from ..components.scroll_safe_spinbox import SpinBox
 from ..theme.tokens import Colors, Spacing, Layout
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, SwitchRow, CollapsibleCard
+from services.utils_paths import get_app_data_dir
 
 
 # ------------------------------------------------------------------ #
@@ -310,8 +311,9 @@ class MeteorPanel(QScrollArea):
         self._save_detections_switch.toggled.connect(self._on_settings_changed)
         card.add_widget(self._save_detections_switch)
 
+        default_log_path = os.path.join(get_app_data_dir(), 'meteor_detections.jsonl')
         self._log_file_edit, log_widget = self._make_path_row(
-            "Default: %LOCALAPPDATA%\\PFRSentinel\\meteor_detections.jsonl",
+            f"Default: {default_log_path}",
             self._browse_log_file, file_picker=True,
         )
         card.add_row("Log File", log_widget, "Leave blank to use the default location")

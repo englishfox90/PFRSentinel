@@ -18,6 +18,7 @@ from typing import Optional, Dict, Any, Tuple
 import numpy as np
 
 from services.logger import app_logger
+from .reveal_in_file_manager import reveal_path
 from .utils_paths import get_ml_contribution_dir
 
 # Optional: astropy for FITS
@@ -523,22 +524,12 @@ class MLDataCollector:
         webbrowser.open(UPLOAD_FORM_URL)
     
     def open_samples_folder(self):
-        """Open the samples folder in file explorer."""
-        import subprocess
-        folder = str(self.samples_dir)
-        if os.name == 'nt':
-            os.startfile(folder)
-        else:
-            subprocess.run(['xdg-open', folder])
-    
+        """Open the samples folder in the OS file manager."""
+        reveal_path(str(self.samples_dir))
+
     def open_exports_folder(self):
-        """Open the exports folder in file explorer."""
-        import subprocess
-        folder = str(self.exports_dir)
-        if os.name == 'nt':
-            os.startfile(folder)
-        else:
-            subprocess.run(['xdg-open', folder])
+        """Open the exports folder in the OS file manager."""
+        reveal_path(str(self.exports_dir))
 
 
 # Singleton instance - initialized lazily when config is available

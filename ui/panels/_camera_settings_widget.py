@@ -11,8 +11,10 @@ from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, FormRow, SwitchRow, ClickSlider, CollapsibleCard
 from ._schedule_window_source import ScheduleWindowSourceRows
+from ._missing_camera_notice import MissingCameraNotice
 from services.logger import app_logger
 from services.config import DEFAULT_CAMERA_PROFILE
+from services.host_platform import zwo_sdk_library_name, zwo_sdk_dialog_filter
 
 _WB_MODES = ["asi_auto", "manual", "gray_world"]
 _BAYER_PATTERNS = ["BGGR", "RGGB", "GRBG", "GBRG"]
@@ -65,7 +67,7 @@ class CameraSettingsWidget(QWidget):
         sdk_row = QHBoxLayout()
         sdk_row.setSpacing(Spacing.sm)
         self.sdk_path_input = LineEdit()
-        self.sdk_path_input.setPlaceholderText("Path to ASICamera2.dll")
+        self.sdk_path_input.setPlaceholderText(f"Path to {zwo_sdk_library_name()}")
         self.sdk_path_input.textChanged.connect(self._on_sdk_path_changed)
         sdk_row.addWidget(self.sdk_path_input, 1)
         sdk_browse = PushButton("Browse")
@@ -90,94 +92,21 @@ class CameraSettingsWidget(QWidget):
         camera_widget.setLayout(camera_row)
         card.add_row("Camera", camera_widget)
 
-        self._missing_widget = QWidget()
-        self._missing_widget.setObjectName("missingCameraWidget")
-        missing_layout = QVBoxLayout(self._missing_widget)
-        missing_layout.setContentsMargins(Spacing.sm, Spacing.sm, Spacing.sm, Spacing.sm)
-        missing_layout.setSpacing(Spacing.xs)
-
-        self._missing_label = BodyLabel("")
-        self._missing_label.setWordWrap(True)
-
-        self._missing_detect_btn = PushButton("Detect Again")
-        self._missing_detect_btn.setIcon(mdi('refresh'))
-        self._missing_detect_btn.clicked.connect(self._on_detect_cameras)
-
-        self._missing_revive_btn = PushButton("Revive (USB Reset)")
-        self._missing_revive_btn.setIcon(mdi('restart'))
-        self._missing_revive_btn.setToolTip(
-            "Toggle the USB device off and on in Windows Device Manager. "
-            "Can recover a camera that the driver sees but can't open. "
-            "Requires Administrator privileges."
-        )
-        self._missing_revive_btn.clicked.connect(self._on_revive_camera_clicked)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(Spacing.sm)
-        btn_row.addWidget(self._missing_detect_btn)
-        btn_row.addWidget(self._missing_revive_btn)
-        btn_row.addStretch()
-
-        missing_layout.addWidget(self._missing_label)
-        missing_layout.addLayout(btn_row)
-        self._missing_widget.hide()
-        self._missing_saved_name = ''
-        card.add_widget(self._missing_widget)
+        self._missing_notice = MissingCameraNotice()
+        self._missing_notice.connect_detect(self._on_detect_cameras)
+        self._missing_notice.revive_clicked.connect(self.revive_camera_clicked)
+        card.add_widget(self._missing_notice)
 
         return card
 
     def set_missing_camera_warning(self, saved_name: str, phantom_count: int = 0):
-        """Pass empty saved_name to hide. phantom_count>0 shows Revive, else Detect Again."""
-        if not saved_name:
-            self._missing_widget.hide()
-            self._missing_saved_name = ''
-            self._missing_revive_btn.setEnabled(True)
-            self._missing_revive_btn.setText("Revive (USB Reset)")
-            return
-
-        self._missing_saved_name = saved_name
-        if phantom_count > 0:
-            msg = (
-                f"'{saved_name}' is stuck — the SDK detects {phantom_count} "
-                "device(s) it can't open. Try Revive to perform a USB reset."
-            )
-            self._missing_detect_btn.hide()
-            self._missing_revive_btn.show()
-            bg, fg = Colors.error_bg, Colors.error_text
-        else:
-            msg = (
-                f"'{saved_name}' is not connected. "
-                "Check the USB cable, then click Detect Again to scan for cameras."
-            )
-            self._missing_revive_btn.hide()
-            self._missing_detect_btn.show()
-            bg, fg = Colors.warning_bg, Colors.warning_text
-
-        self._missing_label.setText(msg)
-        self._missing_label.setStyleSheet(f"color: {fg}; font-weight: 500;")
-        self._missing_widget.setStyleSheet(f"""
-            QWidget#missingCameraWidget {{
-                background-color: {bg};
-                border-radius: 6px;
-                border: 1px solid {fg}40;
-            }}
-        """)
-        self._missing_widget.show()
-
-    def _on_revive_camera_clicked(self):
-        if not self._missing_saved_name:
-            return
-        app_logger.info(
-            f"User requested Revive for camera '{self._missing_saved_name}'"
-        )
-        self._missing_revive_btn.setEnabled(False)
-        self._missing_revive_btn.setText("Resetting USB…")
-        self.revive_camera_clicked.emit(self._missing_saved_name)
+        """Pass empty saved_name to hide. phantom_count>0 shows Revive (Windows) or
+        Detect Again with unplug guidance (elsewhere)."""
+        self._missing_notice.set_warning(saved_name, phantom_count)
 
     def reset_revive_button(self):
         """Restore the Revive button after an async reset finishes."""
-        self._missing_revive_btn.setEnabled(True)
-        self._missing_revive_btn.setText("Revive (USB Reset)")
+        self._missing_notice.reset_revive_button()
 
     def _build_exposure_card(self):
         card = SettingsCard("Exposure Settings", "Control exposure time and gain")
@@ -441,7 +370,7 @@ class CameraSettingsWidget(QWidget):
         return name.split('(Index:')[0].strip() if '(Index:' in name else name
 
     def _browse_sdk(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select ASI SDK", "", "DLL Files (*.dll)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select ASI SDK", "", zwo_sdk_dialog_filter())
         if file_path:
             self.sdk_path_input.setText(file_path)
 

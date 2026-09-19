@@ -160,7 +160,8 @@ class MainWindow(
 
         try:
             from services.utils_paths import resource_path
-            icon_path = resource_path('assets/app_icon.ico')
+            icon_name = 'assets/app_icon.ico' if sys.platform == 'win32' else 'assets/app_icon.png'
+            icon_path = resource_path(icon_name)
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception as e:

@@ -33,6 +33,21 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(scope="module", autouse=True)
+def pretend_windows():
+    """The card is Windows-only (#37) and skipped elsewhere; these tests are
+    about the card itself, so force the Windows branch on every runner."""
+    import ui.main_window.settings as window_settings
+    import ui.panels.output_settings as output_settings
+    saved = (output_settings.IS_WINDOWS, window_settings.IS_WINDOWS)
+    output_settings.IS_WINDOWS = True
+    window_settings.IS_WINDOWS = True
+    try:
+        yield
+    finally:
+        output_settings.IS_WINDOWS, window_settings.IS_WINDOWS = saved
+
+
 # --- helpers --------------------------------------------------------------
 
 def status(kind=STATUS_INSTALLED, message="Installed.", can_install=True,

@@ -57,3 +57,51 @@ def test_hides_window_line_when_status_has_no_forecast(card):
     card.update_status({'recording': False, 'session_path': ''})
 
     assert card.window_label.isHidden()
+
+
+def test_open_button_reveals_file_while_recording(card, tmp_path, monkeypatch):
+    video = tmp_path / "timelapse_recording.mp4"
+    video.write_bytes(b"")
+    card.update_status({
+        'recording': True, 'frame_count': 3, 'session_path': str(video), 'elapsed_seconds': 10,
+    })
+
+    reveal_calls = []
+    open_calls = []
+    monkeypatch.setattr(
+        "ui.panels.timelapse_status_card.reveal_path",
+        lambda path: reveal_calls.append(path),
+    )
+    monkeypatch.setattr(
+        "ui.panels.timelapse_status_card.open_path",
+        lambda path: open_calls.append(path),
+    )
+
+    card._open_current_video()
+
+    assert reveal_calls == [str(video)]
+    assert open_calls == []
+
+
+def test_open_button_opens_file_when_not_recording(card, tmp_path, monkeypatch):
+    video = tmp_path / "timelapse_finished.mp4"
+    video.write_bytes(b"")
+    card.update_status({
+        'recording': False, 'frame_count': 3, 'session_path': str(video), 'elapsed_seconds': 10,
+    })
+
+    reveal_calls = []
+    open_calls = []
+    monkeypatch.setattr(
+        "ui.panels.timelapse_status_card.reveal_path",
+        lambda path: reveal_calls.append(path),
+    )
+    monkeypatch.setattr(
+        "ui.panels.timelapse_status_card.open_path",
+        lambda path: open_calls.append(path),
+    )
+
+    card._open_current_video()
+
+    assert open_calls == [str(video)]
+    assert reveal_calls == []

@@ -20,6 +20,8 @@ from ..components.cards import SwitchRow, CollapsibleCard
 from services.logger import app_logger
 from services.ml_service import get_ml_service
 from services.ml_data_collector import get_ml_collector, UPLOAD_FORM_URL
+from services.reveal_in_file_manager import reveal_path
+from services.utils_paths import get_app_data_dir
 
 
 class ImageProcessingMLSection(QWidget):
@@ -97,7 +99,9 @@ class ImageProcessingMLSection(QWidget):
         ascom_path_row.setSpacing(Spacing.sm)
 
         self.ascom_file_path = LineEdit()
-        self.ascom_file_path.setPlaceholderText("%LOCALAPPDATA%\\PFRSentinel\\RoofStatusFile.txt")
+        self.ascom_file_path.setPlaceholderText(
+            os.path.join(get_app_data_dir(), 'RoofStatusFile.txt')
+        )
         self.ascom_file_path.editingFinished.connect(self._on_ascom_path_changed)
         ascom_path_row.addWidget(self.ascom_file_path, 1)
 
@@ -365,7 +369,7 @@ class ImageProcessingMLSection(QWidget):
                     )
                     msg.setStandardButtons(QMessageBox.Ok)
 
-                    os.startfile(zip_path.parent)
+                    reveal_path(zip_path.parent)
 
                     msg.exec()
                 else:

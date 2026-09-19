@@ -36,19 +36,19 @@ def _label_widths(img, mirror, size=160, cx=128, cy=128):
     labels suppressed, and columns below 5% of the peak are dropped so the
     shadow-over-arm residue does not extend the run.
     """
-    from services import compass_overlay
-    px = max(10, size // 6)
+    from services import font_loader
+    key = ('text', max(10, size // 6))
     sentinel = object()
 
-    previous = compass_overlay._FONT_CACHE.get(px, sentinel)
-    compass_overlay._FONT_CACHE[px] = None  # forces the "skip labels" path
+    previous = font_loader._FONT_CACHE.get(key, sentinel)
+    font_loader._FONT_CACHE[key] = None  # forces the "skip labels" path
     try:
         bare = draw_compass(_make_image(), size=size, cx=cx, cy=cy, mirror=mirror)
     finally:
         if previous is sentinel:
-            compass_overlay._FONT_CACHE.pop(px, None)
+            font_loader._FONT_CACHE.pop(key, None)
         else:
-            compass_overlay._FONT_CACHE[px] = previous
+            font_loader._FONT_CACHE[key] = previous
 
     glyphs = (np.array(img)[:, :, :3].astype(int)
               - np.array(bare)[:, :, :3].astype(int))
@@ -237,12 +237,11 @@ class TestCompassFontCaching:
     """
 
     def _clear_cache(self):
-        from services import compass_overlay
-        compass_overlay._FONT_CACHE.clear()
+        from services import font_loader
+        font_loader.clear_cache()
 
     def test_font_resolved_once_across_many_draws(self):
         from PIL import ImageFont
-        from services import compass_overlay
         self._clear_cache()
 
         calls = []
@@ -263,9 +262,9 @@ class TestCompassFontCaching:
             ImageFont.truetype = real
             self._clear_cache()
 
-        # Count resolutions, not truetype calls: _label_font walks a candidate
+        # Count resolutions, not truetype calls: font_loader walks a candidate
         # list, and how far it gets is platform-dependent — Windows hits
-        # arial.ttf first, Linux falls through to DejaVuSans.ttf. What must
+        # arial.ttf first, Linux goes straight to the bundled font. What must
         # hold everywhere is that the walk happens once, not once per frame.
         assert after_first_draw, "font was never resolved"
         assert calls == after_first_draw, (

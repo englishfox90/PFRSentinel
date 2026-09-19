@@ -20,6 +20,7 @@ from services import app_config
 from services.diagnostics_bundle import build_bundle, default_bundle_path, environment_info
 from services.logger import app_logger
 from services.raw_frame_export import export_raw_frame
+from services.reveal_in_file_manager import reveal_path
 from version import __version__
 
 # A forced capture still has to finish the exposure already in flight and then
@@ -220,8 +221,4 @@ class DiagnosticsController(QObject):
 
     @staticmethod
     def _reveal(path):
-        try:
-            if os.name == 'nt':
-                os.startfile(os.path.dirname(str(path)))
-        except Exception as e:
-            app_logger.debug(f"Could not open diagnostics folder: {e}")
+        reveal_path(str(path))

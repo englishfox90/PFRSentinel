@@ -28,7 +28,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from astropy.io import fits
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
+from services.font_loader import load_font
 
 SUSPECT_LABELS = ("Partly Cloudy", "Overcast")
 THUMB = 360
@@ -137,11 +139,7 @@ def caption(r):
 
 
 def build_montages(rows, out_dir):
-    try:
-        font = ImageFont.truetype("arial.ttf", 12)
-        fontb = ImageFont.truetype("arialbd.ttf", 12)
-    except OSError:
-        font = fontb = ImageFont.load_default()
+    font = fontb = load_font(12, 'text')
     cell_w, cell_h = THUMB + PAD, THUMB + CAP_H + PAD
     sheets = []
     for s in range(0, len(rows), PER_SHEET):

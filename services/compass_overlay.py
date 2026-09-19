@@ -5,7 +5,9 @@ Renders an 8-point star compass rose with cardinal (N/S/E/W) and
 ordinal (NE/SE/SW/NW) points, configurable rotation and position.
 """
 import math
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
+from .font_loader import load_font
 
 
 # Default compass settings
@@ -22,41 +24,15 @@ COMPASS_HALF_BASE = 0.12
 COMPASS_INNER_R = 0.07
 COMPASS_LABEL_R = 0.88
 
-# Resolved label fonts, keyed by pixel size.
-#
-# Resolving inside draw_compass meant a filesystem font lookup on every frame
-# of a 24/7 capture loop, and — worse — a *transient* truetype failure could
-# resolve one frame to arial and the next to the default bitmap font, so the
-# labels visibly changed size and position between frames. Cache the outcome so
-# every frame in a session renders identically.
-_FONT_CACHE = {}
-
 
 def _label_font(px):
-    """Return the cached label font for `px`, resolving it on first use.
+    """Return the label font for `px`.
 
-    Returns None only if no font could be loaded at all, in which case the
-    caller skips the labels rather than failing the frame — an unattended
-    capture must not stop over a missing font.
+    `font_loader.load_font` does the caching and the fallback chain — see its
+    module docstring for why a transient truetype failure must not resolve
+    one frame to a system font and the next to the default bitmap font.
     """
-    if px in _FONT_CACHE:
-        return _FONT_CACHE[px]
-
-    font = None
-    for name in ('arial.ttf', 'Arial.ttf', 'DejaVuSans.ttf'):
-        try:
-            font = ImageFont.truetype(name, px)
-            break
-        except (OSError, IOError):
-            continue
-    if font is None:
-        try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None
-
-    _FONT_CACHE[px] = font
-    return font
+    return load_font(px, 'text')
 
 
 def draw_compass(image, rotation=0, position='bottom-right',

@@ -48,13 +48,12 @@ class _MainWindowLifecycleMixin:
         if not self.isVisible() and self.system_tray:
             try:
                 from PySide6.QtWidgets import QSystemTrayIcon
-                if hasattr(self.system_tray, 'tray_icon') and self.system_tray.tray_icon:
-                    self.system_tray.tray_icon.showMessage(
-                        "Update Available",
-                        f"PFR Sentinel v{update_info.latest_version} is available",
-                        QSystemTrayIcon.Information,
-                        5000
-                    )
+                self.system_tray.tray_icon.showMessage(
+                    "Update Available",
+                    f"PFR Sentinel v{update_info.latest_version} is available",
+                    QSystemTrayIcon.Information,
+                    5000
+                )
             except Exception:
                 pass
 
@@ -198,9 +197,9 @@ class _MainWindowLifecycleMixin:
         from services.shutdown_watchdog import arm_force_exit
         arm_force_exit()
 
-        if self.system_tray and hasattr(self.system_tray, 'tray_icon') and self.system_tray.tray_icon:
+        if self.system_tray is not None:
             try:
-                self.system_tray.tray_icon.stop()
+                self.system_tray.shutdown()
             except Exception:
                 pass
 
@@ -236,23 +235,8 @@ class _MainWindowLifecycleMixin:
             enabled: True to enable tray mode, False to disable
         """
         if enabled and self.system_tray is None:
+            from ..system_tray_qt import SystemTrayQt, TrayUnavailableError
             try:
-                from ..system_tray_qt import SystemTrayQt, PYSTRAY_AVAILABLE
-
-                if not PYSTRAY_AVAILABLE:
-                    app_logger.warning("System tray mode requires pystray package")
-                    from PySide6.QtWidgets import QMessageBox
-                    QMessageBox.warning(
-                        self,
-                        "Missing Dependency",
-                        "System tray mode requires the 'pystray' package.\n\n"
-                        "Install with: pip install pystray"
-                    )
-                    self.config.set('tray_mode_enabled', False)
-                    if hasattr(self, 'settings_panel'):
-                        self.settings_panel.tray_enabled_switch.setChecked(False)
-                    return
-
                 # start_hidden=False: enabling tray from Settings must not yank
                 # the window away — it stays open and only hides on close.
                 self.system_tray = SystemTrayQt(
@@ -261,7 +245,11 @@ class _MainWindowLifecycleMixin:
                 app_logger.info("System tray enabled - window will minimize to tray on close")
 
             except Exception as e:
-                app_logger.error(f"Failed to enable system tray: {e}")
+                if isinstance(e, TrayUnavailableError):
+                    app_logger.warning(f"System tray unavailable: {e}")
+                    self._notify_tray_unavailable()
+                else:
+                    app_logger.error(f"Failed to enable system tray: {e}")
                 self.system_tray = None
                 self.config.set('tray_mode_enabled', False)
                 if hasattr(self, 'settings_panel'):
@@ -269,8 +257,7 @@ class _MainWindowLifecycleMixin:
 
         elif not enabled and self.system_tray is not None:
             try:
-                if hasattr(self.system_tray, 'tray_icon') and self.system_tray.tray_icon:
-                    self.system_tray.tray_icon.stop()
+                self.system_tray.shutdown()
                 self.system_tray = None
                 app_logger.info("System tray disabled - window will close normally")
             except Exception as e:
@@ -287,6 +274,20 @@ class _MainWindowLifecycleMixin:
                 auto_start=self.config.get('autostart_capture', True),
                 start_in_tray=self.system_tray is not None,
             )
+
+    def _notify_tray_unavailable(self):
+        try:
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            bar = InfoBar.warning(
+                title="System tray unavailable",
+                content="This desktop has no system tray, so the window will stay visible.",
+                parent=self.content_area,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+            )
+            bar.raise_()
+        except Exception as e:
+            app_logger.debug(f"tray InfoBar failed: {e}")
 
     def set_run_on_startup(self, enabled: bool, auto_start: bool = True):
         """Register or remove the Windows logon task and report the outcome.

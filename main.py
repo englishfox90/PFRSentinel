@@ -172,7 +172,7 @@ def main():
     parser.add_argument('--headless', action='store_true',
                        help='Run without GUI - captures images based on saved config')
     parser.add_argument('--tray', action='store_true',
-                       help='Start minimized to system tray (requires pystray)')
+                       help='Start minimized to system tray')
     parser.add_argument('--register-startup', action='store_true',
                        help='Register the app to run on Windows logon, then exit')
     parser.add_argument('--unregister-startup', action='store_true',
@@ -253,7 +253,8 @@ def main():
     apply_theme()
     
     # Create splash screen FIRST (before heavy window creation)
-    splash_icon = QIcon('assets/app_icon.png')
+    from services.utils_paths import resource_path
+    splash_icon = QIcon(resource_path('assets/app_icon.png'))
     splash = SplashScreen(splash_icon, None)
     splash.setIconSize(QSize(200, 200))
     splash.titleBar.hide()  # Hide title bar for cleaner look
@@ -294,14 +295,16 @@ def main():
     # ui/main_window/lifecycle.py for the hide-to-tray-on-close behaviour.
     start_hidden = args.tray
 
+    tray_started = False
     if tray_enabled:
+        from ui.system_tray_qt import SystemTrayQt, TrayUnavailableError
         try:
-            from ui.system_tray_qt import SystemTrayQt
             tray = SystemTrayQt(
                 window, app, auto_start=args.auto_start, auto_stop=args.auto_stop,
                 start_hidden=start_hidden,
             )
             window.system_tray = tray  # Store reference so window knows it's in tray mode
+            tray_started = True
 
             # NOTE: --tray is a per-launch directive (the logon task passes it),
             # NOT a persistent preference — don't write tray_mode_enabled here.
@@ -313,11 +316,11 @@ def main():
             splash.finish()
 
             # When start_hidden, the window is shown by the tray's "Show Window"
-        except ImportError as e:
-            app_logger.error(f"System tray mode requires pystray: {e}")
-            print(f"Error: Install pystray with: pip install pystray", file=sys.stderr)
-            sys.exit(1)
-    else:
+        except TrayUnavailableError as e:
+            # Never start invisible with no tray to get the window back.
+            app_logger.warning(f"System tray unavailable, starting with a visible window: {e}")
+
+    if not tray_started:
         # Show main window and close splash
         window.show()
         splash.finish()
@@ -331,8 +334,6 @@ def main():
         )
         window.activateWindow()
         window.raise_()
-        if window.system_tray is not None:
-            window.system_tray._is_visible = True
     instance_guard.activate_requested.connect(_surface_window)
     # A clean-quit request — from the installer's --shutdown before an upgrade,
     # or from Windows ending the session (logoff/shutdown, or the installer's

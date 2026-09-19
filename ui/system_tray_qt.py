@@ -1,40 +1,30 @@
-"""
-System Tray integration for PFR Sentinel (PySide6 version)
-Allows running minimized to system tray with context menu controls
+"""System tray integration for PFR Sentinel.
 
-Requires: pystray (pip install pystray)
+Built on Qt's own QSystemTrayIcon so it runs on the GUI event loop with no
+extra thread and no third-party backend — the previous implementation needed
+the process main thread on macOS and AppIndicator/GTK on Linux.
 """
 import os
-from PIL import Image
-from PySide6.QtCore import QTimer, QObject, Signal
+
+from PySide6.QtCore import QObject, QTimer
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
+
 from services.logger import app_logger
 from services.utils_paths import resource_path
 
-# Try to import pystray
-try:
-    import pystray
-    from pystray import MenuItem as item
-    PYSTRAY_AVAILABLE = True
-except ImportError:
-    PYSTRAY_AVAILABLE = False
-    pystray = None
-    item = None
+
+class TrayUnavailableError(RuntimeError):
+    """Raised when the desktop session offers no system tray."""
 
 
 class SystemTrayQt(QObject):
-    """System tray integration for PySide6 UI
-    
-    Allows minimizing the app to system tray instead of taskbar.
-    Right-click menu provides quick access to common actions.
+    """Tray icon + menu for the main window.
+
+    Everything here runs on the GUI thread, so the slots touch the window
+    directly.
     """
-    
-    # Signals for thread-safe communication from tray to main thread
-    show_window_signal = Signal()
-    hide_window_signal = Signal()
-    start_capture_signal = Signal()
-    stop_capture_signal = Signal()
-    exit_app_signal = Signal()
-    
+
     def __init__(self, window, app, auto_start=False, auto_stop=None, start_hidden=True):
         """
         Args:
@@ -45,183 +35,150 @@ class SystemTrayQt(QObject):
             start_hidden: Hide the window on init (startup-to-tray). When False,
                 the window stays visible — used when tray mode is toggled on
                 from Settings, where yanking the window away is jarring UX.
+
+        Raises:
+            TrayUnavailableError: no system tray on this desktop. Raised before
+                anything is hidden, so the caller can fall back to a plain
+                visible window rather than leaving the app unreachable.
         """
         super().__init__()
 
-        if not PYSTRAY_AVAILABLE:
-            raise ImportError("pystray is not installed")
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            raise TrayUnavailableError("No system tray is available on this desktop")
 
         self.window = window
         self.app = app
         self.auto_start = auto_start
         self.auto_stop = auto_stop
-        self.tray_icon = None
-        self._is_visible = not start_hidden
-        
-        # Connect signals to slots
-        self.show_window_signal.connect(self._do_show_window)
-        self.hide_window_signal.connect(self._do_hide_window)
-        self.start_capture_signal.connect(self._do_start_capture)
-        self.stop_capture_signal.connect(self._do_stop_capture)
-        self.exit_app_signal.connect(self._do_exit_app)
-        
-        # Load icon
-        self.icon_image = self._load_icon()
-        
-        # Setup tray icon
-        self._setup_tray()
 
-        # Start minimized to tray (only on startup-to-tray, not on a Settings toggle)
+        self.menu = QMenu()
+        self._show_hide_action = self.menu.addAction("Hide Window")
+        self._show_hide_action.triggered.connect(self._toggle_window)
+        self.menu.setDefaultAction(self._show_hide_action)
+        self.menu.addSeparator()
+        self._start_action = self.menu.addAction("Start Capture")
+        self._start_action.triggered.connect(self._do_start_capture)
+        self._stop_action = self.menu.addAction("Stop Capture")
+        self._stop_action.triggered.connect(self._do_stop_capture)
+        self.menu.addSeparator()
+        self._exit_action = self.menu.addAction("Exit")
+        self._exit_action.triggered.connect(self._do_exit_app)
+        self.menu.aboutToShow.connect(self._refresh_menu)
+
+        self.tray_icon = QSystemTrayIcon(self._load_icon(), self)
+        self.tray_icon.setToolTip("PFR Sentinel")
+        self.tray_icon.setContextMenu(self.menu)
+        self.tray_icon.activated.connect(self._on_activated)
+        self._refresh_menu()
+        self.tray_icon.show()
+
+        # Without this, hiding the only top-level window quits the app.
+        self.app.setQuitOnLastWindowClosed(False)
+
         if start_hidden:
             self.window.hide()
 
-        # Auto-start capture if requested
+        app_logger.info("System tray initialized")
+
         if auto_start:
             QTimer.singleShot(3000, self._auto_start_capture)
-    
-    def _load_icon(self) -> Image.Image:
-        """Load icon image for tray"""
-        try:
-            # Try to load from assets
-            icon_path = resource_path("assets/app_icon.png")
-            if os.path.exists(icon_path):
-                img = Image.open(icon_path)
-                return img.resize((64, 64), Image.LANCZOS)
-        except Exception as e:
-            app_logger.warning(f"Could not load tray icon: {e}")
-        
-        # Create a simple default icon
-        img = Image.new('RGBA', (64, 64), (0, 120, 200, 255))
-        return img
-    
-    def _setup_tray(self):
-        """Setup system tray icon with menu"""
-        # Create menu with proper visible/enabled state
-        def create_menu():
-            return pystray.Menu(
-                item('Show Window', self._show_window, default=True, visible=lambda _: not self._is_visible),
-                item('Hide Window', self._hide_window, visible=lambda _: self._is_visible),
-                pystray.Menu.SEPARATOR,
-                item('Start Capture', self._start_capture, enabled=lambda _: not self.window.is_capturing),
-                item('Stop Capture', self._stop_capture, enabled=lambda _: self.window.is_capturing),
-                pystray.Menu.SEPARATOR,
-                item('Exit', self._exit_app)
-            )
-        
-        # Create tray icon
-        self.tray_icon = pystray.Icon(
-            "PFRSentinel",
-            self.icon_image,
-            "PFR Sentinel - All-Sky Camera Monitor",
-            menu=create_menu()
-        )
-        
-        # Run tray icon in background thread (pystray blocks, so must be in thread)
-        import threading
-        self._tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
-        self._tray_thread.start()
-        
-        app_logger.info("System tray initialized - app running in background")
-    
-    def _show_window(self, icon=None, item=None):
-        """Show the main window"""
-        self.show_window_signal.emit()
-        app_logger.debug("Window restore requested from tray")
-    
+
+    def _load_icon(self) -> QIcon:
+        for name in ('assets/app_icon.png', 'assets/app_icon.ico'):
+            try:
+                path = resource_path(name)
+                if os.path.exists(path):
+                    return QIcon(path)
+            except Exception as e:
+                app_logger.warning(f"Could not load tray icon {name}: {e}")
+        app_logger.warning("No tray icon asset found - using the platform default")
+        return QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+
+    @property
+    def _is_visible(self) -> bool:
+        # Derived, not tracked: closeEvent hides to the tray and the update
+        # dialog re-shows the window without going through this class.
+        return self.window.isVisible()
+
+    def _refresh_menu(self):
+        self._show_hide_action.setText("Hide Window" if self._is_visible else "Show Window")
+        capturing = bool(getattr(self.window, 'is_capturing', False))
+        self._start_action.setEnabled(not capturing)
+        self._stop_action.setEnabled(capturing)
+
+    def _on_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                      QSystemTrayIcon.ActivationReason.DoubleClick):
+            self._do_show_window()
+
+    def _toggle_window(self):
+        if self._is_visible:
+            self._do_hide_window()
+        else:
+            self._do_show_window()
+
     def _do_show_window(self):
-        """Actually show the window (called from Qt main thread via signal)"""
         self.window.show()
         self.window.activateWindow()
         self.window.raise_()
-        self._is_visible = True
-    
-    def _hide_window(self, icon=None, item=None):
-        """Hide the main window to tray"""
-        self.hide_window_signal.emit()
-    
+        self._refresh_menu()
+
     def _do_hide_window(self):
-        """Actually hide the window"""
         self.window.hide()
-        self._is_visible = False
+        self._refresh_menu()
         app_logger.debug("Window minimized to tray")
-    
-    def _start_capture(self, icon=None, item=None):
-        """Start camera capture"""
-        self.start_capture_signal.emit()
-    
+
     def _do_start_capture(self):
-        """Actually start capture (from Qt thread)"""
         try:
             if not self.window.is_capturing:
                 self.window.start_capture()
                 app_logger.info("Capture started from tray menu")
-                self._update_menu()  # Refresh menu state
         except Exception as e:
             app_logger.error(f"Error starting capture from tray: {e}")
-    
-    def _stop_capture(self, icon=None, item=None):
-        """Stop camera capture"""
-        self.stop_capture_signal.emit()
-    
+        self._refresh_menu()
+
     def _do_stop_capture(self):
-        """Actually stop capture (from Qt thread)"""
         try:
             if self.window.is_capturing:
                 self.window.stop_capture()
                 app_logger.info("Capture stopped from tray menu")
-                self._update_menu()  # Refresh menu state
         except Exception as e:
             app_logger.error(f"Error stopping capture from tray: {e}")
-    
-    def _update_menu(self):
-        """Update the tray menu to reflect current state
-        
-        pystray menus use lambdas for dynamic state, but we need to
-        force a menu rebuild to ensure it reflects current app state.
-        """
-        try:
-            if self.tray_icon:
-                # pystray evaluates the lambda on menu open, but some
-                # implementations cache the menu. Force update by
-                # triggering menu invalidation
-                self.tray_icon.update_menu()
-        except AttributeError:
-            # update_menu() may not exist in all pystray versions
-            pass
-        except Exception as e:
-            app_logger.debug(f"Menu update: {e}")
-    
+        self._refresh_menu()
+
     def _auto_start_capture(self):
-        """Auto-start capture after delay"""
         try:
             self.window.start_capture()
             app_logger.info("Auto-started capture from tray")
-            
-            # Auto-stop if requested
+
             if self.auto_stop and self.auto_stop > 0:
                 QTimer.singleShot(self.auto_stop * 1000, self._auto_stop_capture)
         except Exception as e:
             app_logger.error(f"Error auto-starting capture: {e}")
-    
+
     def _auto_stop_capture(self):
-        """Auto-stop capture"""
         try:
             self.window.stop_capture()
             app_logger.info(f"Auto-stopped capture after {self.auto_stop}s")
         except Exception as e:
             app_logger.error(f"Error auto-stopping capture: {e}")
-    
-    def _exit_app(self, icon=None, item=None):
-        """Exit the application"""
-        app_logger.info("Exiting from system tray")
-        self.exit_app_signal.emit()
-    
+
     def _do_exit_app(self):
-        """Actually exit the app (from Qt thread)"""
-        
-        # Stop tray icon
-        if self.tray_icon:
-            self.tray_icon.stop()
-        
-        # Properly quit application (will trigger shutdown notifications)
+        app_logger.info("Exiting from system tray")
         self.window.quit_application()
+
+    def shutdown(self):
+        """Tear the tray down and let a last window close quit the app again."""
+        try:
+            if self.tray_icon is not None:
+                self.tray_icon.hide()
+                self.tray_icon.setContextMenu(None)
+            if self.menu is not None:
+                self.menu.deleteLater()
+                self.menu = None
+        except Exception as e:
+            app_logger.debug(f"Tray shutdown: {e}")
+        try:
+            self.app.setQuitOnLastWindowClosed(True)
+        except Exception:
+            pass

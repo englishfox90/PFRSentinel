@@ -6,13 +6,13 @@ Layout and display formatting only — the window text arrives ready-made in the
 status dict from TimelapseController (``window_forecast``).
 """
 import os
-import subprocess
 
 from qfluentwidgets import BodyLabel, CaptionLabel, PushButton
 
 from ..theme.tokens import Colors
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard
+from services.reveal_in_file_manager import open_path, reveal_path
 
 
 class TimelapseStatusCard(SettingsCard):
@@ -82,12 +82,11 @@ class TimelapseStatusCard(SettingsCard):
             self.open_video_btn.setEnabled(False)
 
     def _open_current_video(self):
-        """Open video or reveal in Explorer depending on recording state."""
+        """Open video, or reveal it in the file manager while it's still recording."""
         path = self._current_video_path
         if not path or not os.path.isfile(path):
             return
         if self._recording_active:
-            # Reveal in Explorer with the file selected
-            subprocess.run(['explorer', f'/select,{path}'])
+            reveal_path(path)
         else:
-            os.startfile(path)
+            open_path(path)
