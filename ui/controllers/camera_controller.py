@@ -216,6 +216,7 @@ class CameraControllerQt(QObject):
             'scheduled_end_time': self.config.get('scheduled_end_time', '09:00'),
             'scheduled_window_interval': self.config.get('scheduled_window_interval', 5.0),
             'use_raw16': dev_mode.get('use_raw16', False),
+            'auto_recovery': self._auto_recovery_enabled(),
         }
 
         app_logger.info(
@@ -271,6 +272,7 @@ class CameraControllerQt(QObject):
             cam.target_brightness = params['target_brightness']
             cam.set_capture_interval(params['capture_interval'])
             cam.use_raw16 = params['use_raw16']
+            cam.auto_recovery_enabled = params['auto_recovery']
             cam.on_error_callback = self._on_camera_error
             cam.on_calibration_callback = self._on_calibration_status
 
@@ -331,6 +333,12 @@ class CameraControllerQt(QObject):
             from services.posthog_service import capture_error
             capture_error(Exception(err), context='camera_start')
             if self._user_requested_stop:
+                return
+            if not self._auto_recovery_enabled():
+                app_logger.warning(
+                    "Capture failed and automatic recovery is off — not retrying. "
+                    "Click Start when the camera is ready."
+                )
                 return
             if self._is_unrecoverable_error(err):
                 if not self._usb_reset_attempted:
@@ -455,7 +463,28 @@ class CameraControllerQt(QObject):
             if not self._user_requested_stop:
                 self._schedule_auto_recovery()
 
+    def _auto_recovery_enabled(self) -> bool:
+        # Only an explicit False opts out — a damaged value must not silently
+        # strip recovery from an unattended rig.
+        return self.config.get('camera_auto_recovery', True) is not False
+
+    def set_auto_recovery_enabled(self, enabled: bool):
+        """Apply the Settings toggle to a running session (GUI thread)."""
+        if self.zwo_camera is not None:
+            self.zwo_camera.auto_recovery_enabled = enabled
+        if not enabled:
+            self._cancel_auto_recovery_timer()
+            self._auto_recovery_attempts = 0
+
     def _schedule_auto_recovery(self):
+        # Every controller-level recovery step (restart timer, USB toggle, app
+        # relaunch) is reached through here, so this one gate covers them all.
+        if not self._auto_recovery_enabled():
+            app_logger.warning(
+                "Automatic recovery is off — capture stays stopped until "
+                "started manually."
+            )
+            return
         if self._unrecoverable_mode:
             app_logger.info(
                 "Auto-recovery suppressed — in unrecoverable mode, awaiting "

@@ -279,6 +279,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
 | `test_camera.py` | 14 | `zwo_camera` — SDK, config, debayering (3 need `requires_camera`) |
+| `test_camera_auto_recovery.py` | 15 | `camera_auto_recovery` off — one plain reconnect, no ladder/USB/SDK reset (`camera_reconnect`), capture loop stops instead of retrying, controller schedules no restart or USB reset; on = unchanged |
 | `test_discord.py` | 32 | `discord_alerts` — webhooks, embeds (mocked) |
 | `test_image_output.py` | 18 | `processor` — overlays, stretch, output formats |
 | `test_output_crop.py` | 59 | `output_crop` — box normalisation/clamping/evenness, centring, fit-to-circle, proportional rescale across frame sizes, PIL crop, metadata round-trip, DEFAULT_CONFIG integration |

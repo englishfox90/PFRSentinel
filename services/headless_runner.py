@@ -264,6 +264,8 @@ class HeadlessRunner:
             )
             
             self.zwo_camera.schedule_gate = gate_for_config(self.config)
+            self.zwo_camera.auto_recovery_enabled = (
+                self.config.get('camera_auto_recovery', True) is not False)
 
             # Set capture interval
             self.zwo_camera.capture_interval = self.config.get('zwo_interval', 5.0)

@@ -122,7 +122,12 @@ DEFAULT_CONFIG = {
     #                 weather coordinates), widened by the margin below
     "scheduled_window_source": "fixed",
     "scheduled_window_margin_min": 15,      # minutes before/after the timelapse window (0-180)
-    
+
+    # Camera fault recovery (Settings > System). True: the full ladder — retry
+    # loops, USB reset / disable-enable, SDK reset, app restart. False: one plain
+    # reconnect per fault, then capture stops until the user starts it again.
+    "camera_auto_recovery": True,
+
     # White Balance configuration
     "white_balance": {
         "mode": "gray_world",  # "asi_auto" | "manual" | "gray_world"

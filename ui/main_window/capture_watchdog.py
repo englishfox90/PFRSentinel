@@ -85,8 +85,8 @@ class _CaptureWatchdogMixin:
             try:
                 self.camera_controller._on_camera_error(
                     "Capture thread appears permanently wedged inside the ZWO SDK. "
-                    "Auto-recovery will keep trying; the app may need a manual "
-                    "restart if this persists.",
+                    "Auto-recovery (when enabled in Settings) will keep trying; "
+                    "the app may need a manual restart if this persists.",
                     is_fatal=True,
                 )
             except TypeError:

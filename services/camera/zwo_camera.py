@@ -160,7 +160,16 @@ class ZWOCamera:
     def current_bit_depth(self) -> int:
         """Current capture bit depth (8 for RAW8, 16 for RAW16)"""
         return self._connection.current_bit_depth
-    
+
+    @property
+    def auto_recovery_enabled(self) -> bool:
+        """Config 'camera_auto_recovery' — set by whoever builds the camera."""
+        return self._connection.auto_recovery_enabled
+
+    @auto_recovery_enabled.setter
+    def auto_recovery_enabled(self, value):
+        self._connection.auto_recovery_enabled = bool(value)
+
     def __del__(self):
         """Destructor to ensure camera is disconnected when object is destroyed"""
         try:
