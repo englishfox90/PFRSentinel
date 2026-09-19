@@ -146,6 +146,20 @@ PFR Sentinel is built to run unattended, so it tries hard to recover a camera th
 
 Details of each attempt are written to the [Logs](Logs) tab.
 
+### Turning recovery off
+
+> **New in the next release** — not available in version 3.7.6 or earlier.
+
+If you don't want PFR Sentinel resetting the camera's USB device or restarting itself — on a shared USB hub, say — turn off **Automatic camera recovery** under [Settings](Settings#system). With it off:
+
+- A capture error gets **one** plain reconnect: disconnect, a short pause, reopen. No USB reset, no SDK reset, no retry loop.
+- ZWO cameras often fail the very first frame after being reopened, so that one failure is absorbed with a quiet second reopen. It counts as part of the same reconnect.
+- If the reconnect fails, or frames still fail after it, capture stops, the camera is released, and an error is reported. It stays stopped until you click **Start**.
+- In **Only within time window** mode, a camera that won't reopen at the start of the window also stops capture rather than retrying.
+- The app never restarts itself, and the Administrator warning at startup is not shown.
+
+The **Revive (USB Reset)** button still works, because you press it yourself. The switch takes effect immediately, including during a running capture.
+
 ---
 
 ## Notes

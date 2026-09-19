@@ -308,6 +308,9 @@ def capture_loop(camera: "ZWOCamera"):
     # (the SDK can't take that churn — it recommends 10-15s between ops).
     # See also the 2026-06-02 16:00 scheduled-reconnect incident.
     warmup_pending = False
+    # 'camera_auto_recovery' off: a fault gets ONE reconnect; cleared by a good frame.
+    reconnect_spent = False
+    fatal_reason = "Capture loop terminated unexpectedly"
     # Heartbeat + state flags observed by the UI watchdog. _last_frame_time
     # is updated after every successful capture. long_retry_mode_public
     # mirrors the local long_retry_mode so the watchdog can skip bogus
@@ -408,6 +411,10 @@ def capture_loop(camera: "ZWOCamera"):
                             camera.log("Attempting to reconnect camera (re-detecting cameras)...")
                             if not camera.reconnect_camera_safe():
                                 camera.log("✗ ERROR: Failed to reconnect camera for scheduled window")
+                                if not getattr(camera, 'auto_recovery_enabled', True):
+                                    fatal_reason = ("Camera failed to reopen for the scheduled window; "
+                                                    "automatic recovery is off — capture stopped")
+                                    break
                                 camera.log("Will retry in 5 seconds...")
                                 wait_end = time.time() + 5.0
                                 while camera.is_capturing and time.time() < wait_end:
@@ -431,7 +438,7 @@ def capture_loop(camera: "ZWOCamera"):
                 img, metadata = camera.capture_single_frame()
 
                 consecutive_errors = 0
-                warmup_pending = False
+                warmup_pending = reconnect_spent = False
                 camera._last_frame_time = time.time()
                 if long_retry_mode:
                     long_retry_mode = False
@@ -535,6 +542,13 @@ def capture_loop(camera: "ZWOCamera"):
                 if not camera.is_capturing:
                     break
 
+                auto_recovery = getattr(camera, 'auto_recovery_enabled', True)
+                # The cold-open quirk below belongs to that one reconnect, not a 2nd fault.
+                if not auto_recovery and reconnect_spent and not warmup_pending:
+                    fatal_reason = (f"Capture failed again after the single reconnect ({e}); "
+                                    "automatic recovery is off — capture stopped")
+                    break
+
                 # First frame after a scheduled-window reconnect: absorb a
                 # single "Camera closed" quietly. The off-peak path releases the
                 # SDK, so the window-transition reconnect runs against a cold
@@ -544,6 +558,7 @@ def capture_loop(camera: "ZWOCamera"):
                 # quirk doesn't read as a fault (see 2026-06-02 16:00 incident).
                 if warmup_pending:
                     warmup_pending = False
+                    reconnect_spent = True
                     camera.log(
                         f"First frame after reconnect failed ({e}) — reopening "
                         "silently (known ZWO cold-open quirk, no fault raised)"
@@ -592,6 +607,7 @@ def capture_loop(camera: "ZWOCamera"):
                         f"Initiating reconnection attempt "
                         f"{consecutive_errors}/{max_reconnect_attempts}..."
                     )
+                    reconnect_spent = True
                     try:
                         # Abort any running calibration before disconnecting so it
                         # doesn't keep calling SDK methods on a dying camera handle.
@@ -641,6 +657,10 @@ def capture_loop(camera: "ZWOCamera"):
                     except Exception as reconnect_error:
                         camera.log(f"✗ Reconnection attempt failed: {reconnect_error}")
                         camera.log(f"Stack trace: {traceback.format_exc()}")
+                        if not auto_recovery:
+                            fatal_reason = ("Camera reconnect failed; automatic "
+                                            "recovery is off — capture stopped")
+                            break
                         backoff_time = min(2 ** consecutive_errors, 32)
                         camera.log(
                             f"Using exponential backoff: waiting {backoff_time}s "
@@ -697,9 +717,15 @@ def capture_loop(camera: "ZWOCamera"):
                     consecutive_errors = 0
     finally:
         camera.log("Capture loop exiting - cleaning up...")
-        # Note: snapshot mode (start_exposure/get_data_after_exposure),
-        # NOT video mode. Camera cleanup handled by disconnect_camera()
-        # via stop_capture().
+        # Snapshot mode, not video: nothing to stop here, and stop_capture() owns
+        # the disconnect. It never runs on a fatal exit though, and with recovery
+        # off nothing reopens the handle — release the USB device ourselves.
+        if camera.is_capturing and not getattr(camera, 'auto_recovery_enabled', True):
+            camera.log(f"✗ {fatal_reason}")
+            try:
+                camera._connection.disconnect()
+            except Exception:
+                pass
 
         # If capture is exiting while is_capturing is still True, something
         # fatal (unhandled exception) forced us out — tell the UI so it can
@@ -711,13 +737,10 @@ def capture_loop(camera: "ZWOCamera"):
         ):
             camera.is_capturing = False
             try:
-                camera.on_error_callback(
-                    "Capture loop terminated unexpectedly",
-                    is_fatal=True,
-                )
+                camera.on_error_callback(fatal_reason, is_fatal=True)
             except TypeError:
                 try:
-                    camera.on_error_callback("Capture loop terminated unexpectedly")
+                    camera.on_error_callback(fatal_reason)
                 except Exception:
                     pass
             except Exception:

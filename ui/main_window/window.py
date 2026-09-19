@@ -434,6 +434,9 @@ class MainWindow(
         """
         if sys.platform != 'win32':
             return
+        # Admin only matters for USB recovery; nothing to warn about when it's off.
+        if self.config.get('camera_auto_recovery', True) is False:
+            return
 
         try:
             import ctypes

@@ -141,6 +141,45 @@ def run_recovery_ladder(conn, camera_to_find: str,
     return target_found, target_index, post_recovery
 
 
+def reconnect_without_recovery(conn, camera_to_find: Optional[str],
+                               serial_to_find: Optional[str], settings,
+                               allow_fallback: bool) -> bool:
+    """One locate + one open, for config 'camera_auto_recovery' = False.
+
+    The operator has opted out of everything that touches the USB device or
+    resets the SDK, so a camera that is missing or won't open is simply a
+    failed reconnect — the caller stops capture rather than escalating.
+    """
+    conn.log("Automatic recovery is off — single reconnect, no USB/SDK reset")
+    target_index = None
+    if serial_to_find:
+        from .camera_identity import find_index_by_serial
+        target_index = find_index_by_serial(conn, serial_to_find, camera_to_find)
+
+    if target_index is None:
+        detected = conn.detect_cameras()
+        if not detected:
+            conn.log("✗ RECONNECTION FAILED: no cameras detected")
+            return False
+        if camera_to_find:
+            target_index = conn._find_camera_index_by_name(detected, camera_to_find)
+        if target_index is None:
+            if camera_to_find and not allow_fallback:
+                conn.log(f"✗ RECONNECTION FAILED: Target camera '{camera_to_find}' not found")
+                return False
+            target_index = detected[0]['index']
+            conn.log(f"Using first available camera at index {target_index}")
+
+    conn.camera_index = target_index
+    if conn.connect(target_index, settings,
+                    expected_camera_name=camera_to_find,
+                    expected_camera_serial=serial_to_find,
+                    _skip_roi_usb_recovery=True):
+        return True
+    conn.log("✗ RECONNECTION FAILED: camera could not be opened")
+    return False
+
+
 def reconnect_safe(conn, target_camera_name: Optional[str] = None,
                    settings=None, allow_fallback: bool = False,
                    target_camera_serial: Optional[str] = None) -> bool:
@@ -172,6 +211,11 @@ def reconnect_safe(conn, target_camera_name: Optional[str] = None,
         conn.log(f"Target camera: '{camera_to_find}'")
     else:
         conn.log("No target camera name specified - will use first available")
+
+    if not conn.auto_recovery_enabled:
+        return reconnect_without_recovery(
+            conn, camera_to_find, serial_to_find, settings, allow_fallback
+        )
 
     # Serial-first fast path: the index may have shifted, so locate the body by
     # its stable serial before falling back to name-based detection/recovery.

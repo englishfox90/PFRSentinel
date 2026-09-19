@@ -133,6 +133,16 @@ class SettingsPanel(QScrollArea):
         self.autostart_capture_switch.checkedChanged.connect(self._on_startup_changed)
         system_card.add_widget(autostart_capture_row)
 
+        recovery_row = SwitchRow(
+            "Automatic camera recovery",
+            "On: a camera fault is retried indefinitely, with USB resets and an app "
+            "restart if needed. Off: one plain reconnect, then capture stops until "
+            "you start it again. No USB resets."
+        )
+        self.camera_recovery_switch = recovery_row.switch
+        self.camera_recovery_switch.checkedChanged.connect(self._on_camera_recovery_changed)
+        system_card.add_widget(recovery_row)
+
         # Analytics opt-out
         analytics_row = SwitchRow(
             "Send Anonymous Usage Data",
@@ -365,6 +375,16 @@ class SettingsPanel(QScrollArea):
         finally:
             self._loading_config = False
 
+    def _on_camera_recovery_changed(self, enabled: bool):
+        if self._loading_config:
+            return
+        if self.main_window and hasattr(self.main_window, 'config'):
+            self.main_window.config.set('camera_auto_recovery', enabled)
+            controller = getattr(self.main_window, 'camera_controller', None)
+            if controller is not None:
+                controller.set_auto_recovery_enabled(enabled)
+            self.settings_changed.emit()
+
     def _on_analytics_changed(self):
         """Handle analytics opt-in/out toggle"""
         if self._loading_config:
@@ -525,6 +545,7 @@ class SettingsPanel(QScrollArea):
             # System
             self.tray_enabled_switch.setChecked(config.get('tray_mode_enabled', False))
             self.analytics_switch.setChecked(config.get('analytics_enabled', True))
+            self.camera_recovery_switch.setChecked(config.get('camera_auto_recovery', True))
 
             # Startup — the scheduled task is authoritative, not the cached flag.
             from services import autostart

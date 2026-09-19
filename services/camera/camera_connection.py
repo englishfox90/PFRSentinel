@@ -91,6 +91,9 @@ class CameraConnection:
         self._usb_reset_func = None
         self._usb_disable_enable_func = None
         self._init_usb_reset()
+        # config 'camera_auto_recovery'. False: no USB reset, SDK-reset ladder or
+        # escalation anywhere in this class or camera_reconnect — plain opens only.
+        self.auto_recovery_enabled = True
 
     def log(self, message: str) -> None:
         """Log message via callback or app_logger"""
@@ -479,6 +482,7 @@ class CameraConnection:
             # An SDK reset cannot clear this; only a USB disable/enable does.
             # Escalate once, then retry the open+configure on a clean device.
             if (not _skip_roi_usb_recovery
+                    and self.auto_recovery_enabled
                     and "invalid size" in str(e).lower()
                     and expected_camera_name
                     and self._usb_disable_enable_func):
@@ -705,7 +709,8 @@ class CameraConnection:
 
                         except Exception as e:
                             self.log(f"⚠ Warning during camera close: {e}")
-                            if self._usb_reset_available and self.camera_name:
+                            if (self._usb_reset_available and self.camera_name
+                                    and self.auto_recovery_enabled):
                                 self.log("  Attempting USB reset due to close failure...")
                                 try:
                                     self._usb_reset_func(camera_name=self.camera_name, logger=self.log)
