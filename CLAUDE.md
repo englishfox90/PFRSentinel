@@ -27,7 +27,7 @@ PFRSentinel/
 │   ├── components/             # Reusable widgets (header, monitoring panel, status indicator)
 │   ├── panels/                 # Pages (layout only) — monitoring, capture, output, overlays, timelapse, logs
 │   ├── controllers/            # Business logic — capture, output, overlay, timelapse, ML prediction
-│   └── theme/                  # tokens.py, styles.py, accent_themes.py, icons.py
+│   └── theme/                  # tokens.py, styles.py, accent_themes.py, special_themes.py (seasonal packs), icons.py
 ├── services/                   # Core processing modules
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
 │   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
@@ -320,6 +320,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
 | `test_windows_only_ui.py` | 5 | `FfmpegInstallCard` copyable install command off Windows; `MissingCameraNotice` hides Revive where there is no USB reset API (offscreen Qt) |
 | `test_update_dialog_platform.py` | 3 | `UpdateDialog` — download hidden and GitHub made primary off Windows; installer launch is a no-op there (offscreen Qt) |
+| `test_special_themes.py` | 17 | `special_themes` — pack patches accent + neutrals and re-derives aliases, switching off leaves nothing behind, status colours untouchable, neutrals no brighter than Sand, every pack glyph exists in the bundled MDI font, font bundled in the spec; nav rail swaps/restores icons, every sprite state paints in both painter sets, `AppearanceCard` chip/swatch signals and chip restyle on load, `AppBar.show_sending` hold cancelled by a newer frame (offscreen Qt) |
 | `test_scroll_safe_spinbox.py` | 10 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it, a click on the child line edit does (offscreen Qt) |
 | `test_image_processing_panel_stretch.py` | 4 | `ImageProcessingPanel` Auto Stretch rows — Target Median slider reaches the engine floor, Dark Threshold enabled only with Dark Scene Color Fix (offscreen Qt) |
 

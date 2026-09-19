@@ -94,7 +94,21 @@ def configure_widget_cursors(widget: QWidget):
 
 def get_stylesheet() -> str:
     """Generate comprehensive Qt stylesheet from tokens"""
-    
+    from .special_themes import display_font_active, display_size
+
+    # The global font-family rule below beats QWidget.setFont(), so a special
+    # theme's heading font has to arrive as QSS too. Emitted only while a pack
+    # supplies one: card headers otherwise keep today's inherited look.
+    display_rule = ""
+    if display_font_active():
+        display_rule = f"""
+    SubtitleLabel {{
+        font-family: {Typography.family_display};
+        font-size: {display_size()}px;
+        font-weight: {Typography.weight_regular};
+    }}
+    """
+
     return f"""
     /* =================================================================
        PFRAstro Global Stylesheet
@@ -410,7 +424,7 @@ def get_stylesheet() -> str:
         border: none;
         border-radius: {Layout.radius_lg}px;
     }}
-    """
+    """ + display_rule
 
 
 def get_status_chip_style(status: str) -> str:

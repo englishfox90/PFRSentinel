@@ -280,11 +280,7 @@ class _MainWindowOutputMixin:
             self._dispatch_outputs(output_path, dispatch_image, metadata, has_outputs)
 
             if has_outputs:
-                self.app_bar.set_status('sending')
-                if self.is_capturing:
-                    QTimer.singleShot(300, lambda: self.app_bar.set_status('waiting'))
-                else:
-                    QTimer.singleShot(300, lambda: self.app_bar.set_status(None))
+                self.app_bar.show_sending(lambda: 'waiting' if self.is_capturing else None)
             else:
                 if self.is_capturing:
                     self.app_bar.set_status('waiting')

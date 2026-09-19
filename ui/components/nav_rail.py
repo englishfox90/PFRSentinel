@@ -8,10 +8,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIcon, QPainter, QColor, QBrush
-import qtawesome as qta
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.styles import get_nav_item_style
+from ..theme.icons import mdi
+from ..theme.special_themes import active_special_theme
 
 
 class NavButton(QPushButton):
@@ -165,12 +166,7 @@ class NavRail(QFrame):
         # QLabels (QLabel subclasses QFrame), giving the group headers a stray
         # right border that reads as a double line.
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(f"""
-            NavRail {{
-                background-color: {Colors.bg_surface};
-                border-right: 1px solid {Colors.border_subtle};
-            }}
-        """)
+        self._apply_frame_style()
 
         self._group_labels = []
         self._dividers = []
@@ -181,7 +177,7 @@ class NavRail(QFrame):
 
         # Hamburger toggle button
         self.toggle_btn = QPushButton()
-        self.toggle_btn.setIcon(qta.icon('mdi6.menu', color=Colors.text_secondary))
+        self.toggle_btn.setIcon(mdi('menu'))
         self.toggle_btn.setIconSize(QSize(20, 20))
         self.toggle_btn.setFixedSize(40, 40)
         self.toggle_btn.setCursor(Qt.PointingHandCursor)
@@ -198,24 +194,26 @@ class NavRail(QFrame):
         self.toggle_btn.clicked.connect(self.toggle_collapsed)
         layout.addWidget(self.toggle_btn)
 
-        _ico = lambda name: qta.icon(f'mdi6.{name}', color=Colors.text_secondary)
+        # Icons are resolved per section key so a special theme can swap them
+        # (and swap them back) at runtime — see refresh_styles().
+        self._icon_names = {}
 
         # Grouped sections: each (group title, [(icon, label, key), ...]).
         groups = [
             ("Monitor", [
-                (_ico('monitor-shimmer'), "Live Monitoring", 'monitoring'),
-                (_ico('meteor'), "Meteor Tracker", 'meteor'),
+                ('monitor-shimmer', "Live Monitoring", 'monitoring'),
+                ('meteor', "Meteor Tracker", 'meteor'),
             ]),
             ("Image", [
-                (_ico('camera-plus-outline'), "Capture", 'capture'),
-                (_ico('image-edit-outline'), "Image Processing", 'processing'),
-                (_ico('format-textbox'), "Overlays", 'overlays'),
-                (_ico('sphere'), "All-Sky", 'allsky'),
+                ('camera-plus-outline', "Capture", 'capture'),
+                ('image-edit-outline', "Image Processing", 'processing'),
+                ('format-textbox', "Overlays", 'overlays'),
+                ('sphere', "All-Sky", 'allsky'),
             ]),
             ("Publish", [
-                (_ico('monitor-share'), "Output", 'output'),
-                (_ico('filmstrip-box-multiple'), "Timelapse", 'timelapse'),
-                (_ico('image-multiple'), "Library", 'library'),
+                ('monitor-share', "Output", 'output'),
+                ('filmstrip-box-multiple', "Timelapse", 'timelapse'),
+                ('image-multiple', "Library", 'library'),
             ]),
         ]
 
@@ -224,22 +222,16 @@ class NavRail(QFrame):
                 layout.addWidget(self._make_divider())
             layout.addWidget(self._make_group_label(title))
             for icon, label, key in items:
-                btn = NavButton(icon, label, key, self)
-                btn.clicked.connect(lambda checked, k=key: self._on_button_clicked(k))
-                layout.addWidget(btn)
-                self._buttons[key] = btn
+                self._add_nav_button(layout, icon, label, key)
 
         # Push Logs + Settings to the bottom.
         layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
         layout.addWidget(self._make_divider())
         for icon, label, key in (
-            (_ico('math-log'), "Logs", 'logs'),
-            (_ico('cog'), "Settings", 'settings'),
+            ('math-log', "Logs", 'logs'),
+            ('cog', "Settings", 'settings'),
         ):
-            btn = NavButton(icon, label, key, self)
-            btn.clicked.connect(lambda checked, k=key: self._on_button_clicked(k))
-            layout.addWidget(btn)
-            self._buttons[key] = btn
+            self._add_nav_button(layout, icon, label, key)
 
         # Meteor Tracker is still in beta.
         for beta_key in ('meteor',):
@@ -249,15 +241,43 @@ class NavRail(QFrame):
         # Set initial selection
         self._buttons['capture'].set_selected(True)
 
-    def _make_group_label(self, text: str) -> QLabel:
-        lbl = QLabel(text.upper())
-        lbl.setStyleSheet(f"""
+    def _add_nav_button(self, layout, icon_name: str, label: str, key: str):
+        self._icon_names[key] = icon_name
+        btn = NavButton(self._nav_icon(key), label, key, self)
+        btn.clicked.connect(lambda checked, k=key: self._on_button_clicked(k))
+        layout.addWidget(btn)
+        self._buttons[key] = btn
+
+    def _nav_icon(self, key: str) -> QIcon:
+        pack = active_special_theme() or {}
+        themed = pack.get('nav_icons', {}).get(key)
+        if themed:
+            icon = mdi(themed)
+            if not icon.isNull():
+                return icon
+        return mdi(self._icon_names[key])
+
+    @staticmethod
+    def _group_label_style() -> str:
+        return f"""
             color: {Colors.text_muted};
             font-size: {Typography.size_small}px;
             font-weight: {Typography.weight_bold};
             letter-spacing: 1px;
             padding: 6px 12px 2px;
+        """
+
+    def _apply_frame_style(self):
+        self.setStyleSheet(f"""
+            NavRail {{
+                background-color: {Colors.bg_surface};
+                border-right: 1px solid {Colors.border_subtle};
+            }}
         """)
+
+    def _make_group_label(self, text: str) -> QLabel:
+        lbl = QLabel(text.upper())
+        lbl.setStyleSheet(self._group_label_style())
         self._group_labels.append(lbl)
         return lbl
 
@@ -330,8 +350,16 @@ class NavRail(QFrame):
     
     def refresh_styles(self):
         """Re-apply inline stylesheets on all buttons using current Colors values.
-        Call after an accent theme change so the selected highlight updates."""
-        for btn in self._buttons.values():
+        Call after an accent or special theme change so the selected highlight,
+        the rail background and the (possibly themed) icons all update."""
+        self._apply_frame_style()
+        self.toggle_btn.setIcon(mdi('menu'))
+        for lbl in self._group_labels:
+            lbl.setStyleSheet(self._group_label_style())
+        for div in self._dividers:
+            div.setStyleSheet(f"background-color: {Colors.border_subtle}; border: none;")
+        for key, btn in self._buttons.items():
+            btn.setIcon(self._nav_icon(key))
             btn._update_style()
 
     def set_badge(self, key: str, visible: bool, text: str = "", color: str = None):
