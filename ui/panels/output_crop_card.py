@@ -4,7 +4,7 @@ Output framing card — Processing page UI for the output-stage crop (issue #12)
 Layout and config plumbing only. The thumbnail and the Fit-to-sky measurement
 come from ui/controllers/output_crop_controller.py through signals.
 """
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QGridLayout, QHBoxLayout
 from PySide6.QtCore import Qt, Signal
 from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SwitchButton
 
@@ -17,6 +17,7 @@ from .crop_box_editor import CropBoxEditor
 from services.output_crop import DEFAULT_OUTPUT_CROP, centred_box, describe, normalise_box
 
 _DEFAULT_FRACTION = 0.8   # first-enable box: 80% of the frame, centred
+_SPIN_WIDTH = 150
 
 
 class OutputCropCard(CollapsibleCard):
@@ -67,36 +68,49 @@ class OutputCropCard(CollapsibleCard):
         spin.setRange(0, 0)
         spin.setSingleStep(2)
         spin.setToolTip(tooltip)
-        spin.setFixedWidth(120)
+        # Fluent's inline up/down buttons take ~70px; 120 clipped 4-digit values.
+        spin.setFixedWidth(_SPIN_WIDTH)
         spin.valueChanged.connect(self._on_spin_changed)
         return spin
 
+    @staticmethod
+    def _muted_label(text: str) -> BodyLabel:
+        label = BodyLabel(text)
+        label.setStyleSheet(f"color: {Colors.text_secondary};")
+        return label
+
     def _build_numeric_row(self) -> QWidget:
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(Spacing.sm)
-        self.x_spin = self._spin("Left edge of the box (px)")
-        self.y_spin = self._spin("Top edge of the box (px)")
+        """Two rows — offset (X/Y) over size (W/H) — so four 4-digit fields fit a narrow page."""
+        self.x_spin = self._spin("Left edge of the box, measured from the left of the full frame (px)")
+        self.y_spin = self._spin("Top edge of the box, measured from the top of the full frame (px)")
         self.w_spin = self._spin("Box width (px, even)")
         self.h_spin = self._spin("Box height (px, even)")
-        for text, spin in (("X", self.x_spin), ("Y", self.y_spin),
-                           ("W", self.w_spin), ("H", self.h_spin)):
-            label = BodyLabel(text)
-            label.setStyleSheet(f"color: {Colors.text_secondary};")
-            layout.addWidget(label)
-            layout.addWidget(spin)
-        layout.addSpacing(Spacing.md)
-        square_label = BodyLabel("Keep square")
-        square_label.setStyleSheet(f"color: {Colors.text_secondary};")
-        layout.addWidget(square_label)
+
+        grid = QWidget()
+        grid_layout = QGridLayout(grid)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
+        grid_layout.setHorizontalSpacing(Spacing.sm)
+        grid_layout.setVerticalSpacing(Spacing.sm)
+        rows = (("Offset", ("X", self.x_spin), ("Y", self.y_spin)),
+                ("Size", ("W", self.w_spin), ("H", self.h_spin)))
+        for r, (title, *fields) in enumerate(rows):
+            grid_layout.addWidget(self._muted_label(title), r, 0)
+            for c, (text, spin) in enumerate(fields):
+                grid_layout.addWidget(self._muted_label(text), r, 1 + c * 2)
+                grid_layout.addWidget(spin, r, 2 + c * 2)
+
+        square = QHBoxLayout()
+        square.setContentsMargins(Spacing.md, 0, 0, 0)
+        square.setSpacing(Spacing.sm)
+        square.addWidget(self._muted_label("Keep square"))
         self.square_switch = SwitchButton()
         self.square_switch.setChecked(True)
         self.square_switch.setToolTip("Lock the box to a square — the natural shape for an all-sky disc")
         self.square_switch.checkedChanged.connect(self._on_square_toggled)
-        layout.addWidget(self.square_switch)
-        layout.addStretch()
-        return row
+        square.addWidget(self.square_switch)
+        grid_layout.addLayout(square, 1, 5)
+        grid_layout.setColumnStretch(6, 1)
+        return grid
 
     def _build_button_row(self) -> QWidget:
         row = QWidget()
