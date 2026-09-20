@@ -293,8 +293,12 @@ class GuidedCalibrationDialog(QDialog):
             self.saved = True
             self.accept()
             return
-        self._state = _STATE_COLLECT
-        self._set_status("Not saved", message, 'error')
+        # Back to the review, not to picking: the session still holds the
+        # solved model, and a refusal can be transient (a Calibrate Now run
+        # in flight). Dropping to "Solve" left no way to save again, and
+        # solving would discard the very result the user was trying to keep.
+        self._state = _STATE_REVIEW
+        self._set_status("Not saved — try again", message, 'error')
         self._refresh()
 
     # ------------------------------------------------------------------

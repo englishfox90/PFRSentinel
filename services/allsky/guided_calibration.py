@@ -237,7 +237,12 @@ def calibrate_from_anchors(
 # Internals
 # ---------------------------------------------------------------------------
 
-def solve_anchor_set(alts, azs, px, cx, cy, a1_seed, sky_radius, rms_limit):
+class SolveCancelled(Exception):
+    """Raised by solve_anchor_set when its should_cancel callback says stop."""
+
+
+def solve_anchor_set(alts, azs, px, cx, cy, a1_seed, sky_radius, rms_limit,
+                     should_cancel=None):
     """Solve one anchor set: coarse orientation search, per-candidate refine,
     then progressive centre freeing.
 
@@ -251,9 +256,19 @@ def solve_anchor_set(alts, azs, px, cx, cy, a1_seed, sky_radius, rms_limit):
     orientation, widening the leash only while the fit still fails the
     limit, and only ever accepting an improvement.
     """
+    def check_cancelled():
+        if should_cancel is not None and should_cancel():
+            raise SolveCancelled()
+
+    # should_cancel is polled between the least-squares refines, which are
+    # where the time goes — a caller that no longer wants the answer (the
+    # guided dialog closing over an in-flight suggestion solve) gets control
+    # back within one refine instead of waiting out all of them.
+    check_cancelled()
     candidates = _coarse_search(alts, azs, px, cx, cy, a1_seed)
     model, rms = None, float('inf')
     for cand in candidates:
+        check_cancelled()
         m, r = _refine(alts, azs, px, cx, cy, a1_seed, cand)
         if r < rms:
             model, rms = m, r
@@ -261,6 +276,7 @@ def solve_anchor_set(alts, azs, px, cx, cy, a1_seed, sky_radius, rms_limit):
         for stage, frac in enumerate(_CENTRE_RANGE_FRACTIONS):
             if stage and rms <= rms_limit:
                 break
+            check_cancelled()
             settled = (0.0, model.east_left, model.axis_alt, model.axis_az,
                        float(np.degrees(model.roll)))
             m2, r2 = _refine(alts, azs, px, cx, cy, model.a1, settled,

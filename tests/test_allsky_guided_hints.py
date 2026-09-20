@@ -148,6 +148,20 @@ def test_frame_with_almost_no_detections_does_not_accuse_the_anchors(sky):
         assert result.message == ""
 
 
+def test_cancelled_solve_returns_nothing_and_stops_early(sky):
+    candidates, det, _truth = sky
+    polls = []
+
+    def cancel_after_two():
+        polls.append(1)
+        return len(polls) > 2
+
+    result = suggest_stars(_anchors(sky, 4), candidates, det, LAT, LON, DT,
+                           *SKY, should_cancel=cancel_after_two)
+    assert result is None
+    assert len(polls) == 3, "stopped at the first poll that said cancel"
+
+
 def test_anchor_below_horizon_gives_no_suggestions(sky):
     candidates, det, _truth = sky
     anchors = _anchors(sky, 3)

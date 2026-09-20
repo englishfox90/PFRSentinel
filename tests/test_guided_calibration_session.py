@@ -244,6 +244,30 @@ class TestHints:
         assert [h.message for h in events['hints']] == ['4']
 
 
+    def test_superseded_and_closing_solves_are_told_to_stop(self, qapp, monkeypatch):
+        """Closing right after adding a star must not hold the GUI thread
+        for the rest of a suggestion solve nobody will read."""
+        started = []
+
+        def suggest(anchors, *args, should_cancel=None, **kw):
+            started.append(len(anchors))
+            deadline = time.monotonic() + 5.0
+            while not should_cancel() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            return None
+
+        monkeypatch.setattr(gh, 'suggest_stars', suggest)
+        s = gs.GuidedCalibrationSession(_prep())
+        s.request_hints(_anchors(3))
+        s.request_hints(_anchors(4))
+        assert _pump_until(qapp, lambda: len(started) == 2)
+
+        began = time.monotonic()
+        s.close()
+        assert time.monotonic() - began < 2.0, "close() waited out the solves"
+        _flush(qapp)
+
+
 class TestSave:
 
     def _held(self, qapp, monkeypatch, commit):

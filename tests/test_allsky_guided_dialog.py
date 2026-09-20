@@ -252,6 +252,25 @@ class TestReview:
         assert len(dlg._anchors) == MIN_ANCHORS
         assert 'disk full' in dlg._status_body.text()
 
+    def test_failed_save_can_be_retried_without_solving_again(self, dialog):
+        """A refusal can be transient (Calibrate Now in flight). Dropping
+        back to "Solve" left no way to save, and solving discards the model."""
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        dlg.show_solved(_solved())
+        dlg._on_primary()
+        dlg.show_saved(False, "wait for Calibrate Now to finish")
+
+        assert dlg._solve_btn.text() == "Save calibration"
+        assert dlg._solve_btn.isEnabled()
+        assert dlg._back_btn.isVisible()
+        assert dlg._predicted, "the reviewed result is still on the frame"
+
+        dlg._on_primary()
+        assert req['save'] == 2 and req['solve'] == []
+        dlg.show_saved(True, "")
+        assert dlg.saved
+
     def test_adjust_stars_discards_the_result_and_returns_to_picking(self, dialog):
         dlg, req = dialog
         _identify(dlg, MIN_ANCHORS)

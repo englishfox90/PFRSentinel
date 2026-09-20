@@ -71,7 +71,8 @@ class _HintWorker(QThread):
             result = suggest_stars(
                 self._anchors, p.get('candidates', []), p.get('detections', []),
                 p['lat'], p['lon'], p['dt'],
-                p['sky_cx'], p['sky_cy'], p['sky_r'])
+                p['sky_cx'], p['sky_cy'], p['sky_r'],
+                should_cancel=self.isInterruptionRequested)
         except Exception as e:
             log.debug(f"Guided hints failed (non-fatal): {e}")
         self.ready.emit(self._id, result)
@@ -173,6 +174,10 @@ class GuidedCalibrationSession(QObject):
         if self._closed:
             return
         self._hint_request += 1
+        # A superseded suggestion solve is pure waste: stop it rather than
+        # let edits made in quick succession stack up solves nobody reads.
+        for stale in self._hint_workers:
+            stale.requestInterruption()
         from services.allsky.guided_hints import MIN_HINT_ANCHORS
         if len(anchors) < MIN_HINT_ANCHORS:
             self.hints_ready.emit(None)
@@ -187,6 +192,12 @@ class GuidedCalibrationSession(QObject):
         """End the session: late results are ignored, workers waited out."""
         self._closed = True
         self._pending_model = None
+        # Nobody will read a suggestion now. Without this, closing the dialog
+        # right after adding a star held the GUI thread for the rest of that
+        # solve — and for each one stacked behind it (measured 0.65 s for
+        # five on a fast desktop; the rig PCs are slower).
+        for w in self._hint_workers:
+            w.requestInterruption()
         still_running = False
         for w in [self._solve_worker, *self._hint_workers]:
             if w is not None and w.isRunning():

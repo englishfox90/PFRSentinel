@@ -27,7 +27,7 @@ from services.logger import app_logger as log
 
 from .calibration_validate import a1_from_sky_radius, tol_scale
 from .coords import radec_to_altaz
-from .guided_calibration import solve_anchor_set
+from .guided_calibration import SolveCancelled, solve_anchor_set
 
 # Fewer than three anchors leave the pose underdetermined.
 MIN_HINT_ANCHORS = 3
@@ -101,12 +101,16 @@ def suggest_stars(
     sky_cx: float,
     sky_cy: float,
     sky_radius: float,
+    should_cancel=None,
 ) -> Optional[HintResult]:
     """Predict pixel positions for the candidates the user has not named yet.
 
     anchors:    (pixel_x, pixel_y, ra_deg, dec_deg, name) per identified star.
     candidates: the dialog's pick list — dicts with name/alt/az/vmag.
     detections: detected star centroids, (x, y, ...) tuples, brightest first.
+
+    should_cancel: optional callable polled during the solve; returning True
+        abandons it (the result is None).
 
     Returns None when there are too few anchors or the solve cannot run;
     otherwise a HintResult whose `trusted` flag says whether the hints should
@@ -133,7 +137,10 @@ def suggest_stars(
     try:
         model, rms = solve_anchor_set(
             alts, azs, px, float(sky_cx), float(sky_cy),
-            a1_from_sky_radius(sky_radius), sky_radius, rms_limit)
+            a1_from_sky_radius(sky_radius), sky_radius, rms_limit,
+            should_cancel=should_cancel)
+    except SolveCancelled:
+        return None
     except Exception as e:
         log.debug(f"Guided hints: provisional solve failed: {e}")
         return None
