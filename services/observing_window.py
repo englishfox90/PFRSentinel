@@ -5,11 +5,46 @@ Used by star detection and the all-sky overlay: both only make sense when
 the sun is below civil twilight and (if ML roof detection is running) the
 roof is actually open.
 """
+import threading
 from datetime import datetime, timezone
 
 from .logger import app_logger
 
 _CACHE_KEY = '_observing_window'
+
+# Consecutive frames the roof must read Closed before sky features switch off.
+# The roof classifier's known failure is the overexposed or otherwise unusual
+# frame — exactly what an exposure change produces — and acting on the raw
+# per-frame verdict blanked the whole all-sky overlay for that frame. The two
+# other consumers of the same verdict (the ASCOM safety file and the roof
+# alert) already wait for a second frame; this gate was the odd one out.
+# A real closure costs one frame of delay, on a frame with no stars in it.
+ROOF_CLOSED_CONFIRM_FRAMES = 2
+
+
+class _RoofClosedStreak:
+    """Counts consecutive Closed verdicts, one per frame."""
+
+    def __init__(self):
+        self._count = 0
+        self._lock = threading.Lock()
+
+    def observe(self, closed: bool) -> int:
+        with self._lock:
+            self._count = self._count + 1 if closed else 0
+            return self._count
+
+    def reset(self) -> None:
+        with self._lock:
+            self._count = 0
+
+
+_roof_streak = _RoofClosedStreak()
+
+
+def reset_roof_gate() -> None:
+    """Forget the Closed streak (tests)."""
+    _roof_streak.reset()
 
 
 def is_observing_window(config, metadata, feature="feature"):
@@ -18,7 +53,8 @@ def is_observing_window(config, metadata, feature="feature"):
     Primary gate: sun must be below civil twilight (-6°). Requires
     weather.latitude and weather.longitude to be configured.
 
-    Secondary gate: if ML is enabled, roof is predicted Closed, and
+    Secondary gate: if ML is enabled, the roof has been predicted Closed on
+    ROOF_CLOSED_CONFIRM_FRAMES consecutive frames, and
     ml_models.roof_gates_sky_features is True (default), skip. Rigs with no
     roof at all (e.g. open-air all-sky cameras) can set that flag False to
     keep sky-condition ML while dropping the roof-based suppression.
@@ -27,7 +63,8 @@ def is_observing_window(config, metadata, feature="feature"):
     is unavailable, so features degrade gracefully.
 
     Result is cached on ``metadata`` so multiple callers in a single frame
-    (e.g. star detection + all-sky overlay) share one astral computation.
+    (e.g. star detection + all-sky overlay) share one astral computation —
+    and so the Closed streak advances once per frame, not once per caller.
 
     Args:
         config: Application config dict.
@@ -68,8 +105,13 @@ def _evaluate(config, metadata, feature):
     ml_config = config.get('ml_models', {})
     if ml_config.get('enabled', False) and ml_config.get('roof_gates_sky_features', True):
         roof_status = metadata.get('ROOF_STATUS', 'N/A')
-        if roof_status.startswith('Closed'):
+        streak = _roof_streak.observe(roof_status.startswith('Closed'))
+        if streak >= ROOF_CLOSED_CONFIRM_FRAMES:
             app_logger.debug(f"{feature} suppressed: ML roof status '{roof_status}'")
             return False
+        if streak:
+            app_logger.debug(
+                f"{feature}: ML roof status '{roof_status}' on one frame — "
+                f"waiting for a second before suppressing")
 
     return True

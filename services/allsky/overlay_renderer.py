@@ -38,6 +38,14 @@ from .star_centroid import detect_stars, estimate_sky_circle
 # rather than on every rendered frame (Phase 3.1).
 _last_scale_logged: Optional[float] = None
 
+# Local brightness, as a fraction of the frame's sky level, at which a
+# detection's claim on the sky around it is smallest (equipment edge) and
+# largest (open sky). 20/110 and 60/110: the former absolute thresholds at the
+# sky level of the frame they were tuned on.
+_DIM_FRACTION = 0.18
+_SKY_FRACTION = 0.55
+
+
 def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
     """Build a sky visibility mask from actual star detections.
 
@@ -75,10 +83,17 @@ def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
     nn2_dist = np.sort(dists, axis=1)[:, 1]
     base_radii = np.clip(nn2_dist * 0.8, 50, 250)
 
-    # Brightness weight: detections in dim areas (near equipment, median
-    # brightness < 20) get 30% of their base radius.  Detections in
-    # bright sky (median > 60) get 100%.  This prevents equipment-edge
-    # stars from claiming nearby obstructed regions.
+    # Brightness weight: detections in dim areas (near equipment) get 30% of
+    # their base radius, detections in open sky get 100%.  This prevents
+    # equipment-edge stars from claiming nearby obstructed regions.
+    #
+    # "Dim" is judged against this frame's own sky level, not a fixed grey
+    # value. The thresholds were 20 and 60 on a 0-255 scale, which is right
+    # for a frame whose sky sits near 110 and wrong for every other: one
+    # auto-exposure step, or dusk fading, moved the whole sky across them and
+    # the mask shrank to a third — taking the labels over that sky with it
+    # (discussion #76). The fractions below are those same two thresholds
+    # expressed against the reference frame's sky level.
     gray = np.array(img.convert('L'))
     bw = 25  # brightness sample half-window
     brightness = np.array([
@@ -86,7 +101,11 @@ def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
                               max(0, int(x) - bw):int(x) + bw + 1]))
         for x, y in det_xy
     ])
-    weight = np.clip((brightness - 20.0) / 40.0, 0.3, 1.0)
+    # Most detections are in open sky, so their median IS the sky level.
+    sky_level = max(float(np.median(brightness)), 1.0)
+    relative = brightness / sky_level
+    weight = np.clip((relative - _DIM_FRACTION) / (_SKY_FRACTION - _DIM_FRACTION),
+                     0.3, 1.0)
     radii = (base_radii * weight).astype(int)
 
     mask = Image.new('L', (w, h), 0)

@@ -323,6 +323,8 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_special_themes.py` | 17 | `special_themes` — pack patches accent + neutrals and re-derives aliases, switching off leaves nothing behind, status colours untouchable, neutrals no brighter than Sand, every pack glyph exists in the bundled MDI font, font bundled in the spec; nav rail swaps/restores icons, every sprite state paints in both painter sets, `AppearanceCard` chip/swatch signals and chip restyle on load, `AppBar.show_sending` hold cancelled by a newer frame (offscreen Qt) |
 | `test_scroll_safe_spinbox.py` | 10 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it, a click on the child line edit does (offscreen Qt) |
 | `test_image_processing_panel_stretch.py` | 4 | `ImageProcessingPanel` Auto Stretch rows — Target Median slider reaches the engine floor, Dark Threshold enabled only with Dark Scene Color Fix (offscreen Qt) |
+| `test_allsky_label_stability.py` | 34 | `label_stability` + renderer — 15-frame sky-mask vote rides out an exposure change yet still adopts a lasting one, vote kept at reduced resolution and matching a recount, sticky top-N, slot memory; sky mask unchanged when the same sky is exposed less, equipment-edge stars still claim less sky |
+| `test_observing_window.py` | 18 | `observing_window` — twilight gate, roof gate and its opt-out, roof must read Closed on two consecutive frames, several callers in one frame count once |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.

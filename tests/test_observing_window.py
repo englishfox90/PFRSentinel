@@ -8,13 +8,32 @@ disable ML entirely to keep star detection / all-sky calibration alive.
 import os
 import sys
 
+import pytest
+
 # Ensure project root is in path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from services.config import DEFAULT_CONFIG
-from services.observing_window import is_observing_window
+from services.observing_window import (
+    ROOF_CLOSED_CONFIRM_FRAMES, is_observing_window, reset_roof_gate)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_roof_gate():
+    reset_roof_gate()
+    yield
+    reset_roof_gate()
+
+
+def _confirmed(config, status='Closed (98%)'):
+    """Feed enough consecutive frames with `status` to confirm it; return the
+    gate's verdict on the last one. Each frame carries its own metadata."""
+    verdict = None
+    for _ in range(ROOF_CLOSED_CONFIRM_FRAMES):
+        verdict = is_observing_window(config, {'ROOF_STATUS': status}, feature="test")
+    return verdict
 
 
 def _config(ml_models=None, weather=None):
@@ -31,9 +50,8 @@ class TestRoofGateDefaultBehaviour:
 
     def test_suppresses_when_roof_closed(self):
         config = _config(ml_models={'enabled': True})
-        metadata = {'ROOF_STATUS': 'Closed (98%)'}
 
-        assert is_observing_window(config, metadata, feature="test") is False
+        assert _confirmed(config) is False
 
     def test_allows_when_roof_open(self):
         config = _config(ml_models={'enabled': True})
@@ -43,9 +61,8 @@ class TestRoofGateDefaultBehaviour:
 
     def test_explicit_true_matches_default(self):
         config = _config(ml_models={'enabled': True, 'roof_gates_sky_features': True})
-        metadata = {'ROOF_STATUS': 'Closed (98%)'}
 
-        assert is_observing_window(config, metadata, feature="test") is False
+        assert _confirmed(config) is False
 
 
 class TestRoofGateOptOut:
@@ -104,7 +121,8 @@ class TestTwilightGateIndependentOfRoofFlag:
 class TestResultCaching:
     def test_result_is_cached_on_metadata(self):
         config = _config(ml_models={'enabled': True})
-        metadata = {'ROOF_STATUS': 'Closed (98%)'}
+        is_observing_window(config, {'ROOF_STATUS': 'Closed (98%)'}, feature="test")
+        metadata = {'ROOF_STATUS': 'Closed (98%)'}   # second frame: confirmed
 
         first = is_observing_window(config, metadata, feature="test")
         # Flip the underlying status; cached result must not change.
@@ -129,6 +147,51 @@ class TestDefaultConfigPreservesBehaviour:
             'ml_models': dict(DEFAULT_CONFIG['ml_models']),
         }
         config['ml_models']['enabled'] = True
-        metadata = {'ROOF_STATUS': 'Closed (98%)'}
 
-        assert is_observing_window(config, metadata, feature="test") is False
+        assert _confirmed(config) is False
+
+
+class TestRoofClosedConfirmation:
+    """One Closed frame is not a closed roof. The classifier's known failure
+    is the unusual frame an exposure change produces, and acting on it blanked
+    the whole all-sky overlay for that frame (discussion #76)."""
+
+    CONFIG = {'weather': {}, 'ml_models': {'enabled': True}}
+
+    def _frame(self, status):
+        return is_observing_window(self.CONFIG, {'ROOF_STATUS': status}, feature="test")
+
+    def test_a_single_closed_frame_does_not_suppress(self):
+        assert self._frame('Open (95%)') is True
+        assert self._frame('Closed (71%)') is True
+        assert self._frame('Open (96%)') is True
+
+    def test_consecutive_closed_frames_suppress(self):
+        verdicts = [self._frame('Closed (98%)')
+                    for _ in range(ROOF_CLOSED_CONFIRM_FRAMES + 2)]
+        assert verdicts[:ROOF_CLOSED_CONFIRM_FRAMES - 1] == [True] * (ROOF_CLOSED_CONFIRM_FRAMES - 1)
+        assert all(v is False for v in verdicts[ROOF_CLOSED_CONFIRM_FRAMES - 1:])
+
+    def test_an_open_frame_restarts_the_count(self):
+        for status in ('Closed (98%)', 'Open (90%)', 'Closed (98%)'):
+            assert self._frame(status) is True
+
+    def test_reopening_lifts_the_suppression_at_once(self):
+        _confirmed(self.CONFIG)
+        assert self._frame('Open (95%)') is True
+
+    def test_several_callers_in_one_frame_count_as_one_frame(self):
+        """Star detection, the calibration feed and the overlay all ask about
+        the same frame; three questions must not look like three frames."""
+        metadata = {'ROOF_STATUS': 'Closed (98%)'}
+        answers = [is_observing_window(self.CONFIG, metadata, feature=f)
+                   for f in ("Star detection", "All-sky calibration", "All-sky overlay")]
+        assert answers == [True, True, True]
+
+    def test_frames_with_the_gate_switched_off_do_not_count(self):
+        off = {'weather': {}, 'ml_models': {'enabled': True,
+                                            'roof_gates_sky_features': False}}
+        for _ in range(ROOF_CLOSED_CONFIRM_FRAMES + 1):
+            assert is_observing_window(off, {'ROOF_STATUS': 'Closed (98%)'},
+                                       feature="test") is True
+        assert self._frame('Closed (98%)') is True
