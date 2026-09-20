@@ -168,8 +168,8 @@ class GuidedCalibrationSession(QObject):
     def request_hints(self, anchors: list) -> None:
         """Suggest positions for the stars not yet identified.
 
-        Each call supersedes the last: a result for an older anchor set is
-        dropped on arrival rather than the worker being interrupted.
+        Each call supersedes the last: the older solve is asked to stop, and
+        whatever it still delivers is dropped on arrival by its request id.
         """
         if self._closed:
             return
