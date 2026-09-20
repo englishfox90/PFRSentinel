@@ -217,3 +217,23 @@ class TestRoofClosedConfirmation:
         again = {'ROOF_STATUS': 'Open (95%)', SAME_CAPTURE_KEY: True}
         assert is_observing_window(self.CONFIG, again, feature="test") is True
         assert self._frame('Closed (98%)') is False       # second real Closed frame
+
+    def test_a_caller_with_no_roof_verdict_neither_counts_nor_resets(self):
+        """Watch mode asks twice per frame: the processor with the ML verdict,
+        then the overlay renderer with a fresh dict that never saw ML. The
+        second question is not an 'Open' reading."""
+        blind = lambda: is_observing_window(self.CONFIG, {}, feature="All-sky overlay")
+
+        assert self._frame('Closed (98%)') is True     # frame 1, processor
+        assert blind() is True                          # frame 1, overlay
+        assert self._frame('Closed (98%)') is False    # frame 2: confirmed...
+        assert blind() is False                         # ...and the overlay follows
+
+    def test_an_explicit_na_from_ml_still_clears_the_count(self):
+        """ML ran and had no answer: that is a reading, and it is not Closed."""
+        assert self._frame('Closed (98%)') is True
+        assert self._frame('N/A') is True
+        assert self._frame('Closed (98%)') is True
+
+    def test_no_verdict_and_nothing_confirmed_allows(self):
+        assert is_observing_window(self.CONFIG, {}, feature="test") is True

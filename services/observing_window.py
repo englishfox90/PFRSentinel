@@ -114,9 +114,17 @@ def _evaluate(config, metadata, feature):
 
     ml_config = config.get('ml_models', {})
     if ml_config.get('enabled', False) and ml_config.get('roof_gates_sky_features', True):
-        roof_status = metadata.get('ROOF_STATUS', 'N/A')
-        if metadata.get(SAME_CAPTURE_KEY):
-            # The streak already includes this capture; its verdict stands.
+        roof_status = metadata.get('ROOF_STATUS')
+        if roof_status is None or metadata.get(SAME_CAPTURE_KEY):
+            # No new evidence, so the standing verdict applies and the count
+            # is left alone. SAME_CAPTURE_KEY: the streak already includes
+            # this capture. No ROOF_STATUS at all: this caller never ran ML on
+            # its metadata (ML always writes the key, 'N/A' included) - Watch
+            # mode renders the overlay from a second, roof-blind dict for the
+            # frame the processor has just judged. Reading that as "not
+            # Closed" reset the count on every frame, so nothing in Watch mode
+            # could ever be suppressed.
+            roof_status = roof_status or 'no verdict on this call'
             streak = _roof_streak.current()
         else:
             streak = _roof_streak.observe(roof_status.startswith('Closed'))
