@@ -190,13 +190,30 @@ class QualityBadge(QFrame):
         layout.addWidget(self._label)
 
         self.setFixedHeight(26)
+        self._level = 'none'
+        self._attention = ''
         self.set_quality('none')
+
+    # Amber, whatever the rating: a green pill over a calibration the app
+    # can no longer confirm reads as "all is well" (issue #79).
+    _ATTENTION_COLOURS = ('#2D2305', '#FFD166')
+    _ATTENTION_SUFFIX = {'unconfirmed': 'unconfirmed',
+                         'misaligned': 'check alignment'}
+
+    def set_attention(self, attention: str) -> None:
+        self._attention = attention if attention in self._ATTENTION_SUFFIX else ''
+        self.set_quality(self._level)
 
     def set_quality(self, level: str) -> None:
         from services.allsky.calibration_service import CalibrationQuality
+        self._level = level
         bg, text = CalibrationQuality.badge_colors(level)
         desc = CalibrationQuality.description(level)
         label = level.capitalize() if level != 'none' else 'None'
+        if self._attention and level != 'none':
+            bg, text = self._ATTENTION_COLOURS
+            label = f"{label} — {self._ATTENTION_SUFFIX[self._attention]}"
+            desc = f"{desc} (rating from when it was saved)"
 
         self._label.setText(label)
         self.setToolTip(desc)
@@ -274,6 +291,12 @@ class AllSkySettingsPanel(QScrollArea):
         self._status_label = BodyLabel("Not calibrated")
         self._status_label.setWordWrap(True)
         vl.addWidget(self._status_label)
+
+        self._attention_label = CaptionLabel("")
+        self._attention_label.setWordWrap(True)
+        self._attention_label.setStyleSheet("color: #FFD166;")
+        self._attention_label.hide()
+        vl.addWidget(self._attention_label)
 
         self._calibrate_btn = PushButton("Calibrate Now", icon=mdi('refresh'))
         self._calibrate_btn.clicked.connect(self._on_calibrate_clicked)
@@ -408,6 +431,12 @@ class AllSkySettingsPanel(QScrollArea):
     def set_quality(self, level: str) -> None:
         """Update the calibration quality badge."""
         self._quality_badge.set_quality(level)
+
+    def set_attention(self, level: str, message: str) -> None:
+        """Caution beside the badge when the rating can't be confirmed."""
+        self._quality_badge.set_attention(level)
+        self._attention_label.setText(message)
+        self._attention_label.setVisible(bool(level and message))
 
     def set_calibrating(self, active: bool) -> None:
         self._calibrate_btn.setEnabled(not active)

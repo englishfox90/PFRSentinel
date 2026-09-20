@@ -165,11 +165,12 @@ def calibrate_from_anchors(
                     for n, a in zip(names, anchors))
     )
 
-    model, rms = _solve_anchor_set(alts, azs, px, cx, cy, a1_seed,
+    model, rms = solve_anchor_set(alts, azs, px, cx, cy, a1_seed,
                                    sky_radius, rms_limit)
 
     note = None
     used = list(range(len(anchors)))
+    given_names = list(names)
     if rms > rms_limit and len(anchors) > MIN_ANCHORS:
         rescue = _rescue_outliers(
             model, names, alts, azs, px, cx, cy, a1_seed, sky_radius,
@@ -178,13 +179,18 @@ def calibrate_from_anchors(
             model, rms, note, used, names, alts, azs = rescue
 
     if rms > rms_limit:
-        raise CalibrationError(
+        err = CalibrationError(
             f"Guided calibration RMS {rms:.1f}px exceeds limit {rms_limit:.0f}px "
             f"over {len(anchors)} anchors. Per-star residuals: "
             f"{_residual_report(model, alts, azs, px, names)}. The largest "
             "residual usually marks a mis-identified or mis-clicked star — "
             "remove or re-click it and solve again."
         )
+        # Structured copy of the report for the dialog, which marks the
+        # suspect anchors in place instead of making the user parse a log line.
+        err.anchor_residuals = anchor_residuals(model, alts, azs, px, names)
+        err.rms_limit = float(rms_limit)
+        raise err
 
     idx = np.array(used)
     poly_ok, poly_msg = validate_lens_polynomial(model)
@@ -206,6 +212,16 @@ def calibrate_from_anchors(
     # Human-identified anchors outrank every model-free measurement in the
     # admission gates (see model_admission.py) — mark the basin as such.
     model.provenance = 'guided'
+    # Session-only, like guided_note: per-anchor fit for the dialog's review
+    # step, in input order as (given name, name used, residual px). An anchor
+    # the rescue excluded has residual None; one it re-identified has a
+    # different name used.
+    fitted = dict(anchor_residuals(
+        model, alts[idx], azs[idx], px[idx], [names[i] for i in used]))
+    model.guided_residuals = [
+        (given, name, fitted.get(name) if i in used else None)
+        for i, (given, name) in enumerate(zip(given_names, names))]
+    model.guided_rms_limit = float(rms_limit)
     if note:
         model.guided_note = note   # session-only; surfaced in the status msg
         log.warning(f"Guided calibration rescue: {note}")
@@ -221,7 +237,7 @@ def calibrate_from_anchors(
 # Internals
 # ---------------------------------------------------------------------------
 
-def _solve_anchor_set(alts, azs, px, cx, cy, a1_seed, sky_radius, rms_limit):
+def solve_anchor_set(alts, azs, px, cx, cy, a1_seed, sky_radius, rms_limit):
     """Solve one anchor set: coarse orientation search, per-candidate refine,
     then progressive centre freeing.
 
@@ -286,7 +302,7 @@ def _rescue_outliers(full_model, names, alts, azs, px, cx, cy, a1_seed,
         # power — demand a clearly better fit before trusting it.
         limit = rms_limit if len(keep) > MIN_ANCHORS else 0.5 * rms_limit
         idx = np.array(keep)
-        m, r = _solve_anchor_set(alts[idx], azs[idx], px[idx], cx, cy,
+        m, r = solve_anchor_set(alts[idx], azs[idx], px[idx], cx, cy,
                                  a1_seed, sky_radius, limit)
         return (r, drop, keep, m) if r <= limit else None
 
@@ -322,7 +338,7 @@ def _rescue_outliers(full_model, names, alts, azs, px, cx, cy, a1_seed,
             alt, az = radec_to_altaz(ra, dec, lat_deg, lon_deg, dt)
             alts2[i], azs2[i] = float(alt), float(az)
             names2[i] = star_name
-        m2, r2 = _solve_anchor_set(alts2, azs2, px, cx, cy, a1_seed,
+        m2, r2 = solve_anchor_set(alts2, azs2, px, cx, cy, a1_seed,
                                    sky_radius, rms_limit)
         if r2 <= rms_limit:
             swaps = ", ".join(
@@ -463,15 +479,20 @@ def _refine(alts, azs, px, cx, cy, a1_seed, best, centre_range: float = 0.0):
     return model, rms
 
 
-def _residual_report(model, alts, azs, px, names) -> str:
-    """Per-anchor residual summary, worst first, for error messages."""
+def anchor_residuals(model, alts, azs, px, names) -> List[Tuple[str, float]]:
+    """Per-anchor reprojection error in px, worst first (inf = off-image)."""
     pxs, pys, vis = model.altaz_array_to_pixels(alts, azs)
     entries = []
     for i, name in enumerate(names):
-        if not vis[i]:
-            entries.append((float('inf'), f"{name} (off-image)"))
-            continue
-        d = float(np.hypot(pxs[i] - px[i, 0], pys[i] - px[i, 1]))
-        entries.append((d, f"{name} {d:.0f}px"))
-    entries.sort(key=lambda e: -e[0])
-    return ", ".join(text for _d, text in entries)
+        d = (float(np.hypot(pxs[i] - px[i, 0], pys[i] - px[i, 1]))
+             if vis[i] else float('inf'))
+        entries.append((name, d))
+    entries.sort(key=lambda e: -e[1])
+    return entries
+
+
+def _residual_report(model, alts, azs, px, names) -> str:
+    """Per-anchor residual summary, worst first, for error messages."""
+    return ", ".join(
+        f"{name} (off-image)" if d == float('inf') else f"{name} {d:.0f}px"
+        for name, d in anchor_residuals(model, alts, azs, px, names))
