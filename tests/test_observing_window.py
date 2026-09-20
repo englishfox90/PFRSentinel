@@ -17,7 +17,8 @@ if project_root not in sys.path:
 
 from services.config import DEFAULT_CONFIG
 from services.observing_window import (
-    ROOF_CLOSED_CONFIRM_FRAMES, is_observing_window, reset_roof_gate)
+    ROOF_CLOSED_CONFIRM_FRAMES, SAME_CAPTURE_KEY, is_observing_window,
+    reset_roof_gate)
 
 
 @pytest.fixture(autouse=True)
@@ -195,3 +196,24 @@ class TestRoofClosedConfirmation:
             assert is_observing_window(off, {'ROOF_STATUS': 'Closed (98%)'},
                                        feature="test") is True
         assert self._frame('Closed (98%)') is True
+
+    def test_reprocessing_a_capture_does_not_count_it_twice(self):
+        """Nudging a setting re-runs the same capture with fresh metadata. One
+        misread frame must not be able to confirm itself."""
+        assert self._frame('Closed (98%)') is True
+        for _ in range(3):
+            again = {'ROOF_STATUS': 'Closed (98%)', SAME_CAPTURE_KEY: True}
+            assert is_observing_window(self.CONFIG, again, feature="test") is True
+        assert self._frame('Open (95%)') is True          # streak never reached 2
+
+    def test_reprocessing_under_a_confirmed_closure_stays_suppressed(self):
+        _confirmed(self.CONFIG)
+        again = {'ROOF_STATUS': 'Closed (98%)', SAME_CAPTURE_KEY: True}
+        assert is_observing_window(self.CONFIG, again, feature="test") is False
+
+    def test_a_reprocess_cannot_clear_the_streak_either(self):
+        """Whatever the re-run reads, the count belongs to real captures."""
+        assert self._frame('Closed (98%)') is True
+        again = {'ROOF_STATUS': 'Open (95%)', SAME_CAPTURE_KEY: True}
+        assert is_observing_window(self.CONFIG, again, feature="test") is True
+        assert self._frame('Closed (98%)') is False       # second real Closed frame

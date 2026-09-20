@@ -12,6 +12,12 @@ from .logger import app_logger
 
 _CACHE_KEY = '_observing_window'
 
+# Set on a frame's metadata by a caller that is processing a capture it has
+# already processed (a reprocess after a settings change). Such a run starts
+# from fresh metadata, so the per-frame cache above cannot recognise it — and
+# counting it again would let ONE misread frame confirm itself as two.
+SAME_CAPTURE_KEY = '_same_capture_reprocessed'
+
 # Consecutive frames the roof must read Closed before sky features switch off.
 # The roof classifier's known failure is the overexposed or otherwise unusual
 # frame — exactly what an exposure change produces — and acting on the raw
@@ -32,6 +38,10 @@ class _RoofClosedStreak:
     def observe(self, closed: bool) -> int:
         with self._lock:
             self._count = self._count + 1 if closed else 0
+            return self._count
+
+    def current(self) -> int:
+        with self._lock:
             return self._count
 
     def reset(self) -> None:
@@ -105,7 +115,11 @@ def _evaluate(config, metadata, feature):
     ml_config = config.get('ml_models', {})
     if ml_config.get('enabled', False) and ml_config.get('roof_gates_sky_features', True):
         roof_status = metadata.get('ROOF_STATUS', 'N/A')
-        streak = _roof_streak.observe(roof_status.startswith('Closed'))
+        if metadata.get(SAME_CAPTURE_KEY):
+            # The streak already includes this capture; its verdict stands.
+            streak = _roof_streak.current()
+        else:
+            streak = _roof_streak.observe(roof_status.startswith('Closed'))
         if streak >= ROOF_CLOSED_CONFIRM_FRAMES:
             app_logger.debug(f"{feature} suppressed: ML roof status '{roof_status}'")
             return False
