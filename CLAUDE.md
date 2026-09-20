@@ -32,6 +32,7 @@ PFRSentinel/
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
 │   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
 │   ├── font_loader.py          # PIL font resolution: Arial (Windows) → bundled Space Grotesk → DejaVu → default
+│   ├── zwo_sdk_library.py      # ZWO SDK library name + search paths per OS; the only place that may name it
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
 │   ├── config_defaults.py      # DEFAULT_CONFIG + DEFAULT_CAMERA_PROFILE (data only)
 │   ├── utils_paths.py          # get_app_data_dir() — per-platform app-data root; resource paths
@@ -41,7 +42,8 @@ PFRSentinel/
 │   ├── watcher.py              # watchdog FileSystemEventHandler
 │   ├── camera/                 # ZWO subpackage — zwo_camera.py (SDK wrapper, BGGR debayer, auto-exposure),
 │   │                             camera_connection.py (SDK init, detection, USB reconnect),
-│   │                             camera_calibration.py, camera_utils.py
+│   │                             camera_calibration.py, camera_utils.py,
+│   │                             linux_usb_preflight.py (udev rule + usbfs_memory_mb warnings)
 │   ├── cleanup.py              # Disk space management (files only, never folders)
 │   ├── gc_scheduler.py         # GUI-thread cyclic GC (automatic GC off, QTimer-driven)
 │   ├── discord_alerts.py       # Discord webhook client
@@ -316,6 +318,9 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
+| `test_zwo_sdk_library.py` | 35 | `zwo_sdk_library` — library name per OS, search order (bundled → per-user `sdk/` → system, multiarch first), versioned `.so`/`.dylib`, symlink stubs skipped, foreign-platform path detection, help text |
+| `test_zwo_sdk_loading.py` | 7 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; `Config` rewrites only another platform's SDK path |
+| `test_linux_usb_preflight.py` | 15 | `linux_usb_preflight` — `usbfs_memory_mb` and udev-rule warnings, root exempt, once per process, no-op off Linux, shipped `asi.rules` satisfies the check |
 | `test_font_loader.py` | 5 | `font_loader` — bundled Space Grotesk resolves off Windows, Arial never tried there, fallback outcome cached |
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
 | `test_windows_only_ui.py` | 5 | `FfmpegInstallCard` copyable install command off Windows; `MissingCameraNotice` hides Revive where there is no USB reset API (offscreen Qt) |

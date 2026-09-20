@@ -153,22 +153,21 @@ class CameraConnection:
             self.asi = asi
             self.log("zwoasi module imported successfully")
 
-            if self.sdk_path and os.path.exists(self.sdk_path):
-                self.log(f"Attempting SDK init with configured path: {self.sdk_path}")
-                asi.init(self.sdk_path)
-                self.log(f"✓ ZWO SDK initialized successfully from: {self.sdk_path}")
-            else:
-                # Try default locations
-                self.log("SDK path not configured or not found, trying default location")
-                if os.path.exists('ASICamera2.dll'):
-                    self.log("Found ASICamera2.dll in application directory")
-                    asi.init('ASICamera2.dll')
-                    self.log("✓ ZWO SDK initialized from: ASICamera2.dll")
-                else:
-                    self.log("ERROR: ASICamera2.dll not found in application directory")
-                    self.log("Please configure SDK path in Capture tab settings")
-                    return False
+            from ..zwo_sdk_library import missing_library_help, resolve_library_path
+            library_path = resolve_library_path(self.sdk_path)
+            if library_path is None:
+                for line in missing_library_help():
+                    self.log(line)
+                return False
+            if self.sdk_path and os.path.abspath(self.sdk_path) != library_path:
+                self.log(f"Configured SDK path not found ({self.sdk_path}); using {library_path}")
 
+            self.log(f"Attempting SDK init from: {library_path}")
+            asi.init(library_path)
+            self.log(f"✓ ZWO SDK initialized successfully from: {library_path}")
+
+            from .linux_usb_preflight import log_linux_usb_warnings
+            log_linux_usb_warnings(self.log)
             return True
 
         except ImportError as e:

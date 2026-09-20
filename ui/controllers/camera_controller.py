@@ -7,11 +7,11 @@ All auto-exposure, calibration, scheduled windows, etc. are handled by ZWOCamera
 """
 from PySide6.QtCore import QObject, QTimer, Signal
 from datetime import datetime
-import os
 import threading
 import time
 
 from services.logger import app_logger
+from services.zwo_sdk_library import library_name, resolve_library_path
 from services.camera import ZWOCamera
 from services.capture_schedule_window import gate_for_config
 from .camera_settings import apply_camera_settings_async, set_raw16_mode_async
@@ -103,10 +103,10 @@ class CameraControllerQt(QObject):
         """Detect connected ZWO cameras"""
         app_logger.info("Detecting cameras...")
         
-        sdk_path = self.config.get('zwo_sdk_path', '')
-        
-        if not sdk_path or not os.path.exists(sdk_path):
-            self.error.emit("SDK path not found")
+        sdk_path = resolve_library_path(self.config.get('zwo_sdk_path', ''))
+
+        if not sdk_path:
+            self.error.emit(f"ZWO SDK not found ({library_name()})")
             return
         
         try:

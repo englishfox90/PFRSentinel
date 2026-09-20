@@ -21,6 +21,7 @@ from .capture_schedule_window import gate_for_config
 from .output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from .web_image_encode import encode_for_web
 from .web_output import WebOutputServer
+from .zwo_sdk_library import missing_library_help, resolve_library_path
 from .processor import add_overlays
 from .cleanup import run_cleanup
 from .library import ImageLibrary
@@ -230,9 +231,10 @@ class HeadlessRunner:
     def _init_camera(self) -> bool:
         """Initialize ZWO camera"""
         try:
-            sdk_path = self.config.get('zwo_sdk_path')
-            if not sdk_path or not os.path.exists(sdk_path):
-                self._log(f"ERROR: SDK not found at: {sdk_path}")
+            sdk_path = resolve_library_path(self.config.get('zwo_sdk_path'))
+            if not sdk_path:
+                for line in missing_library_help():
+                    self._log(line)
                 return False
             
             # Get camera settings from the active camera's profile.
