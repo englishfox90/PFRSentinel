@@ -319,7 +319,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
 | `test_zwo_sdk_library.py` | 35 | `zwo_sdk_library` — library name per OS, search order (bundled → per-user `sdk/` → system, multiarch first), versioned `.so`/`.dylib`, symlink stubs skipped, foreign-platform path detection, help text |
-| `test_zwo_sdk_loading.py` | 7 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; `Config` rewrites only another platform's SDK path |
+| `test_zwo_sdk_loading.py` | 9 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; the Start Capture index resolver does the same; `Config` rewrites only another platform's SDK path |
 | `test_linux_usb_preflight.py` | 15 | `linux_usb_preflight` — `usbfs_memory_mb` and udev-rule warnings, root exempt, once per process, no-op off Linux, shipped `asi.rules` satisfies the check |
 | `test_font_loader.py` | 5 | `font_loader` — bundled Space Grotesk resolves off Windows, Arial never tried there, fallback outcome cached |
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
