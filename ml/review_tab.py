@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor, QBrush
 
 from .calibration_store import load_calibration
 from .label_suggestion import to_bool  # noqa: F401  re-exported for existing callers
+from .worker_lifetime import join_worker, stop_worker
 
 
 class ReviewTab(QWidget):
@@ -30,6 +31,7 @@ class ReviewTab(QWidget):
         self.all_data = []
         self.filtered_data = []
         self._dirty = True   # loaded on first show, not at startup
+        self._batch_worker = None
 
         self.setup_ui()
 
@@ -441,17 +443,21 @@ class ReviewTab(QWidget):
         if reply != QMessageBox.Yes:
             return
 
-        from ml.ai_worker import AiLabelWorker
+        from .ai_worker import AiLabelWorker
         self.ai_run_btn.setEnabled(False)
         self.refresh_btn.setEnabled(False)
         self.filter_combo.setEnabled(False)
         self.ai_progress.setVisible(True)
         self.ai_progress.setValue(0)
 
+        join_worker(self._batch_worker)   # the previous run's thread, before replacing it
         self._batch_worker = AiLabelWorker(jobs)
         self._batch_worker.progress.connect(self._on_batch_progress)
         self._batch_worker.completed.connect(self._on_batch_done)
         self._batch_worker.start()
+
+    def shutdown(self):
+        stop_worker(self._batch_worker)
 
     def _on_batch_progress(self, done: int, total: int, msg: str):
         self.ai_progress.setValue(int(done / total * 100) if total else 0)

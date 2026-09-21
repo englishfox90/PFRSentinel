@@ -45,6 +45,7 @@ from ml.review_tab import ReviewTab
 from ml.batch_confirm_tab import BatchConfirmTab
 from ml.filter_bar import FilterBar
 from ml.label_filters import extract_filter_meta, frame_matches
+from ml.worker_lifetime import join_worker, stop_worker
 from services.logger import app_logger
 
 TAB_LABELING, TAB_BATCH, TAB_REVIEW = 0, 1, 2
@@ -66,6 +67,7 @@ class LabelingTool(QMainWindow):
         self.meta_cache = self._build_meta_cache()
         self.current_index = 0
         self.current_cal = {}
+        self._cal_error = ""   # why the current frame's JSON could not be read, if it couldn't
         self._ai_worker = None
         self._ai_all_worker = None
 
@@ -255,14 +257,17 @@ class LabelingTool(QMainWindow):
             QMessageBox.information(self, "AI Suggest", "This sample has no lum frame to send.")
             return
         self.context_panel.set_ai_busy(True)
+        join_worker(self._ai_worker)   # the previous request's thread, before replacing it
         self._ai_worker = AiLabelWorker([self._job(sample)])
+        # frame_done names the frame that was sent; by the time it completes the
+        # user may be looking at a different one.
+        self._ai_worker.frame_done.connect(self._refresh_meta)
         self._ai_worker.completed.connect(self._on_ai_suggestion_done)
         self._ai_worker.start()
 
     def _on_ai_suggestion_done(self, labelled: int, failed: int, error: str):
         self.context_panel.set_ai_busy(False)
         if labelled:
-            self._refresh_meta(self.samples[self.current_index]['timestamp'])
             self._after_ai_changed()
         if failed:
             detail = error or "Unknown error"
@@ -292,6 +297,8 @@ class LabelingTool(QMainWindow):
         self._ai_all_worker.start()
 
     def _on_ai_all_done(self, labelled: int, failed: int, error: str):
+        # `completed` is emitted from inside run(); the thread may not have returned yet.
+        join_worker(self._ai_all_worker)
         self._ai_all_worker = None
         self._after_ai_changed()
         msg = f"AI pre-labelled {labelled} frame(s); {failed} failed."
@@ -434,9 +441,11 @@ class LabelingTool(QMainWindow):
 
         try:
             self.current_cal = load_calibration(sample['calibration'])
+            self._cal_error = ""
         except (OSError, ValueError) as e:
             app_logger.warning(f"Could not read {sample['calibration']}: {e}")
             self.current_cal = {}
+            self._cal_error = str(e)
 
         self.context_panel.populate(self.current_cal)
         pred = predict_frame(self.roof_classifier, self.sky_classifier, sample, self.current_cal)
@@ -449,6 +458,13 @@ class LabelingTool(QMainWindow):
 
     def _update_mismatch_banner(self, cal: dict):
         """Flag frames where the AI roof call disagrees with the NINA roof state."""
+        if self._cal_error:
+            self.mismatch_banner.setText(
+                f"⚠️ This frame's calibration JSON could not be read, so it cannot be labeled "
+                f"— move on with → or remove it with Del.  ({self._cal_error})")
+            self.mismatch_banner.setVisible(True)
+            return
+
         ai = cal.get('ai_suggestion')
         rs = cal.get('roof_state', {})
         if not ai or not rs.get('available') or rs.get('roof_open') is None:
@@ -470,10 +486,15 @@ class LabelingTool(QMainWindow):
         if not self.samples:
             return False
         sample = self.samples[self.current_index]
+        if self._cal_error:
+            QMessageBox.warning(
+                self, "Cannot label this frame",
+                f"This frame's calibration JSON could not be read:\n{sample['calibration']}\n\n"
+                f"{self._cal_error}\n\nNothing was saved. Move on with → or remove the frame with Del.")
+            return False
         if not self.labels_widget.save_labels(self.current_cal, sample['calibration']):
-            if self.current_cal:
-                QMessageBox.warning(self, "Save failed",
-                                    f"Could not write:\n{sample['calibration']}\n\nThe label was NOT saved.")
+            QMessageBox.warning(self, "Save failed",
+                                f"Could not write:\n{sample['calibration']}\n\nThe label was NOT saved.")
             return False
         self.meta_cache[sample['timestamp']] = extract_filter_meta(self.current_cal)
         self._refresh_counts()
@@ -570,9 +591,9 @@ class LabelingTool(QMainWindow):
                 event.ignore()
                 return
         for worker in (self._ai_worker, self._ai_all_worker):
-            if worker is not None and worker.isRunning():
-                worker.cancel()
-                worker.wait(5000)
+            stop_worker(worker)
+        self.batch_tab.shutdown()
+        self.review_tab.shutdown()
         event.accept()
 
 

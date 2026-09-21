@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from .calibration_store import load_calibration, save_calibration
+from .calibration_store import update_calibration
 from .label_suggestion import to_bool, suggest_labels, describe_sources, CLOUDY
 
 
@@ -328,10 +328,11 @@ class LabelsWidget(QWidget):
             widget.blockSignals(False)
 
     def save_labels(self, current_cal: dict, calibration_path: Path) -> bool:
-        """Write form values into current_cal and save to disk. Returns True on success."""
-        if not current_cal:
-            return False
+        """Write form values into current_cal and save to disk. Returns True on success.
 
+        An unreadable JSON is the caller's case to refuse (and explain); an empty
+        one is a legitimate frame that simply has no context yet.
+        """
         if 'labels' not in current_cal:
             current_cal['labels'] = {}
 
@@ -362,17 +363,14 @@ class LabelsWidget(QWidget):
         labels['labeled_at'] = datetime.now().isoformat()
         labels['label_source'] = 'manual'
 
-        try:
+        def write_labels(on_disk):
             # Only the labels block is ours: the background AI pre-labeller may have
             # added an ai_suggestion to this file since the frame was loaded.
-            try:
-                on_disk = load_calibration(calibration_path)
-            except ValueError:
-                on_disk = {}
             on_disk.update({k: v for k, v in current_cal.items() if k not in on_disk})
             on_disk['labels'] = labels
-            save_calibration(calibration_path, on_disk)
-            current_cal.update(on_disk)
+
+        try:
+            current_cal.update(update_calibration(calibration_path, write_labels, missing_ok=True))
         except OSError:
             return False
 

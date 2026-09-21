@@ -16,7 +16,7 @@ def load_classifiers():
     """(roof_classifier, sky_classifier); either is None when it cannot be loaded."""
     roof = sky = None
     try:
-        from ml.roof_classifier import RoofClassifier
+        from .roof_classifier import RoofClassifier
         path = MODELS_DIR / 'roof_classifier_v1.pth'
         if path.exists():
             roof = RoofClassifier.load(str(path), image_size=128)
@@ -24,7 +24,7 @@ def load_classifiers():
     except Exception as e:
         app_logger.warning(f"Failed to load roof model: {e}")
     try:
-        from ml.sky_classifier import SkyClassifier
+        from .sky_classifier import SkyClassifier
         path = MODELS_DIR / 'sky_classifier_v1.pth'
         if path.exists():
             sky = SkyClassifier.load(str(path), image_size=256)

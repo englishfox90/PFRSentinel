@@ -15,11 +15,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread
 
 from services.logger import app_logger
-from .calibration_store import load_calibration, save_calibration
+from .calibration_store import load_calibration, update_calibration
 from .frame_prediction import predict_frame
 from .label_suggestion import suggest_labels, labels_from_suggestion, describe_sources
 from .labeling_io import load_fits_as_qpixmap
 from .tagged_image_view import OPEN_COLOUR, CLOSED_COLOUR, tag_text
+from .worker_lifetime import join_worker, stop_worker
 
 COLUMNS, ROWS = 6, 4
 PAGE_SIZE = COLUMNS * ROWS
@@ -44,11 +45,17 @@ class SuggestionWorker(QThread):
         self.samples = samples
         self.roof_clf = roof_clf
         self.sky_clf = sky_clf
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
 
     def run(self):
         found = []
         total = len(self.samples)
         for i, sample in enumerate(self.samples, 1):
+            if self._cancel:
+                return
             try:
                 cal = load_calibration(sample['calibration'])
                 if not (cal.get('labels') or {}).get('labeled_at'):
@@ -193,6 +200,10 @@ class BatchConfirmTab(QWidget):
             self.entries = [e for e in self.entries if e['sample']['timestamp'] not in gone]
             self._rebuild_groups()
 
+    def shutdown(self):
+        stop_worker(self._worker)
+        self._worker = None
+
     def refresh_if_needed(self):
         if self._stale and self._worker is None:
             self.rescan()
@@ -213,6 +224,8 @@ class BatchConfirmTab(QWidget):
         self._worker.start()
 
     def _on_ready(self, entries: list):
+        # `ready` is emitted from inside run(); the thread may not have returned yet.
+        join_worker(self._worker)
         self._worker = None
         self._stale = False
         self.entries = entries
@@ -289,25 +302,29 @@ class BatchConfirmTab(QWidget):
         if not self.confirm_btn.isEnabled():
             return
         now = datetime.now().isoformat()
-        saved = []
+        saved, already_labeled = [], []
         for tile in self.tiles:
             ts = tile.entry['sample']['timestamp']
             if not tile.included:
                 self._skipped.add(ts)
                 continue
-            path = tile.entry['sample']['calibration']
-            try:
-                cal = load_calibration(path)
+            new_labels = labels_from_suggestion(tile.entry['suggestion'], now, 'batch_confirm')
+
+            def label_if_unlabeled(cal, new_labels=new_labels):
                 if (cal.get('labels') or {}).get('labeled_at'):
-                    continue   # labeled elsewhere since the scan; never overwrite a human label
-                cal['labels'] = labels_from_suggestion(tile.entry['suggestion'], now, 'batch_confirm')
-                save_calibration(path, cal)
-                saved.append(ts)
+                    return False   # labeled elsewhere since the scan; never overwrite a human label
+                cal['labels'] = new_labels
+
+            try:
+                if update_calibration(tile.entry['sample']['calibration'], label_if_unlabeled) is not None:
+                    saved.append(ts)
+                else:
+                    already_labeled.append(ts)
             except (OSError, ValueError) as e:
                 app_logger.warning(f"Batch confirm: could not save {ts}: {e}")
                 self._skipped.add(ts)
 
-        done = set(saved)
+        done = set(saved) | set(already_labeled)
         self.entries = [e for e in self.entries if e['sample']['timestamp'] not in done]
         app_logger.info(f"Batch confirm: labeled {len(saved)} frame(s)")
         self.labels_saved.emit(saved)
