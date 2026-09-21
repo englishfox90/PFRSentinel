@@ -725,7 +725,7 @@ class TestResolveCameraIndexRefusesToSwap:
         fake_asi.get_num_cameras.return_value = 1
         fake_asi.list_cameras.return_value = ['ZWO ASI462MM']
         with patch.dict(sys.modules, {'zwoasi': fake_asi}), \
-                patch('os.path.exists', return_value=True):
+                patch('os.path.isfile', return_value=True):
             with pytest.raises(Exception, match="ZWO ASI676MC.*not found"):
                 ctrl._resolve_camera_index(
                     sdk_path='fake.dll',
@@ -740,7 +740,7 @@ class TestResolveCameraIndexRefusesToSwap:
         fake_asi.get_num_cameras.return_value = 2
         fake_asi.list_cameras.return_value = ['ZWO ASI676MC', 'ZWO ASI462MM']
         with patch.dict(sys.modules, {'zwoasi': fake_asi}), \
-                patch('os.path.exists', return_value=True):
+                patch('os.path.isfile', return_value=True):
             idx = ctrl._resolve_camera_index(
                 sdk_path='fake.dll',
                 camera_name='ZWO ASI462MM',
