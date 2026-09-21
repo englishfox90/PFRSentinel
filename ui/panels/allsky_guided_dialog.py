@@ -1,27 +1,34 @@
 """
 Guided all-sky calibration dialog (UI only).
 
-Shows the latest frame; the user clicks bright stars (clicks snap to detected
-centroids) and names each one. On Solve it hands the collected
-(pixel_x, pixel_y, ra_deg, dec_deg) anchors back to the caller, which runs the
-solver off-thread. No business logic lives here — collecting anchors only.
+Shows the latest frame on a zoomable canvas; the user clicks bright stars
+(clicks snap to detected centroids) and names each one. The dialog stays open
+for the whole session — it asks for a solve, shows the outcome over the same
+frame, and only closes once a result has been saved or the user cancels. A
+failed solve keeps every identified star and marks the ones that didn't fit
+(issue #79: the window used to vanish on Solve and come back empty).
 
-The companion solver is services/allsky/guided_calibration.py; the controller
-hooks are AllSkyController.prepare_guided_calibration / start_guided_calibration.
+No business logic lives here. Solving, star suggestions and saving belong to
+ui/controllers/guided_calibration_session.py and AllSkyController; this file
+emits requests and renders what comes back.
 """
 import math
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QPoint, QRect
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QCompleter, QDialog, QHBoxLayout, QVBoxLayout, QLabel,
+    QCompleter, QDialog, QHBoxLayout, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, EditableComboBox, ListWidget,
-    PushButton, PrimaryPushButton,
+    BodyLabel, CaptionLabel, EditableComboBox, IndeterminateProgressBar,
+    ListWidget, MessageBox, PushButton, PrimaryPushButton, StrongBodyLabel,
+    ToolButton,
 )
 
+from ..components.star_pick_canvas import (
+    CanvasHint, CanvasMarker, StarPickCanvas)
+from ..theme.icons import mdi
 from ..theme.tokens import Spacing
 from services.allsky.guided_calibration import MIN_ANCHORS
 
@@ -32,146 +39,58 @@ from services.allsky.guided_calibration import MIN_ANCHORS
 # which alone exceeded the solver's RMS limit).
 _SNAP_SKY_FRACTION = 0.035
 _SNAP_MIN_PX = 30.0
-_MAX_DISPLAY = 760  # longest displayed image edge (px)
 
-# Hover loupe: the preview shows ~4-5 raw pixels per display pixel, too
-# coarse to tell close stars apart (Mizar vs Alioth). The loupe shows a
-# native-resolution crop around the cursor.
-_LOUPE_SIZE = 200     # loupe box edge on screen (px)
-_LOUPE_NATIVE = 150   # raw image pixels shown across the box (~1.3x native)
-_LOUPE_OFFSET = 24    # gap between cursor and loupe box (px)
+# The controls are a fixed thin column; every other pixel goes to the frame.
+_SIDEBAR_WIDTH = 320
+_SCREEN_FRACTION = 0.92
 
+_STATE_COLLECT, _STATE_SOLVING, _STATE_REVIEW = 'collect', 'solving', 'review'
 
-class _ClickableImage(QLabel):
-    """Image label that reports clicks in ORIGINAL image coordinates."""
-
-    def __init__(self, on_click, parent=None):
-        super().__init__(parent)
-        self._on_click = on_click
-        self._scale = 1.0
-        self._markers: List[Tuple[float, float, str]] = []  # img coords + label
-        self._pending: Optional[Tuple[float, float]] = None
-        self.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-
-        self._full: Optional[QPixmap] = None   # native-resolution frame
-        self._snap_r = 0.0                     # snap radius (image px)
-        self.setMouseTracking(True)
-        self._loupe = QLabel(self)
-        self._loupe.setFixedSize(_LOUPE_SIZE, _LOUPE_SIZE)
-        self._loupe.setStyleSheet(
-            "border: 1px solid #999; background-color: black;")
-        self._loupe.hide()
-
-    def set_base_pixmap(self, pix: QPixmap, scale: float):
-        self._base = pix
-        self._scale = scale
-        self._redraw()
-
-    def set_full_pixmap(self, pix: QPixmap, snap_radius_px: float):
-        """Native-resolution frame + snap radius for the hover loupe."""
-        self._full = pix
-        self._snap_r = float(snap_radius_px)
-
-    def set_markers(self, markers, pending):
-        self._markers = markers
-        self._pending = pending
-        self._redraw()
-
-    def _redraw(self):
-        if not hasattr(self, '_base'):
-            return
-        pix = self._base.copy()
-        p = QPainter(pix)
-        try:
-            for ix, iy, label in self._markers:
-                p.setPen(QPen(QColor(60, 220, 60), 2))
-                x, y = ix * self._scale, iy * self._scale
-                p.drawEllipse(QPoint(int(x), int(y)), 9, 9)
-                p.drawText(int(x) + 11, int(y) - 6, label)
-            if self._pending is not None:
-                p.setPen(QPen(QColor(255, 210, 60), 2))
-                x, y = self._pending[0] * self._scale, self._pending[1] * self._scale
-                p.drawEllipse(QPoint(int(x), int(y)), 11, 11)
-                p.drawLine(int(x) - 15, int(y), int(x) + 15, int(y))
-                p.drawLine(int(x), int(y) - 15, int(x), int(y) + 15)
-        finally:
-            p.end()
-        self.setPixmap(pix)
-
-    def mousePressEvent(self, ev):
-        if self._scale > 0:
-            self._on_click(ev.position().x() / self._scale,
-                           ev.position().y() / self._scale)
-
-    def mouseMoveEvent(self, ev):
-        if self._scale > 0:
-            self._update_loupe(ev.position().x() / self._scale,
-                               ev.position().y() / self._scale,
-                               ev.position().toPoint())
-
-    def leaveEvent(self, ev):
-        self._loupe.hide()
-        super().leaveEvent(ev)
-
-    def _update_loupe(self, ix: float, iy: float, cursor: QPoint):
-        """Show a native-resolution crop around image coords (ix, iy)."""
-        if self._full is None:
-            return
-        half = _LOUPE_NATIVE // 2
-        crop = self._full.copy(
-            QRect(int(ix) - half, int(iy) - half, _LOUPE_NATIVE, _LOUPE_NATIVE))
-        crop = crop.scaled(_LOUPE_SIZE, _LOUPE_SIZE,
-                           Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        mag = _LOUPE_SIZE / float(_LOUPE_NATIVE)
-        c = _LOUPE_SIZE // 2
-        p = QPainter(crop)
-        try:
-            p.setPen(QPen(QColor(255, 210, 60), 1))
-            p.drawLine(c - 14, c, c - 4, c)
-            p.drawLine(c + 4, c, c + 14, c)
-            p.drawLine(c, c - 14, c, c - 4)
-            p.drawLine(c, c + 4, c, c + 14)
-            if self._snap_r > 0:
-                r = int(self._snap_r * mag)
-                p.setPen(QPen(QColor(60, 220, 60, 160), 1))
-                p.drawEllipse(QPoint(c, c), r, r)
-        finally:
-            p.end()
-        self._loupe.setPixmap(crop)
-        # Keep the loupe beside the cursor but inside the label.
-        lx = cursor.x() + _LOUPE_OFFSET
-        ly = cursor.y() + _LOUPE_OFFSET
-        if lx + _LOUPE_SIZE > self.width():
-            lx = cursor.x() - _LOUPE_SIZE - _LOUPE_OFFSET
-        if ly + _LOUPE_SIZE > self.height():
-            ly = cursor.y() - _LOUPE_SIZE - _LOUPE_OFFSET
-        self._loupe.move(max(0, lx), max(0, ly))
-        self._loupe.show()
-        self._loupe.raise_()
+_TONE_COLOURS = {'info': '', 'ok': '#3DD68C', 'warn': '#FFD166',
+                 'error': '#FF6B6B'}
+_ROW_COLOURS = {'suspect': QColor(255, 107, 107),
+                'excluded': QColor(255, 160, 60),
+                'renamed': QColor(255, 160, 60)}
 
 
 class GuidedCalibrationDialog(QDialog):
-    """Collect user-identified star anchors for guided calibration."""
+    """Collect user-identified star anchors and review the solve.
+
+    Signals (requests to the controller layer):
+        solve_requested(list): anchors as (px, py, ra_deg, dec_deg, name).
+        hints_requested(list): same shape; asks where the unnamed stars are.
+        save_requested():      the reviewed result should be saved.
+        discard_requested():   the reviewed result was abandoned.
+    """
+
+    solve_requested = Signal(list)
+    hints_requested = Signal(list)
+    save_requested = Signal()
+    discard_requested = Signal()
 
     def __init__(self, prep: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Guided All-Sky Calibration")
-        self._prep = prep
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
+        self.setSizeGripEnabled(True)
         self._detections = prep.get('detections', [])
         self._candidates = prep.get('candidates', [])
         self._snap_px = max(_SNAP_MIN_PX,
                             _SNAP_SKY_FRACTION * float(prep.get('sky_r', 0.0)))
-        self._anchors: List[dict] = []   # {px, py, ra, dec, name, snapped}
+        self._anchors: List[dict] = []   # {px, py, ra, dec, name, snapped, ...}
         self._pending: Optional[Tuple[float, float]] = None
         self._pending_snapped = False
-        # Result exposed to caller after accept():
-        # (px, py, ra_deg, dec_deg, name) per identified star.
-        self.anchors: List[Tuple[float, float, float, float, str]] = []
+        self._hints: List[CanvasHint] = []
+        self._predicted: List[CanvasHint] = []
+        self._state = _STATE_COLLECT
+        self.saved = False
 
         # Display uses the pre-stretched copy (a raw all-sky frame is near-
         # black, see issue #10) — detections/anchors still key off prep['image']
         # coordinates, which stretch_for_display preserves pixel-for-pixel.
         self._build_ui(prep.get('display_image', prep['image']))
+        self._fit_to_screen()
+        self._on_zoom_changed(self._canvas.zoom())
         self._refresh()
 
     # ------------------------------------------------------------------
@@ -181,28 +100,53 @@ class GuidedCalibrationDialog(QDialog):
                                 Spacing.base, Spacing.base)
         root.setSpacing(Spacing.base)
 
-        # Left: clickable image.
-        self._img = _ClickableImage(self._on_image_click)
-        pix, scale, full = self._pil_to_pixmap(pil_image)
-        self._img.set_base_pixmap(pix, scale)
-        self._img.set_full_pixmap(full, self._snap_px)
-        root.addWidget(self._img)
+        # Left: the frame, given all the room there is.
+        left = QVBoxLayout()
+        left.setSpacing(Spacing.xs)
+        self._canvas = StarPickCanvas()
+        self._canvas.set_image(self._pil_to_pixmap(pil_image), self._snap_px)
+        self._canvas.clicked.connect(self._on_image_click)
+        self._canvas.zoom_changed.connect(self._on_zoom_changed)
+        left.addWidget(self._canvas, 1)
 
-        # Right: controls.
-        side = QVBoxLayout()
+        bar = QHBoxLayout()
+        bar.setSpacing(Spacing.xs)
+        for icon, tip, slot in (
+                ('magnify-minus-outline', "Zoom out (-)", self._canvas.zoom_out),
+                ('magnify-plus-outline', "Zoom in (+)", self._canvas.zoom_in),
+                ('fit-to-screen-outline', "Whole frame (0, or double-click)",
+                 self._canvas.reset_view)):
+            btn = ToolButton(mdi(icon))
+            btn.setToolTip(tip)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(slot)
+            bar.addWidget(btn)
+        self._zoom_lbl = CaptionLabel("")
+        bar.addWidget(self._zoom_lbl)
+        bar.addStretch(1)
+        bar.addWidget(CaptionLabel(
+            "Scroll to zoom · drag to pan · hover to magnify"))
+        left.addLayout(bar)
+        root.addLayout(left, 1)
+
+        # Right: a thin column of controls.
+        side_host = QWidget()
+        side_host.setFixedWidth(_SIDEBAR_WIDTH)
+        side = QVBoxLayout(side_host)
+        side.setContentsMargins(0, 0, 0, 0)
         side.setSpacing(Spacing.sm)
-        root.addLayout(side)
+        root.addWidget(side_host)
 
-        self._hint = BodyLabel(
-            "Hover to magnify. Click a bright star (snaps to the nearest "
-            "detected star), choose which star it is, then Add. Identify at "
-            "least 5, spread across the sky — 6 or more lets the solver "
-            "recover automatically if one turns out to be misidentified — "
-            "then Solve.")
+        self._hint = CaptionLabel(
+            "Click a bright star, say which star it is, then Add. Identify "
+            f"at least {MIN_ANCHORS}, spread across the sky — 6 or more lets "
+            "the solver recover if one is wrong. After 3, the other bright "
+            "stars are labelled for you.")
         self._hint.setWordWrap(True)
         side.addWidget(self._hint)
 
         self._pending_lbl = CaptionLabel("No star selected.")
+        self._pending_lbl.setWordWrap(True)
         side.addWidget(self._pending_lbl)
 
         self._combo = EditableComboBox()
@@ -231,6 +175,8 @@ class GuidedCalibrationDialog(QDialog):
 
         side.addWidget(CaptionLabel("Identified stars:"))
         self._list = ListWidget()
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._list.currentRowChanged.connect(self._on_row_selected)
         side.addWidget(self._list, 1)
 
         self._remove_btn = PushButton("Remove selected")
@@ -238,35 +184,131 @@ class GuidedCalibrationDialog(QDialog):
         self._remove_btn.clicked.connect(self._on_remove)
         side.addWidget(self._remove_btn)
 
-        row = QHBoxLayout()
-        row.setSpacing(Spacing.sm)
-        cancel = PushButton("Cancel")
-        cancel.setCursor(Qt.PointingHandCursor)
-        cancel.clicked.connect(self.reject)
+        # Outcome area: always in the same place, never a vanished window.
+        self._status_title = StrongBodyLabel("")
+        self._status_title.setWordWrap(True)
+        side.addWidget(self._status_title)
+        self._status_body = CaptionLabel("")
+        self._status_body.setWordWrap(True)
+        side.addWidget(self._status_body)
+        self._progress = IndeterminateProgressBar()
+        self._progress.hide()
+        side.addWidget(self._progress)
+
+        # The primary action gets the column's full width: three buttons on
+        # one row clipped their own labels at this sidebar width.
         self._solve_btn = PrimaryPushButton("Solve")
         self._solve_btn.setCursor(Qt.PointingHandCursor)
-        self._solve_btn.clicked.connect(self._on_solve)
+        self._solve_btn.clicked.connect(self._on_primary)
+        side.addWidget(self._solve_btn)
+
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.sm)
+        self._cancel_btn = PushButton("Cancel")
+        self._cancel_btn.setCursor(Qt.PointingHandCursor)
+        self._cancel_btn.clicked.connect(self.reject)
+        self._back_btn = PushButton("Adjust stars")
+        self._back_btn.setCursor(Qt.PointingHandCursor)
+        self._back_btn.clicked.connect(self._on_back)
+        row.addWidget(self._cancel_btn)
         row.addStretch(1)
-        row.addWidget(cancel)
-        row.addWidget(self._solve_btn)
+        row.addWidget(self._back_btn)
         side.addLayout(row)
 
-    def _pil_to_pixmap(self, pil_image) -> Tuple[QPixmap, float, QPixmap]:
-        """Return (display pixmap, display scale, native-res pixmap)."""
+    def _fit_to_screen(self) -> None:
+        screen = (self.parent().screen() if self.parent() is not None
+                  else QGuiApplication.primaryScreen())
+        if screen is None:
+            self.resize(1280, 860)
+            return
+        avail = screen.availableGeometry()
+        self.resize(int(avail.width() * _SCREEN_FRACTION),
+                    int(avail.height() * _SCREEN_FRACTION))
+
+    @staticmethod
+    def _pil_to_pixmap(pil_image) -> QPixmap:
         img = pil_image.convert('RGB')
         w, h = img.size
-        scale = min(1.0, _MAX_DISPLAY / float(max(w, h)))
         data = img.tobytes('raw', 'RGB')
-        qimg = QImage(data, w, h, 3 * w, QImage.Format_RGB888).copy()
-        full = QPixmap.fromImage(qimg)
-        if scale < 1.0:
-            qimg = qimg.scaled(int(w * scale), int(h * scale),
-                               Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        return QPixmap.fromImage(qimg), scale, full
+        return QPixmap.fromImage(
+            QImage(data, w, h, 3 * w, QImage.Format_RGB888).copy())
 
     # ------------------------------------------------------------------
+    # Results from the controller layer
+    # ------------------------------------------------------------------
+
+    def show_solving(self) -> None:
+        self._state = _STATE_SOLVING
+        self._set_status("Solving…", "Fitting the lens model to your stars. "
+                         "This takes a few seconds.", 'info')
+        self._refresh()
+
+    def show_failed(self, result: dict) -> None:
+        """A solve failed: keep every star, mark the ones that didn't fit."""
+        self._state = _STATE_COLLECT
+        self._apply_residuals(result.get('anchors', []))
+        self._set_status("Not solved — your stars are kept",
+                         result.get('message', ''), 'error')
+        self._refresh()
+        suspects = [i for i, a in enumerate(self._anchors)
+                    if a.get('state') == 'suspect']
+        if suspects:
+            self._list.setCurrentRow(suspects[0])
+
+    def show_solved(self, result: dict) -> None:
+        """A solve passed and is held unsaved: show it over the frame."""
+        self._state = _STATE_REVIEW
+        self._apply_residuals(result.get('anchors', []))
+        # An identified star already carries its own marker and label.
+        mine = {a.get('used_as') or a['name'] for a in self._anchors}
+        self._predicted = [
+            CanvasHint(p['x'], p['y'], p['name'], supported=True, emphasised=True)
+            for p in result.get('predicted', []) if p['name'] not in mine]
+        body = (f"RMS {result['rms']:.1f} px over {result['n_used']} of "
+                f"{result['n_anchors']} stars. The blue circles show where "
+                "this calibration puts every bright star: zoom in and check "
+                "they sit on real stars, then Save. Nothing is saved yet.")
+        if result.get('note'):
+            body = f"{result['note']}\n\n{body}"
+        self._set_status("Solved — check it, then save", body,
+                         'warn' if result.get('note') else 'ok')
+        self._canvas.reset_view()
+        self._refresh()
+
+    def show_hints(self, result) -> None:
+        """Star suggestions for the current anchors (HintResult or None)."""
+        self._hints = []
+        if result is not None and result.trusted:
+            self._hints = [CanvasHint(h.x, h.y, h.name, supported=h.supported)
+                           for h in result.hints]
+        if self._state == _STATE_COLLECT:
+            if result is not None and not result.trusted and result.message:
+                self._set_status("Check your stars", result.message, 'warn')
+            elif self._status_title.text() == "Check your stars":
+                self._set_status("", "", 'info')
+            self._refresh()
+
+    def show_saved(self, ok: bool, message: str) -> None:
+        if ok:
+            self.saved = True
+            self.accept()
+            return
+        # Back to the review, not to picking: the session still holds the
+        # solved model, and a refusal can be transient (a Calibrate Now run
+        # in flight). Dropping to "Solve" left no way to save again, and
+        # solving would discard the very result the user was trying to keep.
+        self._state = _STATE_REVIEW
+        self._set_status("Not saved — try again", message, 'error')
+        self._refresh()
+
+    # ------------------------------------------------------------------
+    # User actions
+    # ------------------------------------------------------------------
+
     def _on_image_click(self, ix: float, iy: float):
         """Snap the click to the nearest detected star (image coords)."""
+        if self._state != _STATE_COLLECT:
+            return
         best, best_d = None, self._snap_px
         for d in self._detections:
             dist = math.hypot(d[0] - ix, d[1] - iy)
@@ -277,9 +319,31 @@ class GuidedCalibrationDialog(QDialog):
         snapped = ("snapped to detected star" if best is not None
                    else "no detected star nearby — the solve is much less "
                         "accurate with unsnapped clicks")
-        self._pending_lbl.setText(
-            f"Selected ({self._pending[0]:.0f}, {self._pending[1]:.0f}) — {snapped}.")
+        text = (f"Selected ({self._pending[0]:.0f}, {self._pending[1]:.0f}) "
+                f"— {snapped}.")
+        suggestion = self._hint_near(*self._pending)
+        if suggestion is not None:
+            self._select_candidate(suggestion.label)
+            text += (f" This looks like {suggestion.label} — check, then Add.")
+        self._pending_lbl.setText(text)
+        self._combo.setFocus()
         self._refresh()
+
+    def _hint_near(self, ix: float, iy: float) -> Optional[CanvasHint]:
+        best, best_d = None, self._snap_px
+        for h in self._hints:
+            d = math.hypot(h.x - ix, h.y - iy)
+            if d <= best_d:
+                best, best_d = h, d
+        return best
+
+    def _select_candidate(self, name: str) -> None:
+        for i in range(self._combo.count()):
+            c = self._combo.itemData(i)
+            if c and c.get('name') == name:
+                self._combo.setCurrentIndex(i)
+                self._combo.setCursorPosition(0)   # show the name, not "…alt 43°)"
+                return
 
     def _on_add(self):
         if self._pending is None:
@@ -301,9 +365,10 @@ class GuidedCalibrationDialog(QDialog):
             'snapped': self._pending_snapped})
         self._pending = None
         self._pending_snapped = False
+        self._combo.setCurrentIndex(-1)
         self._combo.setText("")
         self._pending_lbl.setText(f"{c['name']} added.")
-        self._refresh()
+        self._anchors_changed()
 
     def _match_typed_star(self):
         """Resolve free-typed text to a candidate star.
@@ -326,22 +391,137 @@ class GuidedCalibrationDialog(QDialog):
         i = self._list.currentRow()
         if 0 <= i < len(self._anchors):
             self._anchors.pop(i)
-            self._refresh()
+            self._anchors_changed()
 
-    def _on_solve(self):
-        self.anchors = [(a['px'], a['py'], a['ra'], a['dec'], a['name'])
-                        for a in self._anchors]
-        self.accept()
+    def _on_row_selected(self, row: int) -> None:
+        """Selecting a star in the list brings it into view."""
+        if 0 <= row < len(self._anchors) and self._canvas.zoom() > 1.0:
+            a = self._anchors[row]
+            self._canvas.centre_on(a['px'], a['py'])
+
+    def _anchors_changed(self) -> None:
+        """The anchor set changed: old residuals no longer describe it."""
+        for a in self._anchors:
+            for key in ('state', 'residual', 'used_as'):
+                a.pop(key, None)
+        self._set_status("", "", 'info')
+        self._refresh()
+        self.hints_requested.emit(self._anchor_tuples())
+
+    def _on_primary(self):
+        if self._state == _STATE_REVIEW:
+            self._state = _STATE_SOLVING
+            self._set_status("Saving…", "", 'info')
+            self._refresh()
+            self.save_requested.emit()
+        elif self._state == _STATE_COLLECT:
+            self.solve_requested.emit(self._anchor_tuples())
+
+    def _on_back(self):
+        """Leave the review without saving; the stars stay as they were."""
+        self.discard_requested.emit()
+        self._state = _STATE_COLLECT
+        self._predicted = []
+        self._set_status("", "", 'info')
+        self._refresh()
+
+    def reject(self):
+        if self._state == _STATE_SOLVING:
+            return   # a few seconds; closing now would orphan the result
+        if self._anchors and not self._confirm_abandon():
+            return
+        if self._state == _STATE_REVIEW:
+            self.discard_requested.emit()
+        super().reject()
+
+    def _confirm_abandon(self) -> bool:
+        unsaved = (" The solved calibration has not been saved."
+                   if self._state == _STATE_REVIEW else "")
+        box = MessageBox(
+            "Close guided calibration?",
+            f"You have identified {len(self._anchors)} star(s); closing "
+            f"discards them.{unsaved}", self)
+        box.yesButton.setText("Close")
+        box.cancelButton.setText("Keep working")
+        return bool(box.exec())
+
+    # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+
+    def _anchor_tuples(self) -> list:
+        return [(a['px'], a['py'], a['ra'], a['dec'], a['name'])
+                for a in self._anchors]
+
+    def _apply_residuals(self, rows: List[dict]) -> None:
+        by_name = {r['name']: r for r in rows}
+        for a in self._anchors:
+            r = by_name.get(a['name'])
+            a['state'] = r['state'] if r else 'ok'
+            a['residual'] = r['residual'] if r else None
+            a['used_as'] = r.get('used_as', a['name']) if r else a['name']
+
+    def _set_status(self, title: str, body: str, tone: str) -> None:
+        colour = _TONE_COLOURS.get(tone, '')
+        self._status_title.setStyleSheet(f"color: {colour};" if colour else "")
+        self._status_title.setText(title)
+        self._status_title.setVisible(bool(title))
+        self._status_body.setText(body)
+        self._status_body.setVisible(bool(body))
+
+    def _on_zoom_changed(self, zoom: float) -> None:
+        self._zoom_lbl.setText("Whole frame" if zoom <= 1.0 else f"{zoom:.1f}×")
+
+    @staticmethod
+    def _label(a: dict) -> str:
+        used_as = a.get('used_as') or a['name']
+        return a['name'] if used_as == a['name'] else f"{a['name']} → {used_as}"
+
+    @staticmethod
+    def _row_text(a: dict) -> str:
+        text = GuidedCalibrationDialog._label(a)
+        if a.get('state') == 'excluded':
+            return f"{text}  — left out"
+        residual = a.get('residual')
+        if residual is not None:
+            off = "off image" if residual == float('inf') else f"{residual:.0f} px off"
+            return f"{text}  — {off}"
+        return f"{text}  {'✓' if a.get('snapped') else '⚠ unsnapped'}"
 
     def _refresh(self):
+        selected = self._list.currentRow()
+        self._list.blockSignals(True)
         self._list.clear()
         for a in self._anchors:
-            mark = "✓" if a.get('snapped') else "⚠ unsnapped"
-            self._list.addItem(
-                f"{a['name']}  @ ({a['px']:.0f}, {a['py']:.0f})  {mark}")
-        markers = [(a['px'], a['py'], a['name']) for a in self._anchors]
-        self._img.set_markers(markers, self._pending)
+            self._list.addItem(self._row_text(a))
+            colour = _ROW_COLOURS.get(a.get('state'))
+            if colour is not None:
+                self._list.item(self._list.count() - 1).setForeground(colour)
+        if 0 <= selected < self._list.count():
+            self._list.setCurrentRow(selected)
+        self._list.blockSignals(False)
+
+        collecting = self._state == _STATE_COLLECT
+        reviewing = self._state == _STATE_REVIEW
+        markers = [CanvasMarker(a['px'], a['py'], self._label(a),
+                                a.get('state') or 'ok') for a in self._anchors]
+        self._canvas.set_overlays(
+            markers, self._predicted if reviewing else self._hints,
+            self._pending if collecting else None)
+        self._canvas.set_interactive(collecting)
+
+        for w in (self._combo, self._add_btn, self._remove_btn, self._list):
+            w.setEnabled(collecting)
+        self._progress.setVisible(self._state == _STATE_SOLVING)
+        self._cancel_btn.setEnabled(self._state != _STATE_SOLVING)
+        self._back_btn.setVisible(reviewing)
+
         n = len(self._anchors)
-        self._solve_btn.setEnabled(n >= MIN_ANCHORS)
-        self._solve_btn.setText(
-            f"Solve ({n}/{MIN_ANCHORS})" if n < MIN_ANCHORS else f"Solve ({n} stars)")
+        if reviewing:
+            self._solve_btn.setText("Save calibration")
+            self._solve_btn.setEnabled(True)
+        else:
+            self._solve_btn.setEnabled(collecting and n >= MIN_ANCHORS)
+            self._solve_btn.setText(
+                f"Solve ({n}/{MIN_ANCHORS})" if n < MIN_ANCHORS
+                else f"Solve ({n} stars)")

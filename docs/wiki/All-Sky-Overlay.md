@@ -96,6 +96,21 @@ When **Calibrate Now** or **Guided Calibration** succeeds, a notification is pos
 
 RMS is the typical distance, in pixels, between where matched stars appear and where the model predicts them. Lower is better.
 
+A guided calibration is rated **Preliminary** because it rests on one frame and a handful of stars, not because it is unreliable: its orientation is pinned by stars you named yourself. Automatic refinement then raises the rating as frames accumulate.
+
+### When the badge turns amber
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+The badge describes how well the calibration fitted **when it was saved**. It is not re-measured every frame, so on its own it cannot tell you the overlay still lines up tonight. PFR Sentinel now says so when it has reason to doubt it: the badge turns amber, gains a suffix, and an explanation appears under the status line.
+
+| Badge reads | What it means |
+|-------------|---------------|
+| **Good — unconfirmed** (any level) | The last three or more automatic refinements were rejected, and recent frames could not confirm the saved calibration either way. |
+| **Good — check alignment** (any level) | The last three or more refinements were rejected **and** the saved calibration missed the bright stars in the last three frames. |
+
+Neither changes or deletes your calibration, and cloud causes both: a cloudy night hides the stars the check relies on. On a clear night, look at the overlay in the preview. If the constellation lines sit on their stars, nothing is needed and the badge returns to normal after the next successful refinement. If they don't, run [Guided Calibration](#guided-calibration). A calibration that still hits its bright stars never shows the caution, however many refinements are rejected.
+
 > **New in the next release** — not available in version 3.7.6 or earlier.
 >
 > A lens model has eight unknowns, so a fit over only a handful of stars can report a flattering RMS while being badly wrong. Automatic calibration now needs at least 8 matched stars to succeed at all, and a saved model below that is rated **Not calibrated** so a better one can replace it. Guided Calibration is unaffected — the stars there are ones you identified yourself, and five is enough.
@@ -147,20 +162,44 @@ Before an automatic calibration overwrites the saved one, the previous file is c
 
 Use guided calibration when automatic calibration cannot get the orientation right: heavily obstructed views, strongly tilted cameras, hazy skies, or a camera that was just moved. It needs a recent frame (start capture first) and your latitude and longitude.
 
-The **Guided All-Sky Calibration** dialog shows the latest frame, brightened so stars are visible, with the controls alongside.
+> **New in the next release** — not available in version 3.7.7 or earlier.
 
-1. **Hover to magnify.** A loupe follows the cursor showing a close-up near full resolution, so you can tell close pairs apart (for example Mizar and Alioth). The green circle in the loupe shows how close a click must be to snap to a star.
-2. **Click a bright star.** The click snaps to the nearest star PFR Sentinel detected. If no detected star is nearby, the click stays where you placed it, with a warning that the solve is much less accurate with unsnapped clicks.
-3. **Choose which star it is.** Type in **Search for a star by name…** to filter the list. It contains bright stars (magnitude 3.5 or brighter) more than 15 degrees above the horizon at the frame's capture time, each shown with its magnitude and altitude. Stars without a proper name are listed by Bayer designation or catalogue number.
-4. **Click Add this star.** The star appears under **Identified stars** with a tick, or with a warning mark if the click did not snap. Each star can only be used once. Select an entry and click **Remove selected** to take it out.
-5. **Repeat for at least 5 stars spread across the sky.** Identifying **6 or more** lets the solver recover automatically if one turns out to be wrong. The button shows your progress, for example **Solve (3/5)**, and becomes available at five.
-6. **Click Solve.** The solve runs in the background and the Lens Calibration status line reports the result.
+The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be maximised. The latest frame, brightened so stars are visible, takes almost all of it; the controls are a narrow column on the right. The dialog stays open for the whole session — while it solves, if the solve fails, and until you have saved a result or cancelled.
+
+### Moving around the frame
+
+| Action | What it does |
+|--------|--------------|
+| Scroll wheel, or **+** / **-** | Zoom in and out around the cursor. |
+| Drag | Pan when zoomed in. |
+| Double-click, **0**, or the **Whole frame** button | Return to the whole frame. |
+| Hover | At whole-frame zoom a loupe follows the cursor with a near full-resolution close-up, so you can tell close pairs apart (for example Mizar and Alioth). The green circle in the loupe shows how close a click must be to snap to a star. The loupe switches off once you zoom in past full resolution. |
+
+### Identifying stars
+
+1. **Click a bright star.** The click snaps to the nearest star PFR Sentinel detected. If no detected star is nearby, the click stays where you placed it, with a warning that the solve is much less accurate with unsnapped clicks.
+2. **Choose which star it is.** Type in **Search for a star by name…** to filter the list. It contains bright stars (magnitude 3.5 or brighter) more than 15 degrees above the horizon at the frame's capture time, each shown with its magnitude and altitude. Stars without a proper name are listed by Bayer designation or catalogue number.
+3. **Click Add this star.** The star appears under **Identified stars** with a tick, or with a warning mark if the click did not snap. Each star can only be used once. Select an entry and click **Remove selected** to take it out; selecting an entry while zoomed in also brings that star into view.
+4. **After three stars, let the suggestions help.** Three identified stars are enough to work out roughly where every other bright star must be, so the 30 brightest are labelled on the frame with dashed blue circles (fainter where no detected star sits nearby). Click a labelled star and its name is filled in for you — check it, then **Add this star**. If instead you see **Check your stars**, the stars identified so far disagree with each other or with the sky in the frame: one of them is probably wrong, most likely the one you just added.
+5. **Identify at least 5 stars spread across the sky.** **6 or more** lets the solver recover automatically if one turns out to be wrong. The button shows your progress, for example **Solve (3/5)**, and becomes available at five.
+6. **Click Solve.** A progress bar runs for the few seconds the solve takes.
+
+### If the solve fails
+
+Nothing is lost. Every star you identified stays where it was, the message names the star that did not fit and how far off it is, that star is shown in red on the frame and in the list (and selected, ready for **Remove selected**), and the others show their own error. Remove or re-identify the suspect and click **Solve** again. The full detail for every star is also in the [Logs](Logs).
+
+### Checking and saving the result
+
+A solve that passes is **not saved yet**. The dialog shows the RMS error and draws solid blue circles where the new calibration puts the 40 brightest stars, over the same frame. Zoom in and check that they sit on real stars, then:
+
+- **Save calibration** saves it, closes the dialog, and the overlay starts using it. The Lens Calibration status line reads "Guided calibration saved: …" and a notification is added.
+- **Adjust stars** returns to identifying stars without saving, with everything you identified intact.
+
+Closing the dialog with stars identified asks for confirmation first, so a stray Esc does not discard your work.
 
 ### Outlier rescue
 
-If the full set of stars does not fit well and you identified more than five, the solver tries leaving out one or two of them. If a left-out click actually sits on a different bright star, it is re-identified as that star and kept. The status line explains what happened — for example that a star you named is actually a different star and all anchors were used, or that the solve used 6 of 7 anchors and which one was excluded.
-
-If the solve still fails, the [Logs](Logs) list the error for each identified star. The largest error usually marks a misidentified or mis-clicked star: remove or re-click it and solve again.
+If the full set of stars does not fit well and you identified more than five, the solver tries leaving out one or two of them. If a left-out click actually sits on a different bright star, it is re-identified as that star and kept. The result explains what happened, and the affected star is shown in orange — for example **Pollux → Sirius** when a star you named turned out to be a different one, or **left out** when the solve used 6 of 7 stars.
 
 ---
 
@@ -292,7 +331,9 @@ The All-Sky page does not draw a compass. To show N/E/S/W on your image, add a *
 | Overlay is badly wrong and does not improve | A bad saved calibration is holding back refinement | Click **Reset Calibration…**, then run Guided Calibration. |
 | Overlay does not appear at all | Sun above -6 degrees, roof reported closed, no calibration, or image cropped | Check the quality badge, the time of day, and the ML roof status. |
 | Few stars detected and the image looks dark | Auto-exposure is at maximum exposure and still below target | The [Logs](Logs) show a warning that auto-exposure is pinned at max exposure. Lower the target brightness or raise gain — see [Auto-Exposure](Auto-Exposure). |
-| Guided solve fails with a large error on one star | That star was misidentified or mis-clicked | Remove or re-click it. Identify 6 or more stars so the solver can recover automatically. |
+| Guided solve fails with a large error on one star | That star was misidentified or mis-clicked | It is marked in red and selected in the dialog, with your other stars kept: remove or re-identify it and solve again. Identify 6 or more stars so the solver can recover automatically. |
+| Guided Calibration shows **Check your stars** | The stars identified so far do not agree with each other or with the frame | Re-check the most recent star first. The warning clears as soon as the identifications agree. |
+| Badge is amber and reads **unconfirmed** or **check alignment** | Automatic refinements keep being rejected and recent frames could not confirm the saved calibration | See [When the badge turns amber](#when-the-badge-turns-amber). Often just cloud; if the overlay is visibly off on a clear night, run Guided Calibration. |
 
 ---
 
@@ -300,7 +341,7 @@ The All-Sky page does not draw a compass. To show N/E/S/W on your image, add a *
 
 - **Set your coordinates and clock first.** Nearly every calibration problem comes down to time or location.
 - **Let it run.** On a clear night, automatic calibration improves from Preliminary towards Good or Excellent as frames accumulate over an hour or more.
-- **Use Guided Calibration** on obstructed or tilted installs, or right after moving the camera. Spread your stars across the whole sky rather than clustering them.
+- **Use Guided Calibration** on obstructed or tilted installs, or right after moving the camera. Spread your stars across the whole sky rather than clustering them — and start with three you are sure of, so the suggestions can label the rest.
 - **Use Max objects visible to control clutter.** The default of 15 works well for most setups.
 - **Enable NGC cautiously.** Start with a low maximum magnitude (6 or 7) and raise it only if you want a denser overlay.
 - **Burn in only where you need labels.** The burn-in options are per destination, so you can, for example, label the web image while keeping saved files and timelapses clean.
