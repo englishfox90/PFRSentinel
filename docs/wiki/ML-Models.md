@@ -24,8 +24,12 @@ Alongside the image, the model uses:
 |---------------|-------------|
 | Corner-to-centre ratio | Brightness of the frame corners compared with the centre. A closed roof tends to be evenly dark; an open sky has a gradient. |
 | Median brightness | Overall frame brightness, scaled correctly for 8-bit and 16-bit frames. |
-| Night flag | Whether the PC clock is between 20:00 and 06:00. |
+| Night flag | Whether it is astronomical night at your location (sun more than 18° below the horizon), from the latitude and longitude in [Weather Setup](Weather-Setup). With no location set, the PC clock between 22:00 and 05:00. |
 | Hour | Hour of day from the PC clock. |
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The models shipped so far were trained before the flag was corrected, so the full benefit arrives with the next retrained models; until then the corrected flag is closer to what they learned than the clock was.
 
 ### Sky Classifier
 

@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import re
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -28,26 +28,17 @@ except ImportError:
     print("ERROR: astropy required. Install with: pip install astropy")
     sys.exit(1)
 
-# Try to import astral for accurate sun calculations
-try:
-    from astral import LocationInfo
-    from astral.sun import sun, twilight
-    ASTRAL_AVAILABLE = True
-except ImportError:
-    ASTRAL_AVAILABLE = False
+# The time context comes from the app's own service so a backfilled flag is
+# the one a live capture writes (issue #86: this script used to carry its own
+# copy of the algorithm, with the same faults). scripts/dev/allsky/ is three
+# levels below the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from services.time_context import ASTRAL_AVAILABLE, compute_time_context as _service_time_context  # noqa: E402
+from services.moon import get_configured_location as _config_location  # noqa: E402
+
+if not ASTRAL_AVAILABLE:
     print("WARNING: astral not installed. Using simple hour-based time classification.")
     print("         Install with: pip install astral")
-
-# Try to import Config for location settings
-try:
-    # Add parent directory to path to import services
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from services.config import Config
-    CONFIG_AVAILABLE = True
-except ImportError:
-    CONFIG_AVAILABLE = False
-    if ASTRAL_AVAILABLE:
-        print("WARNING: Could not import Config. Will use simple hour-based time classification.")
 
 
 def parse_timestamp_from_filename(filename):
@@ -144,261 +135,23 @@ def compute_percentiles(lum):
 
 
 def compute_time_context(dt):
-    """
-    Compute time-of-day context using astral for accurate sun calculations.
-    
-    Uses configured latitude/longitude from weather settings to calculate
-    accurate sunrise, sunset, and twilight times.
-    
-    Args:
-        dt: datetime object for the capture time
-        
-    Returns:
-        dict with time context information
-    """
-    # Try to get location from config
-    lat, lon, location_name = get_configured_location()
-    
-    # If astral available and location configured, use accurate calculations
-    if ASTRAL_AVAILABLE and lat is not None and lon is not None:
-        return compute_astral_time_context(dt, lat, lon, location_name)
-    
-    # Fallback to simple hour-based classification
-    return compute_simple_time_context(dt)
+    """Time context for a capture at naive host-local ``dt``, from the same
+    service the app uses at capture time."""
+    return _service_time_context(now=dt, location=get_configured_location())
 
 
 def get_configured_location():
-    """
-    Get latitude/longitude from weather config.
-    
-    Falls back to default observatory location if not configured.
-    
-    Returns:
-        tuple: (latitude, longitude, location_name)
-    """
+    """(latitude, longitude, name) from the weather config, else the default
+    observatory the training set came from."""
     # Default location: Rockwood, Texas observatory
     DEFAULT_LAT = 31.3303162
     DEFAULT_LON = -100.4570705
     DEFAULT_NAME = "Rockwood, Texas"
-    
-    if not CONFIG_AVAILABLE:
-        return DEFAULT_LAT, DEFAULT_LON, DEFAULT_NAME
-    
-    try:
-        config = Config()
-        weather_config = config.get('weather', {})
-        
-        lat_str = weather_config.get('latitude', '')
-        lon_str = weather_config.get('longitude', '')
-        location_name = weather_config.get('location', DEFAULT_NAME)
-        
-        if lat_str and lon_str:
-            return float(lat_str), float(lon_str), location_name
-        
-        # Fall back to default
-        return DEFAULT_LAT, DEFAULT_LON, DEFAULT_NAME
-    except Exception as e:
-        return DEFAULT_LAT, DEFAULT_LON, DEFAULT_NAME
 
-
-def compute_astral_time_context(now, lat, lon, location_name):
-    """
-    Compute accurate twilight times using astral package.
-    
-    Args:
-        now: datetime for the capture time (naive local time)
-        lat: Latitude in degrees
-        lon: Longitude in degrees  
-        location_name: Name of location
-        
-    Returns:
-        dict with accurate sun position and twilight phase
-    """
-    try:
-        # Create location
-        loc = LocationInfo(
-            name=location_name,
-            region="",
-            timezone="UTC",
-            latitude=lat,
-            longitude=lon
-        )
-        
-        # Get sun times for that date (returns UTC)
-        capture_date = now.date()
-        s = sun(loc.observer, date=capture_date)
-        
-        # Convert now to UTC for comparison
-        import time
-        local_tz_offset = time.timezone if time.daylight == 0 else time.altzone
-        now_utc = now + timedelta(seconds=local_tz_offset)
-        
-        # Extract times
-        dawn = s.get('dawn')
-        sunrise = s.get('sunrise')
-        noon = s.get('noon')
-        sunset = s.get('sunset')
-        dusk = s.get('dusk')
-        
-        # Strip timezone for comparison
-        def strip_tz(dt):
-            return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
-        
-        dawn_naive = strip_tz(dawn)
-        sunrise_naive = strip_tz(sunrise)
-        noon_naive = strip_tz(noon)
-        sunset_naive = strip_tz(sunset)
-        dusk_naive = strip_tz(dusk)
-        
-        sun_times_naive = {
-            'dawn': dawn_naive,
-            'sunrise': sunrise_naive,
-            'noon': noon_naive,
-            'sunset': sunset_naive,
-            'dusk': dusk_naive,
-        }
-        
-        # Classify time period
-        period, detailed_period = classify_time_period(now_utc, sun_times_naive)
-        
-        # Check for astronomical night
-        is_astro_night = False
-        try:
-            astro_twilight = twilight(loc.observer, date=capture_date, direction=1)
-            astro_dusk = twilight(loc.observer, date=capture_date, direction=-1)
-            
-            if astro_twilight and astro_dusk:
-                astro_dawn_start = strip_tz(astro_twilight[0])
-                astro_dusk_end = strip_tz(astro_dusk[1])
-                is_astro_night = now_utc < astro_dawn_start or now_utc > astro_dusk_end
-        except Exception:
-            if dawn_naive and dusk_naive:
-                is_astro_night = now_utc < dawn_naive or now_utc > dusk_naive
-        
-        return {
-            'hour': now.hour,
-            'minute': now.minute,
-            'period': period,
-            'detailed_period': detailed_period,
-            'is_daylight': period == 'day',
-            'is_astronomical_night': is_astro_night,
-            'location': {
-                'name': location_name,
-                'latitude': lat,
-                'longitude': lon,
-            },
-            'sun_times': {
-                'dawn': dawn.isoformat() if dawn else None,
-                'sunrise': sunrise.isoformat() if sunrise else None,
-                'noon': noon.isoformat() if noon else None,
-                'sunset': sunset.isoformat() if sunset else None,
-                'dusk': dusk.isoformat() if dusk else None,
-            },
-            'calculation_method': 'astral',
-        }
-        
-    except Exception as e:
-        print(f"  Warning: Astral calculation failed ({e}), using fallback")
-        return compute_simple_time_context(now)
-
-
-def classify_time_period(now, sun_times):
-    """
-    Classify time into period and detailed_period.
-    
-    Args:
-        now: Current datetime (naive)
-        sun_times: Dict with dawn/sunrise/noon/sunset/dusk
-        
-    Returns:
-        tuple: (period, detailed_period)
-    """
-    dawn = sun_times.get('dawn')
-    sunrise = sun_times.get('sunrise')
-    noon = sun_times.get('noon')
-    sunset = sun_times.get('sunset')
-    dusk = sun_times.get('dusk')
-    
-    # Determine period
-    if sunrise and sunset and sunrise <= now <= sunset:
-        period = 'day'
-    elif (dawn and sunrise and dawn <= now < sunrise) or \
-         (sunset and dusk and sunset < now <= dusk):
-        period = 'twilight'
-    else:
-        period = 'night'
-    
-    # Determine detailed period
-    if dawn and now < dawn:
-        detailed_period = 'night'
-    elif dawn and sunrise and dawn <= now < sunrise:
-        detailed_period = 'dawn'
-    elif sunrise and noon and sunrise <= now < noon:
-        detailed_period = 'morning'
-    elif noon and sunset:
-        afternoon_end = sunset.replace(
-            hour=max(0, sunset.hour - 2),
-            minute=sunset.minute
-        )
-        if noon <= now < afternoon_end:
-            detailed_period = 'afternoon'
-        elif afternoon_end <= now < sunset:
-            detailed_period = 'evening'
-        elif sunset <= now:
-            if dusk and now <= dusk:
-                detailed_period = 'dusk'
-            else:
-                detailed_period = 'night'
-        else:
-            detailed_period = 'afternoon'
-    else:
-        detailed_period = hour_to_detailed_period(now.hour)
-    
-    return period, detailed_period
-
-
-def hour_to_detailed_period(hour):
-    """Simple hour-based detailed period (fallback)."""
-    if 5 <= hour < 8:
-        return 'dawn'
-    elif 8 <= hour < 12:
-        return 'morning'
-    elif 12 <= hour < 17:
-        return 'afternoon'
-    elif 17 <= hour < 20:
-        return 'evening'
-    elif 20 <= hour < 22:
-        return 'dusk'
-    else:
-        return 'night'
-
-
-def compute_simple_time_context(dt):
-    """
-    Fallback: Simple hour-based time classification.
-    
-    Used when astral is not available or location not configured.
-    """
-    hour = dt.hour
-    
-    if 6 <= hour < 18:
-        period = 'day'
-    elif 18 <= hour < 21 or 5 <= hour < 6:
-        period = 'twilight'
-    else:
-        period = 'night'
-    
-    detailed_period = hour_to_detailed_period(hour)
-    
-    return {
-        'hour': hour,
-        'minute': dt.minute,
-        'period': period,
-        'detailed_period': detailed_period,
-        'is_daylight': 6 <= hour < 20,
-        'is_astronomical_night': hour >= 22 or hour < 5,
-        'calculation_method': 'simple_hour_based',
-    }
+    lat, lon, name = _config_location()
+    if lat is not None and lon is not None:
+        return lat, lon, name
+    return DEFAULT_LAT, DEFAULT_LON, DEFAULT_NAME
 
 
 def load_fits_normalized(fits_path, denom=None):
@@ -472,13 +225,10 @@ def backfill_calibration(json_path, dry_run=False, force_time=False):
         fields_to_add.append('corner_analysis')
     if 'percentiles' not in cal:
         fields_to_add.append('percentiles')
-    if 'time_context' not in cal:
+    if 'time_context' not in cal or force_time:
+        # --force-time recomputes every file, 'astral' ones included: the
+        # flag they carry from before issue #86 was wrong too.
         fields_to_add.append('time_context')
-    elif force_time:
-        # Check if current time_context uses old simple method
-        tc = cal.get('time_context', {})
-        if tc.get('calculation_method') != 'astral':
-            fields_to_add.append('time_context')
     
     if not fields_to_add:
         return True, "Already complete", []
@@ -582,7 +332,8 @@ Examples:
     parser.add_argument('--no-recursive', action='store_true',
                         help='Do not search subdirectories')
     parser.add_argument('--force-time', action='store_true',
-                        help='Force recalculation of time_context using astral (even if exists)')
+                        help='Recompute time_context for every file, including ones that already '
+                             'have it (needed once to re-label data written before issue #86)')
     
     args = parser.parse_args()
     
@@ -593,14 +344,10 @@ Examples:
     
     # Check astral availability when --force-time is used
     if args.force_time:
-        if ASTRAL_AVAILABLE and CONFIG_AVAILABLE:
+        if ASTRAL_AVAILABLE:
             lat, lon, loc_name = get_configured_location()
-            if lat is not None:
-                print(f"Using astral calculations for location: {loc_name} ({lat}, {lon})")
-            else:
-                print("WARNING: Location not configured in config.json weather settings")
-                print("         Will use simple hour-based classification")
-        elif not ASTRAL_AVAILABLE:
+            print(f"Using astral calculations for location: {loc_name} ({lat}, {lon})")
+        else:
             print("WARNING: astral not installed, --force-time will use simple classification")
     
     # Find all calibration files
