@@ -26,11 +26,9 @@ Worker ownership:
 """
 import functools
 import math
-import os
-import shutil
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional
 
 from PySide6.QtCore import QObject, Signal
@@ -41,7 +39,9 @@ from .star_centroid import detect_stars, measure_sky_circle
 from .fisheye import FisheyeModel
 from .catalogs import get_bright_stars
 from .coords import radec_to_altaz
+from .calibration_attention import calibration_attention
 from .calibration_quality import CalibrationQuality, model_quality  # re-exported for existing callers
+from .calibration_store import save_with_backup
 from .calibration_validate import median_frame_resolution
 from .calibration_workers import (  # re-exported for existing callers
     MAX_RESIDUAL_PX, _InitialCalWorker, _RefineWorker)
@@ -110,10 +110,13 @@ class CalibrationService(QObject):
     Signals:
         quality_upgraded(str, object): quality level name + FisheyeModel.
         status_changed(str): human-readable status for the UI.
+        attention_changed(str, str): (level, message) caution shown beside
+            the quality badge; ('', '') clears it. See calibration_attention.
     """
 
     quality_upgraded = Signal(str, object)
     status_changed = Signal(str)
+    attention_changed = Signal(str, str)
 
     # Internal signal: queued to main thread for safe QThread creation.
     _check_refine = Signal()
@@ -162,6 +165,7 @@ class CalibrationService(QObject):
         # Cross-run pole consensus (pole_consensus.py). Survives set_model /
         # clear_model: it describes the field, not the model.
         self._pole_history = PoleHistory()
+        self._attention = ('', '')
         self._lat = 0.0
         self._lon = 0.0
         self._check_refine.connect(self._maybe_refine)
@@ -200,6 +204,7 @@ class CalibrationService(QObject):
         self._refine_backoff_failures = 0
         self._clear_escape_state()
         self._escape_backoff.reset()
+        self._publish_attention()
         if self._quality != CalibrationQuality.NONE:
             self._quality = CalibrationQuality.NONE
         log.info("CalibrationService: model cleared (user reset); "
@@ -219,6 +224,7 @@ class CalibrationService(QObject):
         new_q = model_quality(model, model.n_images, model.span_minutes)
         with self._lock:
             self._frames.clear()
+        self._publish_attention()
         if new_q != self._quality:
             self._quality = new_q
             self.quality_upgraded.emit(self._quality, model)
@@ -528,6 +534,17 @@ class CalibrationService(QObject):
         log.warning(log_msg)
         self.status_changed.emit(status)
 
+    def _publish_attention(self) -> None:
+        """Re-judge the badge caution; emit only when it changes."""
+        with self._lock:
+            frames = list(self._frames)
+        attention = calibration_attention(
+            self._model, self._consecutive_refine_failures, frames,
+            self._escape_backoff.exhausted(time.monotonic()))
+        if attention != self._attention:
+            self._attention = attention
+            self.attention_changed.emit(*attention)
+
     def _clear_escape_state(self) -> None:
         self._escape_attempt = False
         self._escape_incumbent_failed_anchors = False
@@ -678,6 +695,7 @@ class CalibrationService(QObject):
             )
             # After the status restore, or the pause line is overwritten.
             self._warn_if_escape_exhausted()
+        self._publish_attention()
 
     def _on_refine_failed(self, error: str) -> None:
         was_escape = self._escape_attempt
@@ -705,33 +723,14 @@ class CalibrationService(QObject):
             log.info(f"Cold-start calibration not yet successful: {error}")
             self.status_changed.emit("Calibrating… (accumulating frames)")
         self._warn_if_escape_exhausted()
+        self._publish_attention()
 
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
     def _save_model(self, model: FisheyeModel, stamp_time: bool = True) -> None:
-        """Save model to the production calibration file.
-
-        The file being overwritten is copied to the backup path first: an
-        automatic replacement is the one write the user did not ask for, and
-        on 2026-09-05 it destroyed the only copy of a correct model.
-        `stamp_time=False` re-saves the same model (a provenance stamp)
-        without moving its calibration timestamp.
-        """
-        try:
-            from services.app_config import (
-                get_calibration_backup_path, get_calibration_path)
-            cal_path = get_calibration_path()
-            if stamp_time and os.path.isfile(cal_path):
-                try:
-                    shutil.copyfile(cal_path, get_calibration_backup_path())
-                except OSError as e:
-                    log.warning(f"Could not back up the previous calibration: {e}")
-            if stamp_time:
-                model.calibrated_at = datetime.now(timezone.utc).isoformat()
-            model.save(cal_path)
-            log.info(f"Calibration saved to {cal_path}")
-        except Exception as e:
-            log.error(f"Failed to save calibration: {e}")
-            self.status_changed.emit(f"Calibration save failed: {e}")
+        """Save to the production calibration file (calibration_store)."""
+        error = save_with_backup(model, stamp_time=stamp_time)
+        if error:
+            self.status_changed.emit(f"Calibration save failed: {error}")
