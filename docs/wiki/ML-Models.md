@@ -89,7 +89,7 @@ The status strip in [Live Monitoring](Live-Monitoring) has **Roof** and **Sky** 
 
 ### Skipping Sky Features While the Roof Is Closed
 
-With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
+With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. From the next release the roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — no longer blanks the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
 
 The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details.
 

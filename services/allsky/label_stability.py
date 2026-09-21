@@ -8,9 +8,10 @@ drops out of the mask frees a slot, the next-ranked object takes it, and both
 swap back a frame later (issues #31, #13). This module holds the small amount
 of state that lets consecutive frames agree:
 
-  * ``SkyMaskHistory`` — majority vote over the last few detection masks, plus
-    a hold-over for frames that produce no usable mask (too few detections),
-    so a single noisy frame cannot flip a region between sky and obstruction.
+  * ``SkyMaskHistory`` — majority vote over recent detection masks, plus a
+    hold-over for frames that produce no usable mask (too few detections), so
+    neither a noisy frame nor a run of them — an exposure change lasts many
+    frames, not one — can flip a region between sky and obstruction.
   * ``StickySelection`` — objects already on screen keep their slot while they
     stay visible and within a rank margin of the budget. A newcomer displaces
     an incumbent only when it out-ranks it by more than that margin.
@@ -20,15 +21,29 @@ of state that lets consecutive frames agree:
 State is keyed by nothing: the renderer serves one live frame stream, and a
 recalibration or size change is handled inside each piece.
 """
+import math
 import threading
 from collections import deque
 from typing import Deque, Dict, List, Optional, Set
 
 import numpy as np
 
-MASK_VOTE_DEPTH = 3       # frames in the majority vote
-MASK_HOLD_FRAMES = 3      # frames to reuse the last vote when detection fails
+# What counts as open sky is a property of the installation — the pier, the
+# walls, the scopes — and changes slowly. A 3-frame vote absorbed a single
+# noisy frame but simply followed anything longer: when auto-exposure steps,
+# or dusk fades, the per-frame mask shrinks for as long as the change lasts,
+# and the labels over the lost sky went with it (discussion #76). 15 frames is
+# ~7 minutes at 30 s exposures: long enough to ride out an exposure ramp, short
+# enough that a telescope slewing across the field is followed rather than
+# labelled over for the rest of the night.
+MASK_VOTE_DEPTH = 15      # frames in the majority vote
+MASK_HOLD_FRAMES = 15     # frames to reuse the last vote when detection fails
 RANK_MARGIN = 3           # incumbents survive up to this far past the budget
+
+# The vote is kept at reduced resolution. Fifteen full-resolution masks of a
+# 3552 px frame are ~190 MB; the mask is made of circles no smaller than 15 px
+# in radius, so nothing a label test can see is lost at this size.
+MASK_VOTE_MAX_EDGE = 512
 
 
 class SkyMaskHistory:
@@ -36,9 +51,11 @@ class SkyMaskHistory:
 
     def __init__(self, depth: int = MASK_VOTE_DEPTH,
                  hold_frames: int = MASK_HOLD_FRAMES):
-        self._depth = max(1, int(depth))
+        self._depth = max(1, min(255, int(depth)))   # votes are summed in uint8
         self._hold = max(0, int(hold_frames))
-        self._frames: Deque[np.ndarray] = deque()
+        self._frames: Deque[np.ndarray] = deque()    # reduced-resolution bools
+        self._votes: Optional[np.ndarray] = None     # running sum of _frames
+        self._shape: Optional[tuple] = None          # full-resolution shape
         self._vote: Optional[np.ndarray] = None
         self._misses = 0
 
@@ -48,6 +65,8 @@ class SkyMaskHistory:
 
     def reset(self) -> None:
         self._frames.clear()
+        self._votes = None
+        self._shape = None
         self._vote = None
         self._misses = 0
 
@@ -67,21 +86,30 @@ class SkyMaskHistory:
             self.reset()
             return None
 
-        sky = np.asarray(mask) > 0
-        if self._frames and self._frames[0].shape != sky.shape:
+        full = np.asarray(mask)
+        if self._shape is not None and self._shape != full.shape:
             self.reset()
-        self._misses = 0
-        self._frames.append(sky)
-        while len(self._frames) > self._depth:
-            self._frames.popleft()
+        self._shape = full.shape
+        step = max(1, math.ceil(max(full.shape) / MASK_VOTE_MAX_EDGE))
+        sky = np.ascontiguousarray(full[::step, ::step] > 0)
 
-        n = len(self._frames)
-        votes = np.zeros(sky.shape, dtype=np.uint8)
-        for f in self._frames:
-            votes += f
+        self._misses = 0
+        if self._votes is None:
+            self._votes = np.zeros(sky.shape, dtype=np.uint8)
+        self._frames.append(sky)
+        self._votes += sky
+        while len(self._frames) > self._depth:
+            self._votes -= self._frames.popleft()
+
         # "Sky in at least half the frames, rounding up": one frame is itself,
         # two frames is either, three frames needs two.
-        self._vote = np.where(votes * 2 >= n, 255, 0).astype(np.uint8)
+        n = len(self._frames)
+        small = np.where(self._votes.astype(np.uint16) * 2 >= n, 255, 0).astype(np.uint8)
+        if step == 1:
+            self._vote = small
+        else:
+            self._vote = np.repeat(np.repeat(small, step, axis=0), step, axis=1)[
+                :full.shape[0], :full.shape[1]]
         return self._vote
 
 

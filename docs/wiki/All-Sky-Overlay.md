@@ -23,7 +23,7 @@ The overlay is drawn on a copy of the processed frame. Your clean image is never
 The overlay and automatic calibration only run when it makes sense to look at the sky:
 
 - **The sun must be below civil twilight** (6 degrees below the horizon). This check needs your latitude and longitude; without them it is skipped.
-- **The roof must not be reported closed.** If [ML Models](ML-Models) are enabled and the roof classifier reports **Closed**, the overlay and calibration pause. Rigs with no roof (for example an open-air all-sky camera) can turn off **Skip Sky Features When Roof Closed** in the ML settings so a misread "Closed" does not suppress them.
+- **The roof must not be reported closed.** If [ML Models](ML-Models) are enabled and the roof classifier reports **Closed** on two frames in a row, the overlay and calibration pause. A single Closed frame is ignored (from the next release; in 3.7.7 and earlier one frame was enough, which could blank the overlay for a frame when the exposure changed). The overlay follows the roof reading in Directory Watch mode as well; in 3.7.7 and earlier it ignored the roof there. Rigs with no roof (for example an open-air all-sky camera) can turn off **Skip Sky Features When Roof Closed** in the ML settings so a misread "Closed" does not suppress them.
 - **A calibration must exist.**
 
 If you shrink images with **Resize**, the calibration is scaled to match automatically. If you crop your outputs with **Output Framing** on the [Image Processing](Image-Processing#output-framing) tab (new in the next release), the calibration is scaled and then shifted to match the cropped image, so a burned-in overlay still lines up with the sky; calibration itself keeps using the full frame. If the image has been cropped to a different shape some other way, the overlay is skipped rather than drawn in the wrong place.
@@ -292,11 +292,24 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 
 Labels hold steady between frames instead of blinking on and off or jumping around, which matters most in timelapses:
 
-- **Open sky** is combined over the last 3 frames, so a single noisy frame does not hide or reveal labels. If a frame has too few detected stars, the last good result is kept for up to 3 frames.
+- **Open sky** is combined over recent frames, so a noisy frame does not hide or reveal labels. If a frame has too few detected stars, the last good result is kept.
 - **Max objects visible** is sticky: an object already on screen keeps its place until a newcomer is clearly brighter.
 - **Label position** is remembered: each label tries the same side of its object as in the previous frame first.
 
 In version 3.7.6 and earlier, each frame is labelled from scratch, so labels near the **Max objects visible** limit or at the edge of an obstruction can flicker between frames.
+
+#### When the exposure changes
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+In version 3.7.7, open sky is combined over only 3 frames, and "open sky" is judged against fixed brightness levels. That absorbs one odd frame but not an exposure change, which lasts many: when auto-exposure steps, dusk fades, or you change the exposure yourself, the area treated as open sky shrinks, and the constellation lines and labels over the lost area disappear until the frames settle — or for good, if the frames stay darker.
+
+From the next release:
+
+- Open sky is combined over the last **15 frames** (about 7 minutes at 30-second exposures), and the last good result is kept for up to 15 frames when too few stars are detected. Labels ride through an exposure change instead of following it. A lasting change, such as a telescope parked across the view, is still picked up, after about 8 frames.
+- Open sky is judged against **each frame's own sky brightness**, so a darker or brighter frame of the same sky gives the same result.
+
+On a recorded sequence with a simulated exposure ramp, this cut label changes from 62 to 18 over 40 frames, most of the remainder being real changes in the scene.
 
 ---
 
