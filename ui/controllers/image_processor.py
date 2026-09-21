@@ -363,7 +363,11 @@ class ImageProcessorWorker(QThread):
                         if self._main_window:
                             self._main_window.last_ml_results = ml_results
 
-                        app_logger.debug(f"ML predictions: roof={ml_tokens.get('ROOF_STATUS')}, sky={ml_tokens.get('SKY_CONDITION')}")
+                        app_logger.debug(
+                            f"ML predictions: roof={ml_tokens.get('ROOF_STATUS')}, "
+                            f"sky={ml_tokens.get('SKY_CONDITION')}, "
+                            f"static={ml_results.get('static_ratio')}"
+                            f"{' (noise only)' if ml_results.get('frame_is_static') else ''}")
                 except Exception as e:
                     app_logger.debug(f"ML prediction skipped: {e}")
 

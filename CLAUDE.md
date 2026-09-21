@@ -58,6 +58,7 @@ PFRSentinel/
 │   ├── capture_schedule_window.py # Capture schedule that follows the timelapse window ± margin
 │   ├── ffmpeg_utils.py         # Shared ffmpeg detection
 │   ├── diagnostics_bundle.py   # Support ZIP: logs + redacted config + frames (pure)
+│   ├── frame_static_score.py   # Is a frame scene or only sensor noise? Reporting only — gates nothing
 │   ├── raw_frame_export.py     # Cached frame → Bayer FITS + unprocessed PNG + JSON
 │   ├── allsky/                 # All-sky fisheye calibration + overlay
 │   ├── meteor/                 # Meteor detection — see METEOR_DETECTION_PLAN.md
@@ -322,6 +323,9 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_update_dialog_platform.py` | 3 | `UpdateDialog` — download hidden and GitHub made primary off Windows; installer launch is a no-op there (offscreen Qt) |
 | `test_special_themes.py` | 17 | `special_themes` — pack patches accent + neutrals and re-derives aliases, switching off leaves nothing behind, status colours untouchable, neutrals no brighter than Sand, every pack glyph exists in the bundled MDI font, font bundled in the spec; nav rail swaps/restores icons, every sprite state paints in both painter sets, `AppearanceCard` chip/swatch signals and chip restyle on load, `AppBar.show_sending` hold cancelled by a newer frame (offscreen Qt) |
 | `test_scroll_safe_spinbox.py` | 10 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it, a click on the child line edit does (offscreen Qt) |
+| `test_frame_static_score.py` | 18 | `frame_static_score` — pure noise scores 0.25 at any brightness / bit depth, dim scenes stay scenes, gradients and LEDs don't fool it, unmeasurable input is `None`, full-res plane never copied |
+| `test_ml_service.py` | 8 | `ml_service` — `median_lum` bit-depth normalisation, per-frame memory ceiling (`requires_ml_models`), static score reported in results, never changes the roof reading, logged on transition only |
+| `test_status_strip_static.py` | 6 | `StatusStrip` — static frame keeps the roof reading and marks it unreliable, Sky reads "Too much static", clears on the next good frame, warning glyph exists (offscreen Qt) |
 | `test_image_processing_panel_stretch.py` | 4 | `ImageProcessingPanel` Auto Stretch rows — Target Median slider reaches the engine floor, Dark Threshold enabled only with Dark Scene Color Fix (offscreen Qt) |
 | `test_allsky_guided_hints.py` | 9 | `guided_hints` — three anchors place the other bright stars within a click-snap, capped to the brightest, mis-identified or rotated anchors withhold the hints with a reason, a frame with almost no detections never accuses the anchors |
 | `test_allsky_guided_residuals.py` | 3 | `guided_calibration` — per-anchor residuals on the solved model (renamed / excluded) and on the `CalibrationError` of a failed solve |

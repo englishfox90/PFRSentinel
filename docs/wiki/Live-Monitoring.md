@@ -69,7 +69,7 @@ The band below the app bar shows live observatory status. Tiles that have nothin
 |------|-------|
 | **WEB** | **On** when the web server is running, **Starting…** when it is enabled but not yet running, **Off** when disabled. See [Web Server](Web-Server). |
 | **DISCORD** | **On** or **Off**, following the Discord setting on the [Output](Output-Settings) tab. |
-| **ROOF** | **Open** (green) or **Closed** (red) from the roof classifier. Needs ML models enabled; see [ML Models](ML-Models). |
+| **ROOF** | **Open** (green) or **Closed** (red) from the roof classifier. Turns amber and reads **Open · unreliable** or **Closed · unreliable** when the frame is only sensor noise, with **Too much static** on the Sky tile (new in the next release; see [ML Models](ML-Models#too-much-static)). Needs ML models enabled; see [ML Models](ML-Models). |
 | **SKY** | Sky condition from the sky classifier: **Clear** (green), **Partly Cloudy** (amber), or other conditions such as **Overcast** (red). Shows **Roof closed** while the roof is closed, because the camera can't see the sky. Needs ML models enabled. |
 | **WEATHER** | Temperature, condition, and cloud cover from OpenWeatherMap, e.g. "12.0°C · Clear · 20%". Needs an API key and a location or coordinates in [Settings](Settings). The tile keeps updating while capture is stopped, and dims if the weather data is more than 30 minutes old (for example, an invalid API key or no internet). |
 | **SEEING** | Star count and FWHM from star detection, e.g. "412 stars · FWHM 2.3". Shows **—** until the first reading arrives, and **Roof closed** while the roof is closed. |
