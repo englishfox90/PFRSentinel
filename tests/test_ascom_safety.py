@@ -395,3 +395,44 @@ def test_heartbeat_restamps_steady_state():
     fsm.update(_OPEN, cfg)         # past heartbeat -> re-stamp
     assert len(w.calls) == n_after_confirm + 1
     assert _is_safe_write(w.calls[-1])  # re-stamped the confirmed SAFE state
+
+
+# --- log wording: a confident Closed is not "uncertain" (issue #86) ----------
+
+def test_confident_closed_is_logged_as_closed_not_uncertain():
+    line = ascom_safety.unsafe_reason('Closed', 0.989, 0.7)
+    assert 'roof closed' in line
+    assert 'uncertain' not in line
+    assert line.endswith('-> writing UNSAFE')
+
+
+@pytest.mark.parametrize("status, confidence", [
+    ('Open', 0.5),      # Open below min_confidence
+    ('Open', None),     # no confidence
+    ('Closed', 0.5),    # Closed below min_confidence
+    ('Closed', None),
+    ('N/A', None),
+    ('Weird', 0.99),
+])
+def test_other_unsafe_readings_are_logged_as_uncertain(status, confidence):
+    line = ascom_safety.unsafe_reason(status, confidence, 0.7)
+    assert 'uncertain roof reading' in line
+    assert f'status={status}' in line
+    assert line.endswith('-> writing UNSAFE')
+
+
+def test_write_status_logs_closed_wording_and_still_writes_unsafe(tmp_path, monkeypatch):
+    logged = []
+    monkeypatch.setattr(ascom_safety.app_logger, 'debug', logged.append)
+    target = tmp_path / "roof.txt"
+    writer = ASCOMSafetyWriter(_config(target))
+
+    assert writer.write_status({'roof_status': 'Closed', 'roof_confidence': 0.989}) is True
+    assert target.read_text(encoding='utf-8').startswith('Roof Status: CLOSED')
+    assert any('roof closed' in m for m in logged)
+    assert not any('uncertain' in m for m in logged)
+
+    logged.clear()
+    assert writer.write_status({'roof_status': 'Open', 'roof_confidence': 0.4}) is True
+    assert target.read_text(encoding='utf-8').startswith('Roof Status: CLOSED')
+    assert any('uncertain roof reading' in m for m in logged)

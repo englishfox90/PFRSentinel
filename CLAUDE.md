@@ -332,6 +332,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_guided_calibration_wiring.py` | 2 | `_open_guided_calibration` — the real main-window wiring releases the dialog and both prep frames on cancel and on save (a closure over the dialog leaked them) (offscreen Qt) |
 | `test_allsky_guided_dialog.py` | 22 | `GuidedCalibrationDialog` — frame gets the room, stays open through solve / failure with every star kept and the suspect selected, review before save, a refused save can be retried without solving again, suggested names, confirm before discarding (offscreen Qt) |
 | `test_star_pick_canvas.py` | 13 | `StarPickCanvas` — clicks in original image pixels at any zoom, wheel zoom about the cursor, clamped pan, drag never picks, picking can be switched off, view cached at the display pixel ratio (offscreen Qt) |
+| `test_time_context.py` | 22 | `time_context` — `is_astronomical_night` from sun elevation at absolute instants: flips at astronomical dusk/dawn, never night in the afternoon at a western site (the date-clamp bug), same flag from any host zone, high-latitude summer and polar day never raise, no-location clock fallback, per-day sun-times cache, `ui/controllers` shim re-exports |
 | `test_allsky_quality_badge.py` | 11 | `QualityBadge` amber "unconfirmed" / "check alignment" state, panel caution text, controller status line and badge level after a guided save (offscreen Qt) |
 
 Standalone (not in pytest suite):
