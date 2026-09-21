@@ -172,7 +172,7 @@ jobs:
           if (-not (Test-Path $plugin)) { throw "NINA plugin DLL is not in the bundle" }
 
       - name: Upload the app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PFRSentinel-windows-dev-unsigned
           path: dist/PFRSentinel/
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload the installer
         if: env.BUILD_INSTALLER == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PFRSentinel-installer-dev-unsigned
           path: installer/dist/*.exe
