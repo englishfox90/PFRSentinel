@@ -29,7 +29,7 @@ Alongside the image, the model uses:
 
 > **New in the next release** — not available in version 3.7.7 or earlier.
 >
-> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup to benefit.
+> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The models shipped so far were trained before the flag was corrected, so the full benefit arrives with the next retrained models; until then the corrected flag is closer to what they learned than the clock was.
 
 ### Sky Classifier
 

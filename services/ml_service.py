@@ -400,10 +400,10 @@ class MLService:
     def _compute_time_context(self) -> Dict[str, Any]:
         """Time context for the ML features — the same sun-elevation source the
         calibration JSON (training data) uses, so ``is_astronomical_night``
-        means the same thing at inference as in training (issue #86). The
-        clock stand-in this replaces flipped the flag hours off true darkness
-        depending on season and latitude, and that flag is what tips a
-        borderline roof frame."""
+        means the same thing at inference as in the data the next models are
+        trained on (issue #86). The clock stand-in this replaces flipped the
+        flag hours off true darkness depending on season and latitude, and
+        that flag is what tips a borderline roof frame."""
         try:
             return compute_time_context(location=self._configured_location())
         except Exception as e:

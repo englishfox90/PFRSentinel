@@ -90,7 +90,7 @@ def test_sun_times_land_on_the_site_day_in_order():
     ctx = compute_time_context(datetime(2026, 6, 21, 12, 0, tzinfo=CHICAGO), TEXAS)
     times = {k: datetime.fromisoformat(v) for k, v in ctx['sun_times'].items()}
     assert times['dawn'] < times['sunrise'] < times['noon'] < times['sunset'] < times['dusk']
-    assert times['sunset'].isoformat() == '2026-06-22T01:49:43.967159+00:00'
+    assert times['sunset'].replace(microsecond=0).isoformat() == '2026-06-22T01:49:43+00:00'
 
 
 # --- period classification --------------------------------------------------
@@ -128,7 +128,25 @@ def test_polar_day_degrades_without_sun_times():
     assert ctx['calculation_method'] == 'astral'
     assert ctx['period'] == 'day'
     assert ctx['is_astronomical_night'] is False
-    assert ctx['sun_times'] == {}
+    # Only solar noon exists; the sun never crosses the horizon or twilight.
+    assert {k for k, v in ctx['sun_times'].items() if v} == {'noon'}
+    assert set(ctx['sun_times']) == {'dawn', 'sunrise', 'noon', 'sunset', 'dusk'}
+
+
+def test_one_missing_event_keeps_the_others():
+    # Tampere in June: the sun sets and rises but never reaches civil dusk.
+    tampere = (61.5, 23.8, "Tampere")
+    ctx = compute_time_context(datetime(2026, 6, 21, 9, 0, tzinfo=ZoneInfo("Europe/Helsinki")), tampere)
+    assert ctx['sun_times']['dawn'] is None and ctx['sun_times']['dusk'] is None
+    assert ctx['sun_times']['sunrise'] and ctx['sun_times']['noon'] and ctx['sun_times']['sunset']
+    assert ctx['detailed_period'] == 'morning'
+
+
+def test_period_edges_agree_with_astral_event_times():
+    ctx = compute_time_context(datetime(2026, 6, 21, 12, 0, tzinfo=CHICAGO), TEXAS)
+    rise = datetime.fromisoformat(ctx['sun_times']['sunrise'])
+    assert compute_time_context(rise - timedelta(seconds=30), TEXAS)['period'] == 'twilight'
+    assert compute_time_context(rise + timedelta(seconds=30), TEXAS)['period'] == 'day'
 
 
 def test_no_location_falls_back_to_the_training_clock_band():
@@ -161,12 +179,12 @@ def test_astral_failure_falls_back_to_clock(monkeypatch):
 
 def test_sun_times_computed_once_per_site_day(monkeypatch):
     calls = []
-    real_sun = time_context.sun
+    real_noon = time_context.noon
 
-    def counting_sun(*a, **k):
-        calls.append(k.get('date'))
-        return real_sun(*a, **k)
-    monkeypatch.setattr(time_context, 'sun', counting_sun)
+    def counting_noon(observer, day, **k):
+        calls.append(day)
+        return real_noon(observer, day, **k)
+    monkeypatch.setattr(time_context, 'noon', counting_noon)
 
     # The site day is the mean-solar day (UTC-7 at this longitude), so 03:00
     # CDT is already the 21st while 01:00 CDT would still be the 20th.

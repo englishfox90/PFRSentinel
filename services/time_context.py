@@ -4,8 +4,9 @@ position at the configured observer location.
 The single source of truth for the ``is_astronomical_night`` feature, used
 both when building calibration JSON (training data, via
 ``ui/controllers/dev_mode_utils.py``) and at inference time (``MLService``), so
-the roof and sky models are fed the same flag they were trained on. Lives in
-services/ so services can use it without importing up into ui/controllers.
+the roof and sky models are fed the same flag their training data carries.
+Lives in services/ so services can use it without importing up into
+ui/controllers.
 
 Night is decided from the sun's elevation at the instant asked about, not from
 astral's dawn/dusk event times. The event-based version this replaces went
@@ -17,6 +18,14 @@ took the setting branch (and raised at high latitude). The upshot was a flag
 that read "night" for most of the afternoon or all day, whatever the host's
 timezone. Elevation has no calendar date to clamp and no direction to get
 wrong, and stays well-defined at latitudes where the sun never reaches -18°.
+
+That history matters for the models shipped in ``ml/models``: the flag in
+their training JSON was constant, so they never learned a night/day
+distinction from it. Inference now feeds them the true flag, which is closer
+to their training than the 20:00–06:00 clock was, but training and inference
+only genuinely agree once the calibration JSON is re-labelled
+(``scripts/dev/allsky/backfill_calibration.py --force-time``) and the models
+retrained on it.
 """
 from datetime import datetime, timedelta, timezone
 import threading
@@ -24,7 +33,7 @@ from typing import Optional, Tuple
 
 try:
     from astral import Observer
-    from astral.sun import sun, elevation
+    from astral.sun import dawn, dusk, elevation, noon, sunrise, sunset
     ASTRAL_AVAILABLE = True
 except ImportError:
     ASTRAL_AVAILABLE = False
@@ -32,9 +41,10 @@ except ImportError:
 from services.logger import app_logger
 from services.moon import get_configured_location
 
-# Sun elevation thresholds, degrees. Sunrise/sunset is the apparent upper limb
-# at the horizon, -0.833° once refraction is included; civil twilight ends at
-# -6°; astronomical night (no sky glow) starts at -18°.
+# Geometric sun elevation thresholds, degrees, compared against the
+# unrefracted elevation so they mean the same thing as astral's event times:
+# sunrise/sunset is the centre at -0.833° (refraction plus the upper limb),
+# civil twilight ends at -6°, astronomical night (no sky glow) starts at -18°.
 HORIZON_ELEVATION = -0.833
 CIVIL_TWILIGHT_ELEVATION = -6.0
 ASTRONOMICAL_NIGHT_ELEVATION = -18.0
@@ -80,8 +90,8 @@ def _as_aware(now: datetime) -> datetime:
 def _astral_time_context(now: datetime, lat: float, lon: float,
                          location_name: str) -> dict:
     observer = Observer(latitude=lat, longitude=lon)
-    elev = elevation(observer, now)
-    rising = elevation(observer, now + timedelta(minutes=10)) > elev
+    elev = elevation(observer, now, with_refraction=False)
+    rising = elevation(observer, now + timedelta(minutes=10), with_refraction=False) > elev
     sun_times = _sun_times_for_day(observer, now, lon)
 
     period = _period_from_elevation(elev)
@@ -146,13 +156,18 @@ def _sun_times_for_day(observer, now: datetime, lon: float) -> dict:
         hit = _SUN_TIMES_CACHE.get(key)
     if hit is not None:
         return hit
-    try:
-        times = dict(sun(observer, date=day, tzinfo=solar_zone))
-    except ValueError as e:
-        # Polar day/night: some event never happens. The classification
-        # above only needs noon and sunset, and degrades without them.
-        app_logger.debug(f"Time context: sun times unavailable for {day}: {e}")
-        times = {}
+    times = {}
+    for name, event in (('dawn', dawn), ('sunrise', sunrise), ('noon', noon),
+                        ('sunset', sunset), ('dusk', dusk)):
+        try:
+            times[name] = event(observer, day, tzinfo=solar_zone)
+        except ValueError as e:
+            times[name] = None
+            # That event never happens on this day (polar day/night, or a
+            # summer night at ~60° that never gets as dark as civil dusk).
+            # Each is independent; the classification above only needs noon
+            # and sunset, and degrades without them.
+            app_logger.debug(f"Time context: no {name} for {day}: {e}")
     with _SUN_TIMES_LOCK:
         if len(_SUN_TIMES_CACHE) >= _SUN_TIMES_MAX_ENTRIES:
             _SUN_TIMES_CACHE.clear()
