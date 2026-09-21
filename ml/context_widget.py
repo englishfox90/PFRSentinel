@@ -10,13 +10,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
-from .review_tab import to_bool
+from .label_suggestion import to_bool
 
 
 class ContextPanel(QWidget):
     """Read-only column: context, ML predictions, AI pre-label, classified mode."""
 
-    ai_requested = Signal()  # user clicked "AI Suggest" for the current frame
+    ai_requested = Signal()      # user clicked "AI Suggest" for the current frame
+    ai_all_requested = Signal()  # user asked to pre-label every unlabeled frame
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,6 +54,13 @@ class ContextPanel(QWidget):
         self.ai_button.setStyleSheet("background: #0EA5E9; color: white; font-weight: bold; padding: 6px;")
         self.ai_button.clicked.connect(self.ai_requested)
         ai_layout.addWidget(self.ai_button)
+        self.ai_all_button = QPushButton("🌐 AI pre-label all unlabeled")
+        self.ai_all_button.setToolTip(
+            "Send every unlabeled frame that has no AI suggestion yet to OpenRouter, "
+            "several at a time. You can keep labeling while it runs.")
+        self.ai_all_button.setStyleSheet("background: #075985; color: white; padding: 6px;")
+        self.ai_all_button.clicked.connect(self.ai_all_requested)
+        ai_layout.addWidget(self.ai_all_button)
         layout.addWidget(ai_group, 3)
 
         mode_group = QGroupBox("Classified Mode")
@@ -70,6 +78,12 @@ class ContextPanel(QWidget):
         self.ai_button.setText("⏳ Running AI…" if busy else "🌐 AI Suggest (this frame)")
         if busy:
             self.ai_text.setText("⏳ Calling OpenRouter…")
+
+    def set_ai_all_state(self, pending: int, progress: str = ""):
+        """pending = unlabeled frames still without a suggestion; progress is set while running."""
+        self.ai_all_button.setEnabled(not progress and pending > 0)
+        self.ai_all_button.setText(
+            f"⏳ {progress}" if progress else f"🌐 AI pre-label all unlabeled ({pending})")
 
     def populate(self, cal: dict):
         """Refresh context, AI pre-label, and mode from calibration data."""
@@ -123,7 +137,7 @@ class ContextPanel(QWidget):
     def _ai_text(self, cal: dict) -> str:
         ai = cal.get('ai_suggestion')
         if not ai:
-            return "No AI pre-label yet.\n\nRun:\n  python ml/ai_prelabel.py"
+            return "No AI pre-label yet.\n\nUse the buttons below."
 
         hints = ai.get('hints_used')
         mode = "image-only" if hints is False else ("hinted" if hints else "legacy/hinted")
