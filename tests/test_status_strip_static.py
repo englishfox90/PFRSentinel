@@ -70,6 +70,59 @@ def test_warning_clears_on_the_next_good_frame(strip):
     assert strip.seeing_tile.value.text() == "41 stars"
 
 
+def _no_verdict_frame(static=False):
+    # What ml_service reports when the roof classifier is off or its
+    # prediction threw: no roof verdict, and the sky is never judged.
+    return {'_ML_RESULTS': {'roof_status': 'N/A', 'sky_condition': 'N/A',
+                            'frame_is_static': static, 'static_ratio': 0.9}}
+
+
+def test_warning_clears_when_the_next_good_frame_has_no_roof_verdict(strip):
+    strip.update_from_metadata(_frame('Open', static=True))
+    strip.update_from_metadata(_no_verdict_frame())
+    assert strip.roof_tile.value.text() == "—"
+    assert strip.roof_tile._tone == 'muted'
+    assert strip.roof_tile._icon_name == 'home-roof'
+    assert strip.sky_tile.value.text() == "—"
+    assert strip.sky_tile._icon_name == 'weather-partly-cloudy'
+    assert strip.roof_tile.toolTip() == ""
+    assert strip.sky_tile.toolTip() == ""
+
+
+def test_warning_clears_when_the_sky_classifier_is_off(strip):
+    # Roof back with a real reading, but sky stays N/A because the sky model
+    # is disabled: the Sky tile must not keep saying "Too much static".
+    strip.update_from_metadata(_frame('Open', static=True))
+    strip.update_from_metadata(_frame('Open', static=False, sky='N/A'))
+    assert strip.roof_tile.value.text() == "Open"
+    assert strip.roof_tile._tone == 'ok'
+    assert strip.sky_tile.value.text() == "—"
+    assert strip.sky_tile._tone == 'muted'
+
+
+def test_warning_clears_on_a_frame_with_no_ml_results_at_all(strip):
+    strip.update_from_metadata(_frame('Closed', static=True))
+    strip.update_from_metadata({'STAR_COUNT': 'N/A'})
+    assert strip.roof_tile.value.text() == "—"
+    assert strip.sky_tile.value.text() == "—"
+
+
+def test_a_frame_without_a_verdict_keeps_an_earlier_good_reading(strip):
+    # The reset is for leaving the static state only. Between good frames a
+    # no-verdict frame still leaves the last reading up, as it always has.
+    strip.update_from_metadata(_frame('Open', static=False))
+    strip.update_from_metadata(_no_verdict_frame())
+    assert strip.roof_tile.value.text() == "Open"
+    assert strip.sky_tile.value.text() == "Clear"
+
+    strip.update_from_metadata(_frame('Open', static=True))
+    strip.update_from_metadata(_no_verdict_frame())
+    strip.update_from_metadata(_frame('Open', static=False))
+    strip.update_from_metadata(_no_verdict_frame())
+    assert strip.roof_tile.value.text() == "Open"
+    assert strip.sky_tile.value.text() == "Clear"
+
+
 def test_results_without_a_static_verdict_behave_as_before(strip):
     strip.update_from_metadata({'_ML_RESULTS': {'roof_status': 'Closed'}})
     assert strip.roof_tile.value.text() == "Closed"

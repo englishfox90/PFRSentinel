@@ -212,6 +212,7 @@ class StatusStrip(QFrame):
         super().__init__(parent)
         self._capture_mode = 'idle'
         self._frame_count = 0
+        self._static_shown = False
         self._build()
 
     def _build(self):
@@ -329,12 +330,23 @@ class StatusStrip(QFrame):
         self.roof_tile.setToolTip(tooltip)
         self.sky_tile.setToolTip(tooltip)
 
+        # The warning is painted over whatever the tiles held, and a tile is
+        # only repainted when a frame carries a verdict for it. A classifier
+        # that is off or that failed gives none, so the first good frame after
+        # a static one must clear the warning itself or it stays up for good.
+        recovering = self._static_shown and not static
+        self._static_shown = static
+
         roof = ml.get('roof_status')
         if roof in ('Open', 'Closed'):
             if static:
                 self.set_roof(f"{roof} · unreliable", 'warn', 'alert-outline')
             else:
                 self.set_roof(roof, 'ok' if roof == 'Open' else 'error')
+        elif recovering:
+            # The flagged reading came from a noise frame, so there is no last
+            # good value to fall back to.
+            self.set_roof("—", 'muted')
 
         if static:
             self.set_sky("Too much static", 'warn', 'alert-outline')
@@ -355,6 +367,8 @@ class StatusStrip(QFrame):
         if sky and sky != 'N/A':
             tone = 'ok' if sky == 'Clear' else ('warn' if sky == 'Partly Cloudy' else 'error')
             self.set_sky(sky, tone)
+        elif recovering:
+            self.set_sky("—", 'muted')
 
         stars = metadata.get('STAR_COUNT')
         if stars not in (None, 'N/A'):
