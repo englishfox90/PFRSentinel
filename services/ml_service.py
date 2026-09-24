@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import numpy as np
 
+from services.frame_static_score import STATIC_RATIO_THRESHOLD, measure_static
 from services.logger import app_logger
 from services.moon import get_configured_location
 from services.time_context import compute_time_context
@@ -67,6 +68,7 @@ class MLService:
         
         # Cache last prediction results for quick access
         self._last_results = {}
+        self._frame_was_static = False
     
     def initialize(self) -> bool:
         """
@@ -224,6 +226,8 @@ class MLService:
             'stars_visible': None,
             'star_density': None,
             'moon_visible': None,
+            'static_ratio': None,
+            'frame_is_static': False,
         }
         
         # Build analysis context from image. This runs first and releases its
@@ -246,7 +250,9 @@ class MLService:
                 gray = to_gray_float32(image_array)
             except Exception as e:
                 app_logger.debug(f"ML Service: grayscale conversion failed: {e}")
-        
+
+        self._report_static(gray, results)
+
         # Roof prediction
         roof_enabled = config.get('roof_classifier', True)
         if roof_enabled and self._roof_classifier is not None:
@@ -299,6 +305,35 @@ class MLService:
         
         return results
     
+    def _report_static(self, plane: np.ndarray, results: Dict[str, Any]) -> None:
+        """Record whether the frame is only sensor noise. REPORTING ONLY: both
+        models still run and nothing downstream (ASCOM file, roof gates) reads
+        these keys — see frame_static_score for why it must stay that way until
+        the score is validated on real frames."""
+        try:
+            score = measure_static(plane)
+        except Exception as e:
+            app_logger.debug(f"ML Service: static score failed: {e}")
+            return
+        if score is None:
+            return
+
+        results['static_ratio'] = round(score.ratio, 3)
+        results['frame_is_static'] = score.is_static
+
+        # INFO on the transition only; the per-frame value rides on the
+        # existing DEBUG prediction line.
+        if score.is_static != self._frame_was_static:
+            self._frame_was_static = score.is_static
+            if score.is_static:
+                app_logger.info(
+                    f"ML Service: frame looks like sensor noise only (static ratio "
+                    f"{score.ratio:.2f} < {STATIC_RATIO_THRESHOLD}) - roof and sky "
+                    f"readings may be unreliable. Reporting only; predictions unchanged.")
+            else:
+                app_logger.info(
+                    f"ML Service: frame has scene structure again (static ratio {score.ratio:.2f})")
+
     def get_last_results(self) -> Dict[str, Any]:
         """Get cached results from last analysis."""
         return self._last_results.copy()

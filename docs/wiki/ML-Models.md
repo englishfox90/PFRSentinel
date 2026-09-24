@@ -91,6 +91,16 @@ While the roof is closed, the three sky tokens show `N/A`. **Star density** is l
 
 The status strip in [Live Monitoring](Live-Monitoring) has **Roof** and **Sky** tiles. Roof shows Open or Closed, and Sky shows the sky condition, each colour-coded. While the roof is closed, the Sky and Seeing tiles show "Roof closed". Both tiles show "Not configured" when ML is off.
 
+#### Too Much Static
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+A frame that is almost entirely sensor noise gives the models nothing to judge. This is typical of a closed roof at night with the exposure at its maximum. On such a frame the roof model can report a low-confidence **Open**, and the sky model a confident **Clear**, when neither is true.
+
+PFR Sentinel measures each frame for this. When a frame is only noise, the Roof tile turns amber and reads **Open · unreliable** or **Closed · unreliable**, the Sky tile reads **Too much static**, and hovering either tile explains why. The log records when it starts and stops.
+
+This is a warning only. The roof reading, the overlay tokens, roof change notifications and the ASCOM safety file all still use whatever the models reported.
+
 ### Skipping Sky Features While the Roof Is Closed
 
 With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. From the next release the roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — no longer blanks the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.

@@ -30,6 +30,11 @@ _TONE_COLORS = {
 
 _ICON_SIZE = QSize(18, 18)
 
+_STATIC_TOOLTIP = (
+    "This frame is almost entirely sensor noise, so there is too little in it "
+    "to judge the roof or the sky. The readings shown may be wrong."
+)
+
 
 class StatusTile(QFrame):
     """Icon + uppercase eyebrow label + value, with a trailing separator."""
@@ -207,6 +212,7 @@ class StatusStrip(QFrame):
         super().__init__(parent)
         self._capture_mode = 'idle'
         self._frame_count = 0
+        self._static_shown = False
         self._build()
 
     def _build(self):
@@ -265,11 +271,11 @@ class StatusStrip(QFrame):
             self.discord_tile.set_value("Off", 'muted', 'fa6b.discord')
 
     # --- Sensor tiles ----------------------------------------------------
-    def set_roof(self, text: str, tone: str = 'primary'):
-        self.roof_tile.set_value(text, tone, 'home-roof')
+    def set_roof(self, text: str, tone: str = 'primary', icon_name: str = 'home-roof'):
+        self.roof_tile.set_value(text, tone, icon_name)
 
-    def set_sky(self, text: str, tone: str = 'primary'):
-        self.sky_tile.set_value(text, tone, 'weather-partly-cloudy')
+    def set_sky(self, text: str, tone: str = 'primary', icon_name: str = 'weather-partly-cloudy'):
+        self.sky_tile.set_value(text, tone, icon_name)
 
     def set_weather(self, text: str, tone: str = 'primary'):
         self.weather_tile.set_value(text, tone, 'thermometer', mono=(tone != 'muted'))
@@ -317,9 +323,36 @@ class StatusStrip(QFrame):
 
         ml = metadata.get('_ML_RESULTS') or {}
 
+        # A noise-only frame still shows the model's roof reading — the static
+        # score is unproven and must not hide an identification — but flags it.
+        static = bool(ml.get('frame_is_static'))
+        tooltip = _STATIC_TOOLTIP if static else ""
+        self.roof_tile.setToolTip(tooltip)
+        self.sky_tile.setToolTip(tooltip)
+
+        # The warning is painted over whatever the tiles held, and a tile is
+        # only repainted when a frame carries a verdict for it. A classifier
+        # that is off or that failed gives none, so the first good frame after
+        # a static one must clear the warning itself or it stays up for good.
+        recovering = self._static_shown and not static
+        self._static_shown = static
+
         roof = ml.get('roof_status')
         if roof in ('Open', 'Closed'):
-            self.set_roof(roof, 'ok' if roof == 'Open' else 'error')
+            if static:
+                self.set_roof(f"{roof} · unreliable", 'warn', 'alert-outline')
+            else:
+                self.set_roof(roof, 'ok' if roof == 'Open' else 'error')
+        elif recovering:
+            # The flagged reading came from a noise frame, so there is no last
+            # good value to fall back to.
+            self.set_roof("—", 'muted')
+
+        if static:
+            self.set_sky("Too much static", 'warn', 'alert-outline')
+            # A star count taken from noise is not a seeing measurement.
+            self.set_seeing("Roof closed" if roof == 'Closed' else "—", 'muted')
+            return
 
         # With the roof closed the pier camera only sees the closed roof, so the
         # frame-derived sky condition and star/seeing values are meaningless —
@@ -334,6 +367,8 @@ class StatusStrip(QFrame):
         if sky and sky != 'N/A':
             tone = 'ok' if sky == 'Clear' else ('warn' if sky == 'Partly Cloudy' else 'error')
             self.set_sky(sky, tone)
+        elif recovering:
+            self.set_sky("—", 'muted')
 
         stars = metadata.get('STAR_COUNT')
         if stars not in (None, 'N/A'):

@@ -58,6 +58,7 @@ PFRSentinel/
 │   ├── capture_schedule_window.py # Capture schedule that follows the timelapse window ± margin
 │   ├── ffmpeg_utils.py         # Shared ffmpeg detection
 │   ├── diagnostics_bundle.py   # Support ZIP: logs + redacted config + frames (pure)
+│   ├── frame_static_score.py   # Is a frame scene or only sensor noise? Reporting only — gates nothing
 │   ├── raw_frame_export.py     # Cached frame → Bayer FITS + unprocessed PNG + JSON
 │   ├── allsky/                 # All-sky fisheye calibration + overlay
 │   ├── meteor/                 # Meteor detection — see METEOR_DETECTION_PLAN.md
@@ -322,6 +323,9 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_update_dialog_platform.py` | 3 | `UpdateDialog` — download hidden and GitHub made primary off Windows; installer launch is a no-op there (offscreen Qt) |
 | `test_special_themes.py` | 17 | `special_themes` — pack patches accent + neutrals and re-derives aliases, switching off leaves nothing behind, status colours untouchable, neutrals no brighter than Sand, every pack glyph exists in the bundled MDI font, font bundled in the spec; nav rail swaps/restores icons, every sprite state paints in both painter sets, `AppearanceCard` chip/swatch signals and chip restyle on load, `AppBar.show_sending` hold cancelled by a newer frame (offscreen Qt) |
 | `test_scroll_safe_spinbox.py` | 10 | `ScrollSafeSpinBox` / `ScrollSafeDoubleSpinBox` — wheel ignored unless the box holds click/Tab focus; page-handed focus never arms it, a click on the child line edit does (offscreen Qt) |
+| `test_frame_static_score.py` | 18 | `frame_static_score` — pure noise scores 0.25 at any brightness / bit depth, dim scenes stay scenes, gradients and LEDs don't fool it, unmeasurable input is `None`, full-res plane never copied |
+| `test_ml_service.py` | 11 | `ml_service` — `median_lum` bit-depth normalisation, per-frame memory ceiling (`requires_ml_models`), static score reported in results, never changes the roof reading, logged on transition only; time context from the shared service with the configured location cached, daytime defaults when it fails |
+| `test_status_strip_static.py` | 10 | `StatusStrip` — static frame keeps the roof reading and marks it unreliable, Sky reads "Too much static", clears on the next good frame even when that frame carries no roof or sky verdict (classifier off, prediction failed, no ML results), a no-verdict frame between good ones still keeps the last reading, warning glyph exists (offscreen Qt) |
 | `test_image_processing_panel_stretch.py` | 4 | `ImageProcessingPanel` Auto Stretch rows — Target Median slider reaches the engine floor, Dark Threshold enabled only with Dark Scene Color Fix (offscreen Qt) |
 | `test_allsky_label_stability.py` | 34 | `label_stability` + renderer — 15-frame sky-mask vote rides out an exposure change yet still adopts a lasting one, vote kept at reduced resolution and matching a recount, sticky top-N, slot memory; sky mask unchanged when the same sky is exposed less, equipment-edge stars still claim less sky |
 | `test_observing_window.py` | 24 | `observing_window` — twilight gate, roof gate and its opt-out, roof must read Closed on two consecutive frames, several callers in one frame count once, a reprocess of the same capture never advances or clears the count, nor does a caller with no roof verdict (Watch mode's overlay render) |
