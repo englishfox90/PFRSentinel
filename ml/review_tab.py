@@ -5,9 +5,6 @@ ML Prediction Review Tab
 Shows all samples with ML predictions for validation review.
 Compares ML predictions vs NINA roof state vs manual labels.
 """
-import json
-from pathlib import Path
-from typing import Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
@@ -17,13 +14,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QBrush
 
-def to_bool(value) -> bool:
-    """Convert various representations to boolean (handles string 'True'/'False')."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.lower() in ('true', '1', 'yes')
-    return bool(value)
+from .calibration_store import load_calibration
+from .label_suggestion import to_bool  # noqa: F401  re-exported for existing callers
+from .worker_lifetime import join_worker, stop_worker
+
 
 class ReviewTab(QWidget):
     """Tab for reviewing ML predictions vs ground truth."""
@@ -34,10 +28,20 @@ class ReviewTab(QWidget):
     def __init__(self, samples: list, parent=None):
         super().__init__(parent)
         self.samples = samples
+        self.all_data = []
         self.filtered_data = []
-        
+        self._dirty = True   # loaded on first show, not at startup
+        self._batch_worker = None
+
         self.setup_ui()
-        self.refresh_data()
+
+    def mark_dirty(self):
+        """A calibration JSON changed; reload next time the tab is shown."""
+        self._dirty = True
+
+    def refresh_if_needed(self):
+        if self._dirty:
+            self.refresh_data()
     
     def setup_ui(self):
         """Setup the review UI."""
@@ -115,8 +119,10 @@ class ReviewTab(QWidget):
         self.table.setHorizontalHeaderLabels([
             "Timestamp", "ML Prediction", "Confidence", "NINA State",
             "ML vs NINA", "Manual Label", "ML vs Label",
-            "AI Pred", "AI vs NINA", "AI vs Label", "Folder", "Go"
+            "AI Pred", "AI vs NINA", "AI vs Label", "Folder", "Open"
         ])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.cellDoubleClicked.connect(self._on_row_activated)
         
         # Table styling
         self.table.setAlternatingRowColors(True)
@@ -155,7 +161,7 @@ class ReviewTab(QWidget):
         # Legend
         legend = QLabel(
             "🟢 OPEN  🔴 CLOSED  ✅ Match  ❌ Mismatch  "
-            "⚠️ No NINA data  📝 Labeled  ⬜ Unlabeled"
+            "⚠️ No NINA data  📝 Labeled  ⬜ Unlabeled   ·   double-click a row to open it"
         )
         legend.setStyleSheet("color: #888; padding: 5px;")
         layout.addWidget(legend)
@@ -169,9 +175,8 @@ class ReviewTab(QWidget):
                 continue
             
             try:
-                with open(sample['calibration'], 'r') as f:
-                    cal = json.load(f)
-            except:
+                cal = load_calibration(sample['calibration'])
+            except (OSError, ValueError):
                 continue
             
             ml = cal.get('ml_prediction')
@@ -189,9 +194,9 @@ class ReviewTab(QWidget):
                 'ai': ai,
                 'lum': sample.get('lum'),
                 'cal_path': sample['calibration'],
-                'cal': cal
             })
-        
+
+        self._dirty = False
         self.apply_filter()
     
     def apply_filter(self):
@@ -285,8 +290,15 @@ class ReviewTab(QWidget):
     
     def update_table(self):
         """Update table with filtered data."""
+        self.table.setUpdatesEnabled(False)
+        try:
+            self._fill_table()
+        finally:
+            self.table.setUpdatesEnabled(True)
+
+    def _fill_table(self):
         self.table.setRowCount(len(self.filtered_data))
-        
+
         for row, item in enumerate(self.filtered_data):
             ml = item['ml_prediction']
             nina = item['nina_state']
@@ -384,12 +396,12 @@ class ReviewTab(QWidget):
             folder_item = QTableWidgetItem(item['folder'])
             self.table.setItem(row, 10, folder_item)
 
-            # Go button
-            go_btn = QPushButton("→")
-            go_btn.setMaximumWidth(40)
-            go_btn.setToolTip("Go to this sample in Labeling tab")
-            go_btn.clicked.connect(lambda checked, idx=item['index']: self.go_to_sample(idx))
-            self.table.setCellWidget(row, 11, go_btn)
+            # A cell widget per row made this table the slowest thing in the tool;
+            # rows open on double-click instead.
+            open_item = QTableWidgetItem("→")
+            open_item.setToolTip("Double-click the row to open it in the Labeling tab")
+            open_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 11, open_item)
     
     def _match_cell(self, applicable, is_match) -> QTableWidgetItem:
         """Build a ✅/❌ cell, or '--' when the comparison doesn't apply."""
@@ -398,6 +410,10 @@ class ReviewTab(QWidget):
         item = QTableWidgetItem("✅" if is_match else "❌")
         item.setForeground(QBrush(QColor("#10b981" if is_match else "#ef4444")))
         return item
+
+    def _on_row_activated(self, row: int, _column: int):
+        if 0 <= row < len(self.filtered_data):
+            self.go_to_sample(self.filtered_data[row]['index'])
 
     def go_to_sample(self, index: int):
         """Emit signal to navigate to sample."""
@@ -427,17 +443,21 @@ class ReviewTab(QWidget):
         if reply != QMessageBox.Yes:
             return
 
-        from ml.ai_worker import AiLabelWorker
+        from .ai_worker import AiLabelWorker
         self.ai_run_btn.setEnabled(False)
         self.refresh_btn.setEnabled(False)
         self.filter_combo.setEnabled(False)
         self.ai_progress.setVisible(True)
         self.ai_progress.setValue(0)
 
+        join_worker(self._batch_worker)   # the previous run's thread, before replacing it
         self._batch_worker = AiLabelWorker(jobs)
         self._batch_worker.progress.connect(self._on_batch_progress)
         self._batch_worker.completed.connect(self._on_batch_done)
         self._batch_worker.start()
+
+    def shutdown(self):
+        stop_worker(self._batch_worker)
 
     def _on_batch_progress(self, done: int, total: int, msg: str):
         self.ai_progress.setValue(int(done / total * 100) if total else 0)

@@ -66,6 +66,8 @@ releases/
 output/
 watch_dir_test/
 test_output/
+# Product video workspace (brag skill) — real rig frames and calibration, never publish
+brag-output*/
 stretch_tuner_out/
 noise_models/
 colorize_out/

@@ -317,16 +317,28 @@ Shows current progress vs targets and recommends priority collection.
 python ml/labeling_tool.py "D:\Pier Camera ML Data"
 ```
 
-**Keyboard shortcuts**:
-- `Space` - Save & Next
-- `A` / `←` - Previous
-- `D` / `→` - Next
-- `S` - Save
+**Keyboard shortcuts** (Labeling tab):
+- `Space` - Save & Next (accepts the pre-filled suggestion as-is)
+- `A` / `←` - Previous, `D` / `→` - Next, `S` - Save, `Del` - Remove frame
+- `R` - toggle roof, `1` / `2` / `3` - Clear / Partly Cloudy / Overcast (sets the cloud flag and opens the roof)
+- `C` - clouds, `T` - stars, `M` - moon
 
 **Features**:
-- Auto-suggests labels from collected context (and from AI pre-labels if present)
+- The image is framed in the colour of its roof tag — green open, red closed — with the tag
+  written above it. Solid frame = saved label, dashed = suggestion or unsaved edit.
+- Pre-fill priority is `ml/label_suggestion.py`: roof from NINA, then AI, then the roof CNN
+  (NINA matched ~4,000 human labels 99.4 %, the AI 94.9 %, both agreeing 99.9 %); sky from the
+  AI, then the sky CNN, then weather; stars/moon from the sky CNN.
+- **⚡ Batch Confirm tab** — unlabeled frames grouped by suggested tag, 24 thumbnails a page.
+  Click the ones that don't match, `Enter` labels the rest, `N` skips the page. By default only
+  frames whose roof sources agree are offered. Labels written here carry
+  `label_source: "batch_confirm"` (the form writes `"manual"`), so they can be audited or excluded.
 - "Skip labeled" checkbox to process only new samples
 - Shows the pier camera luminance frame (all-sky reference removed — models train on lum only)
+
+**Housekeeping folders**: any folder starting with `_` (`_removed`, `_backup_scrub_*`, …) is
+ignored by the tool, the AI pre-labeller and the training scripts (`ml/dataset_files.py`). They hold
+same-named copies of the calibration JSONs; never search the data dir with a bare `rglob`.
 
 ### AI Pre-labeling (optional, speeds up review)
 

@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ml.labeling_io import find_sample_sets
 from ml.ai_labeler import label_lum_frame, build_context_from_cal
+from ml.ai_worker import store_ai_suggestion
 
 
 def _should_process(cal: dict, include_labeled: bool, overwrite: bool) -> bool:
@@ -88,9 +89,7 @@ def main():
         result = label_lum_frame(sample["lum"], context, model=args.model)
         result["suggested_at"] = datetime.now().isoformat()
         result["hints_used"] = bool(use_hints)
-        cal["ai_suggestion"] = result
-        with open(sample["calibration"], "w") as f:
-            json.dump(cal, f, indent=2)
+        store_ai_suggestion(sample["calibration"], result)
         return result
 
     done = failed = 0

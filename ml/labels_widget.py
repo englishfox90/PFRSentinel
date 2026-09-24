@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +9,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from .review_tab import to_bool
+from .calibration_store import update_calibration
+from .label_suggestion import to_bool, suggest_labels, describe_sources, CLOUDY
 
 
 class LabelsWidget(QWidget):
@@ -25,6 +25,7 @@ class LabelsWidget(QWidget):
     save_next_requested = Signal()
     remove_requested = Signal()
     skip_changed = Signal()
+    labels_changed = Signal()   # any form edit or reload — drives the image tag frame
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,7 +104,7 @@ class LabelsWidget(QWidget):
         roof_layout = QVBoxLayout(roof_frame)
         roof_layout.addWidget(QLabel("ROOF STATE (from pier camera view):"))
         roof_row = QHBoxLayout()
-        self.roof_open = QCheckBox("Roof is OPEN (sky visible)")
+        self.roof_open = QCheckBox("Roof is OPEN (sky visible)   [R]")
         self.roof_open.setStyleSheet("font-weight: bold; font-size: 14px;")
         roof_row.addWidget(self.roof_open)
         roof_row.addStretch()
@@ -115,13 +116,13 @@ class LabelsWidget(QWidget):
         sky_layout = QVBoxLayout(sky_frame)
         sky_layout.addWidget(QLabel("SKY CONDITIONS (cloud cover from lum frame, applies when roof open):"))
         sky_row = QHBoxLayout()
-        sky_row.addWidget(QLabel("Overall sky:"))
+        sky_row.addWidget(QLabel("Overall sky  [1 Clear · 2 Partly · 3 Overcast]:"))
         self.sky_condition = QComboBox()
         self.sky_condition.addItems(["", "Clear", "Partly Cloudy", "Overcast"])
         sky_row.addWidget(self.sky_condition)
         sky_row.addStretch()
         sky_layout.addLayout(sky_row)
-        self.clouds_visible = QCheckBox("Clouds visible")
+        self.clouds_visible = QCheckBox("Clouds visible   [C]")
         sky_layout.addWidget(self.clouds_visible)
         labels_layout.addWidget(sky_frame)
 
@@ -129,7 +130,7 @@ class LabelsWidget(QWidget):
         celestial_frame.setStyleSheet("background: #1e293b; border-radius: 5px; padding: 8px;")
         celestial_layout = QVBoxLayout(celestial_frame)
         celestial_layout.addWidget(QLabel("CELESTIAL OBJECTS:"))
-        self.stars_visible = QCheckBox("Stars visible")
+        self.stars_visible = QCheckBox("Stars visible   [T]")
         celestial_layout.addWidget(self.stars_visible)
         star_row = QHBoxLayout()
         star_row.addWidget(QLabel("Star density (0=none, 0.5=moderate, 1=milky way):"))
@@ -140,7 +141,7 @@ class LabelsWidget(QWidget):
         star_row.addWidget(self.star_density)
         star_row.addStretch()
         celestial_layout.addLayout(star_row)
-        self.moon_visible = QCheckBox("Moon visible")
+        self.moon_visible = QCheckBox("Moon visible   [M]")
         celestial_layout.addWidget(self.moon_visible)
         labels_layout.addWidget(celestial_frame)
 
@@ -218,30 +219,48 @@ class LabelsWidget(QWidget):
         if raw:
             self.jump_date_requested.emit(raw)
 
-    def update_unlabeled_count(self, samples: list):
-        total = len(samples)
-        unlabeled = sum(1 for s in samples if not self.is_sample_labeled(s))
-        self.unlabeled_count.setText(f"({total - unlabeled}/{total} labeled)")
+    def update_unlabeled_count(self, labeled: int, total: int):
+        self.unlabeled_count.setText(f"({labeled}/{total} labeled)")
 
-    def is_sample_labeled(self, sample: dict) -> bool:
-        if 'calibration' not in sample:
-            return False
-        try:
-            with open(sample['calibration'], 'r') as f:
-                cal = json.load(f)
-            return bool(cal.get('labels', {}).get('labeled_at'))
-        except Exception:
-            return False
+    # ── Keyboard helpers ──────────────────────────────────────────────────────
+
+    def toggle_roof(self):
+        self.roof_open.toggle()
+
+    def toggle_clouds(self):
+        self.clouds_visible.toggle()
+
+    def toggle_stars(self):
+        self.stars_visible.toggle()
+
+    def toggle_moon(self):
+        self.moon_visible.toggle()
+
+    def set_sky(self, condition: str):
+        """Pick a sky condition; cloud flag follows it, and a sky call implies an open roof."""
+        idx = self.sky_condition.findText(condition)
+        if idx < 0:
+            return
+        self.roof_open.setChecked(True)
+        self.sky_condition.setCurrentIndex(idx)
+        self.clouds_visible.setChecked(condition in CLOUDY)
+
+    def current_tag(self) -> tuple:
+        """(roof_open, sky_condition) exactly as the form would save them now."""
+        roof = self.roof_open.isChecked()
+        return roof, (self.sky_condition.currentText() if roof else "")
 
     # ── Display setters ───────────────────────────────────────────────────────
 
     def mark_unsaved(self):
         self.unsaved_changes = True
         self.update_status()
+        self.labels_changed.emit()
 
     def mark_saved(self):
         self.unsaved_changes = False
         self.update_status()
+        self.labels_changed.emit()
 
     @property
     def skip_labeled_checked(self) -> bool:
@@ -259,12 +278,6 @@ class LabelsWidget(QWidget):
 
     def populate_fields(self, cal: dict, roof_pred, sky_pred):
         """Populate the editable form from calibration data and ML predictions."""
-        tc = cal.get('time_context', {})
-        rs = cal.get('roof_state', {})
-        wc = cal.get('weather_context', {})
-        mc = cal.get('moon_context', {})
-        ca = cal.get('corner_analysis', {})
-
         labels = cal.get('labels', {})
         has_labels = bool(labels.get('labeled_at'))
 
@@ -289,69 +302,24 @@ class LabelsWidget(QWidget):
 
             self.notes_edit.setText(labels.get('notes', '') or '')
         else:
-            ml_prefilled = False
-
-            if roof_pred is not None:
-                self.roof_open.setChecked(bool(roof_pred.roof_open))
-                ml_prefilled = True
-            else:
-                if rs.get('available') and rs.get('source') == 'nina_api':
-                    self.roof_open.setChecked(to_bool(rs.get('roof_open', False)))
-                else:
-                    ratio = ca.get('corner_to_center_ratio', 1.0)
-                    self.roof_open.setChecked(ratio < 0.95)
-
-            if sky_pred is not None:
-                idx = self.sky_condition.findText(sky_pred.sky_condition)
-                self.sky_condition.setCurrentIndex(idx if idx >= 0 else 0)
-                cloudy_conditions = ['Partly Cloudy', 'Overcast']
-                self.clouds_visible.setChecked(sky_pred.sky_condition in cloudy_conditions)
-                self.stars_visible.setChecked(bool(sky_pred.stars_visible))
-                self.star_density.setValue(sky_pred.star_density if sky_pred.stars_visible else 0)
-                self.moon_visible.setChecked(bool(sky_pred.moon_visible))
-                ml_prefilled = True
-            else:
-                if wc.get('available'):
-                    cloud_pct = wc.get('cloud_coverage_pct', 0)
-                    self.clouds_visible.setChecked(cloud_pct > 25)
-                    if cloud_pct <= 25:
-                        sky_cond = "Clear"
-                    elif cloud_pct <= 75:
-                        sky_cond = "Partly Cloudy"
-                    else:
-                        sky_cond = "Overcast"
-                    idx = self.sky_condition.findText(sky_cond)
-                    self.sky_condition.setCurrentIndex(idx if idx >= 0 else 0)
-                else:
-                    self.clouds_visible.setChecked(False)
-                    self.sky_condition.setCurrentIndex(0)
-
-                self.moon_visible.setChecked(bool(mc.get('moon_is_up')) if mc.get('available') else False)
-
-                is_night = tc.get('is_astronomical_night', False)
-                is_clear = wc.get('is_clear', False) if wc.get('available') else True
-                stars_likely = is_night and self.roof_open.isChecked() and is_clear
-                self.stars_visible.setChecked(stars_likely)
-                self.star_density.setValue(0.5 if stars_likely else 0)
-
+            sug = suggest_labels(cal, roof_pred, sky_pred)
+            self.roof_open.setChecked(sug['roof_open'])
+            idx = self.sky_condition.findText(sug['sky_condition'])
+            self.sky_condition.setCurrentIndex(idx if idx >= 0 else 0)
+            self.clouds_visible.setChecked(sug['clouds_visible'])
+            self.stars_visible.setChecked(sug['stars_visible'])
+            self.star_density.setValue(sug['star_density'])
+            self.moon_visible.setChecked(sug['moon_visible'])
             self.notes_edit.setText('')
 
-            ai = cal.get('ai_suggestion')
-            if ai:
-                # AI judges only our two priorities (roof + clouds); stars/moon/
-                # density keep whatever the CNN/heuristic above already set.
-                self.roof_open.setChecked(bool(ai.get('roof_open', False)))
-                idx = self.sky_condition.findText(ai.get('sky_condition', ''))
-                self.sky_condition.setCurrentIndex(idx if idx >= 0 else 0)
-                self.clouds_visible.setChecked(bool(ai.get('clouds_visible', False)))
-                conf = ai.get('roof_confidence', 0) or 0
-                self.label_state.setText(f"🌐 AI-suggested · roof {conf:.0%} (review & save)")
-                self.label_state.setStyleSheet("color: #0EA5E9; font-weight: bold;")
-            elif ml_prefilled:
-                self.label_state.setText("🤖 ML-suggested (review & save)")
-                self.label_state.setStyleSheet("color: #8b5cf6; font-weight: bold;")
+            if sug['agreed']:
+                self.label_state.setText(f"✓ Sources agree — {describe_sources(sug)}")
+                self.label_state.setStyleSheet("color: #10b981; font-weight: bold;")
+            elif len(set(sug['roof_votes'].values())) > 1:
+                self.label_state.setText(f"⚠️ Sources DISAGREE — {describe_sources(sug)}")
+                self.label_state.setStyleSheet("color: #ef4444; font-weight: bold;")
             else:
-                self.label_state.setText("⚡ API-suggested (review & save)")
+                self.label_state.setText(f"Suggested — {describe_sources(sug)}")
                 self.label_state.setStyleSheet("color: #f59e0b; font-weight: bold;")
 
         for widget in [self.roof_open, self.stars_visible, self.moon_visible,
@@ -360,10 +328,11 @@ class LabelsWidget(QWidget):
             widget.blockSignals(False)
 
     def save_labels(self, current_cal: dict, calibration_path: Path) -> bool:
-        """Write form values into current_cal and save to disk. Returns True on success."""
-        if not current_cal:
-            return False
+        """Write form values into current_cal and save to disk. Returns True on success.
 
+        An unreadable JSON is the caller's case to refuse (and explain); an empty
+        one is a legitimate frame that simply has no context yet.
+        """
         if 'labels' not in current_cal:
             current_cal['labels'] = {}
 
@@ -388,12 +357,20 @@ class LabelsWidget(QWidget):
         notes = self.notes_edit.text().strip()
         if notes:
             labels['notes'] = notes
+        else:
+            labels.pop('notes', None)
 
         labels['labeled_at'] = datetime.now().isoformat()
+        labels['label_source'] = 'manual'
+
+        def write_labels(on_disk):
+            # Only the labels block is ours: the background AI pre-labeller may have
+            # added an ai_suggestion to this file since the frame was loaded.
+            on_disk.update({k: v for k, v in current_cal.items() if k not in on_disk})
+            on_disk['labels'] = labels
 
         try:
-            with open(calibration_path, 'w') as f:
-                json.dump(current_cal, f, indent=2)
+            current_cal.update(update_calibration(calibration_path, write_labels, missing_ok=True))
         except OSError:
             return False
 

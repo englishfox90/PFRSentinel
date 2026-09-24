@@ -36,8 +36,10 @@ except ImportError:
 
 try:
     from ml.image_preprocess import resize_for_model
+    from ml.dataset_files import iter_calibration_files
 except ImportError:  # run as a script: ml/ is on path, not the project root
     from image_preprocess import resize_for_model
+    from dataset_files import iter_calibration_files
 
 try:
     from astropy.io import fits
@@ -256,7 +258,7 @@ def load_dataset(data_dir: Path) -> list:
     samples = []
     
     # Find all calibration files
-    for cal_file in data_dir.rglob("calibration_*.json"):
+    for cal_file in iter_calibration_files(data_dir):
         try:
             with open(cal_file, 'r') as f:
                 cal_data = json.load(f)
