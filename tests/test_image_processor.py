@@ -483,3 +483,30 @@ def test_worker_reuses_one_overlay_image_cache_across_frames(worker, tmp_path):
     assert len(seen) == 2
     assert seen[0] is not None and seen[0] is seen[1]
     assert seen[0] is worker._overlay_image_cache
+
+
+def test_reprocess_marks_the_capture_so_per_capture_state_is_not_advanced(worker, tmp_path, monkeypatch):
+    """The roof gate counts consecutive Closed frames. A reprocess re-runs the
+    same capture from fresh metadata, so the processor has to say so — or one
+    misread frame confirms itself the moment a setting is nudged."""
+    from services import observing_window
+    from services.observing_window import SAME_CAPTURE_KEY
+
+    worker._main_window = None
+    cfg = _base_config(tmp_path, {'enabled': False})
+    seen = []
+    real = observing_window.is_observing_window
+
+    def spy(config, metadata, feature="feature"):
+        seen.append(bool(metadata.get(SAME_CAPTURE_KEY)))
+        return real(config, metadata, feature=feature)
+
+    monkeypatch.setattr(observing_window, 'is_observing_window', spy)
+
+    for reprocess in (False, True):
+        seen.clear()
+        worker._process_task(ImageProcessingTask(
+            Image.new('RGB', (64, 64), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg,
+            reprocess=reprocess))
+        assert seen, "the gate was never consulted"
+        assert all(flag is reprocess for flag in seen)

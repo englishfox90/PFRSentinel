@@ -273,6 +273,7 @@ class MainWindow(
         self.allsky_controller = AllSkyController(self)
         self.allsky_controller.status_changed.connect(self.allsky_panel.set_status)
         self.allsky_controller.quality_changed.connect(self.allsky_panel.set_quality)
+        self.allsky_controller.attention_changed.connect(self.allsky_panel.set_attention)
         self.allsky_controller.settings_changed.connect(self._on_allsky_settings_changed)
         self.allsky_panel.settings_changed.connect(self._on_allsky_panel_changed)
 

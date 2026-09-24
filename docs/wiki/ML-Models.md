@@ -24,8 +24,12 @@ Alongside the image, the model uses:
 |---------------|-------------|
 | Corner-to-centre ratio | Brightness of the frame corners compared with the centre. A closed roof tends to be evenly dark; an open sky has a gradient. |
 | Median brightness | Overall frame brightness, scaled correctly for 8-bit and 16-bit frames. |
-| Night flag | Whether the PC clock is between 20:00 and 06:00. |
+| Night flag | Whether it is astronomical night at your location (sun more than 18° below the horizon), from the latitude and longitude in [Weather Setup](Weather-Setup). With no location set, the PC clock between 22:00 and 05:00. |
 | Hour | Hour of day from the PC clock. |
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The models shipped so far were trained before the flag was corrected, so the full benefit arrives with the next retrained models; until then the corrected flag is closer to what they learned than the clock was.
 
 ### Sky Classifier
 
@@ -89,7 +93,7 @@ The status strip in [Live Monitoring](Live-Monitoring) has **Roof** and **Sky** 
 
 ### Skipping Sky Features While the Roof Is Closed
 
-With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
+With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. From the next release the roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — no longer blanks the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
 
 The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details.
 

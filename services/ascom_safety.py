@@ -40,6 +40,22 @@ def is_safe_open(ml_results: Dict[str, Any], min_confidence: float) -> bool:
     )
 
 
+def unsafe_reason(roof_status, roof_confidence, min_confidence: float) -> str:
+    """Log line for a reading that is not a confident ``Open``.
+
+    Only the wording differs by case — the file gets the UNSAFE trigger either
+    way. A confident ``Closed`` is the model doing its job, not an uncertain
+    reading, and describing it as one made a support log read as though the
+    model had been unsure all afternoon (issue #86).
+    """
+    if (roof_status == 'Closed' and roof_confidence is not None
+            and roof_confidence >= min_confidence):
+        return (f"ASCOM Safety: roof closed (confidence={roof_confidence}) "
+                f"-> writing UNSAFE")
+    return (f"ASCOM Safety: uncertain roof reading (status={roof_status}, "
+            f"confidence={roof_confidence}) -> writing UNSAFE")
+
+
 class ASCOMSafetyWriter:
     """
     Writes ML predictions to ASCOM-compatible safety monitor file.
@@ -108,8 +124,7 @@ class ASCOMSafetyWriter:
         safe = is_safe_open(ml_results, self.min_confidence)
         if not safe:
             app_logger.debug(
-                f"ASCOM Safety: uncertain roof reading (status={roof_status}, "
-                f"confidence={roof_confidence}) -> writing UNSAFE")
+                unsafe_reason(roof_status, roof_confidence, self.min_confidence))
 
         # Build file content
         trigger = self.open_trigger if safe else self.closed_trigger

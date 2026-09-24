@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from services.allsky.fisheye import FisheyeModel
 from services.allsky.label_collision import LabelGrid, candidate_slots, default_gap
 from services.allsky.label_stability import (
+    MASK_HOLD_FRAMES, MASK_VOTE_DEPTH, MASK_VOTE_MAX_EDGE,
     SkyMaskHistory, StickySelection, get_label_stabilizer, reset_label_stability,
 )
 
@@ -109,6 +110,61 @@ class TestSkyMaskHistory:
         for _ in range(5):
             h.update(_mask())
         assert h.depth == 2
+
+    def test_a_run_of_shrunken_masks_is_ridden_out(self):
+        """An exposure change lasts many frames, not one: the default vote has
+        to outlast it, which a 3-frame vote never could (discussion #76)."""
+        h = SkyMaskHistory()
+        for _ in range(MASK_VOTE_DEPTH):
+            h.update(_mask())
+        shrunk = _mask()
+        shrunk[2:, :] = 0
+        for _ in range(6):
+            assert h.update(shrunk)[3, 3] == 255
+
+    def test_a_lasting_change_is_still_adopted(self):
+        """A telescope parked across the field must not be labelled forever."""
+        h = SkyMaskHistory()
+        for _ in range(MASK_VOTE_DEPTH):
+            h.update(_mask())
+        blocked = _mask()
+        blocked[3, 3] = 0
+        out = None
+        for _ in range(MASK_VOTE_DEPTH):
+            out = h.update(blocked)
+        assert out[3, 3] == 0
+
+    def test_default_hold_outlasts_a_run_of_failed_detections(self):
+        h = SkyMaskHistory()
+        vote = h.update(_mask())
+        for _ in range(MASK_HOLD_FRAMES):
+            assert h.update(None) is vote
+        assert h.update(None) is None
+
+    def test_large_masks_are_voted_at_reduced_resolution(self):
+        """Fifteen full-resolution masks of a 3552 px frame are ~190 MB."""
+        h = SkyMaskHistory()
+        big = np.zeros((2000, 3000), dtype=np.uint8)
+        big[:, 1500:] = 255                       # right half is open sky
+        out = h.update(big)
+        assert out.shape == big.shape
+        assert out[1000, 2500] == 255 and out[1000, 500] == 0
+        stored = h._frames[0]
+        assert max(stored.shape) <= MASK_VOTE_MAX_EDGE
+        assert stored.nbytes < big.nbytes / 25
+
+    def test_running_vote_matches_a_recount(self):
+        """The vote is a running sum; it must not drift from the frames it holds."""
+        rng = np.random.default_rng(7)
+        h = SkyMaskHistory(depth=4)
+        frames = [np.where(rng.random((6, 6)) > 0.5, 255, 0).astype(np.uint8)
+                  for _ in range(11)]
+        for i, frame in enumerate(frames):
+            out = h.update(frame)
+            window = frames[max(0, i - 3):i + 1]
+            expected = np.where(sum((f > 0).astype(int) for f in window) * 2
+                                >= len(window), 255, 0)
+            assert np.array_equal(out, expected), f"drifted at frame {i}"
 
 
 # ===================================================================
@@ -319,3 +375,46 @@ class TestRendererStability:
         reset_label_stability()
         assert stab.masks.depth == 0 and not stab.slot_memory
         assert stab.selection.shown == set()
+
+
+# ===================================================================
+# Sky mask vs frame brightness
+# ===================================================================
+
+class TestSkyMaskBrightness:
+    """The mask says where the sky is, which does not change when the camera's
+    exposure does. Absolute grey thresholds made it shrink to a third on a
+    darker frame, and the labels over the lost sky vanished (discussion #76)."""
+
+    @staticmethod
+    def _coverage(img) -> float:
+        from services.allsky.overlay_renderer import _detect_sky_mask
+        mask = _detect_sky_mask(img)
+        assert mask is not None, "synthetic frame should yield a detection mask"
+        return float((mask > 0).mean())
+
+    def test_same_sky_at_a_third_of_the_brightness_keeps_its_mask(self):
+        bright = _synthetic_sky(60, seed=3)
+        arr = np.array(bright.convert('L')).astype(np.float32)
+        dim = Image.fromarray((arr * 0.35).astype(np.uint8)).convert('RGBA')
+
+        full, faded = self._coverage(bright), self._coverage(dim)
+        assert faded > 0.8 * full, (
+            f"mask fell from {full:.0%} to {faded:.0%} of the frame when the "
+            "same sky was simply exposed less")
+
+    def test_stars_beside_dark_equipment_still_claim_less_sky(self):
+        """The reason the weighting exists: a star at an obstruction's edge
+        must not mark the obstruction as open sky."""
+        img = _synthetic_sky(60, seed=3)
+        arr = np.array(img.convert('L')).astype(np.float32)
+        blocked = arr.copy()
+        blocked[:, :375] *= 0.12                 # left half in deep shadow
+        shadowed = Image.fromarray(blocked.astype(np.uint8)).convert('RGBA')
+        from services.allsky.overlay_renderer import _detect_sky_mask
+        mask = _detect_sky_mask(shadowed)
+        if mask is None:
+            pytest.skip("too few detections survive the synthetic shadow")
+        left = float((mask[:, :375] > 0).mean())
+        right = float((mask[:, 375:] > 0).mean())
+        assert left < right

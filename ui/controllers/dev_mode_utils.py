@@ -22,7 +22,7 @@ from ui.controllers.context_fetchers import (
 
 # Import extracted modules
 from ui.controllers.file_writers import save_raw_fits, save_luminance_fits, write_json
-from ui.controllers.time_context import compute_time_context
+from services.time_context import compute_time_context
 from ui.controllers.image_analysis import (
     infer_normalization_denom,
     compute_luminance,

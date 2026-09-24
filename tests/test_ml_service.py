@@ -108,3 +108,55 @@ def test_analyze_image_for_tokens_stays_under_memory_ceiling(monkeypatch):
         f"analyze_image_for_tokens peaked at {peak / 1e6:.1f} MB, "
         f"ceiling is {MEMORY_CEILING_BYTES / 1e6:.0f} MB"
     )
+
+
+# --- time context feeds the models the training-side flag (issue #86) --------
+
+def test_time_context_comes_from_the_shared_service(monkeypatch):
+    import services.ml_service as ml_service_module
+    seen = {}
+
+    def fake_compute(now=None, location=None):
+        seen['location'] = location
+        return {'hour': 22, 'is_astronomical_night': True, 'calculation_method': 'astral'}
+    monkeypatch.setattr(ml_service_module, 'compute_time_context', fake_compute)
+    monkeypatch.setattr(ml_service_module, 'get_configured_location',
+                        lambda: (31.55, -100.46, 'obs'))
+
+    service = MLService()
+    service._location_cache = None
+    ctx = service._compute_time_context()
+    assert ctx['is_astronomical_night'] is True
+    assert seen['location'] == (31.55, -100.46, 'obs')
+
+
+def test_configured_location_is_cached_between_frames(monkeypatch):
+    import services.ml_service as ml_service_module
+    reads = []
+    monkeypatch.setattr(ml_service_module, 'get_configured_location',
+                        lambda: reads.append(1) or (1.0, 2.0, 'obs'))
+    monkeypatch.setattr(ml_service_module, 'compute_time_context',
+                        lambda now=None, location=None: {'hour': 1, 'is_astronomical_night': True})
+
+    service = MLService()
+    service._location_cache = None
+    service._compute_time_context()
+    service._compute_time_context()
+    assert len(reads) == 1
+
+    service._location_cache = (time.time() - 301, (1.0, 2.0, 'obs'))
+    service._compute_time_context()
+    assert len(reads) == 2
+
+
+def test_time_context_failure_yields_daytime_defaults(monkeypatch):
+    import services.ml_service as ml_service_module
+
+    def boom(now=None, location=None):
+        raise RuntimeError("astral exploded")
+    monkeypatch.setattr(ml_service_module, 'compute_time_context', boom)
+    monkeypatch.setattr(ml_service_module, 'get_configured_location', lambda: (None, None, None))
+
+    service = MLService()
+    service._location_cache = None
+    assert service._compute_time_context() == {'hour': 12, 'is_astronomical_night': False}

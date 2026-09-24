@@ -171,13 +171,35 @@ class _MainWindowSettingsMixin:
         prep = self.allsky_controller.prepare_guided_calibration()
         if not prep:
             return  # controller already emitted a status explaining why
+        session = dlg = None
         try:
             from ui.panels.allsky_guided_dialog import GuidedCalibrationDialog
+            session = self.allsky_controller.begin_guided_session(prep)
             dlg = GuidedCalibrationDialog(prep, parent=self)
-            if dlg.exec() and dlg.anchors:
-                self.allsky_controller.start_guided_calibration(dlg.anchors, prep)
+            dlg.solve_requested.connect(session.solve)
+            dlg.hints_requested.connect(session.request_hints)
+            dlg.discard_requested.connect(session.discard)
+            session.solving.connect(dlg.show_solving)
+            session.solved.connect(dlg.show_solved)
+            session.failed.connect(dlg.show_failed)
+            session.hints_ready.connect(dlg.show_hints)
+            # Bound methods only. A closure over dlg connected to dlg's own
+            # signal is a cycle Python's GC cannot see through Qt, and it
+            # kept the dialog, its full-resolution pixmap and both prep
+            # frames alive for the life of the process.
+            dlg.save_requested.connect(session.save)
+            session.saved.connect(dlg.show_saved)
+
+            if dlg.exec() and dlg.saved:
+                self._notify("Guided calibration saved — the all-sky overlay "
+                             "now uses it.", 'info')
         except Exception as e:
             app_logger.error(f"Guided calibration dialog failed: {e}")
+        finally:
+            if session is not None:
+                session.close()
+            if dlg is not None:
+                dlg.deleteLater()
 
     def _on_allsky_settings_changed(self) -> None:
         try:
