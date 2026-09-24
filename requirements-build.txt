@@ -2,4 +2,4 @@
 # runners don't pay to install PyInstaller they never invoke.
 # Pinned: a PyInstaller bump changes what lands in the installer, so it is a
 # deliberate, tested step — not something a floor picks up on a Monday.
-pyinstaller==6.17.0
+pyinstaller==6.22.3
