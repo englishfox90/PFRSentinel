@@ -168,6 +168,11 @@ class ImageProcessorWorker(QThread):
                     app_logger.warning("Reprocess skipped: cached frame could not be rebuilt")
                     return
                 task.img, task.metadata = img, metadata
+            if task.reprocess:
+                # Same capture, new settings: per-capture state (the roof
+                # gate's Closed streak) must not count it a second time.
+                from services.observing_window import SAME_CAPTURE_KEY
+                metadata[SAME_CAPTURE_KEY] = True
             
             # Extract config values
             output_dir = config.get('output_dir', '')

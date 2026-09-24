@@ -33,6 +33,8 @@ import numpy as np
 
 from services.frame_static_score import STATIC_RATIO_THRESHOLD, measure_static
 from services.logger import app_logger
+from services.moon import get_configured_location
+from services.time_context import compute_time_context
 
 
 class MLService:
@@ -431,23 +433,29 @@ class MLService:
         return ctx
 
     def _compute_time_context(self) -> Dict[str, Any]:
-        """Compute time context for ML features."""
-        from datetime import datetime
-        
+        """Time context for the ML features — the same sun-elevation source the
+        calibration JSON (training data) uses, so ``is_astronomical_night``
+        means the same thing at inference as in the data the next models are
+        trained on (issue #86). The clock stand-in this replaces flipped the
+        flag hours off true darkness depending on season and latitude, and
+        that flag is what tips a borderline roof frame."""
         try:
-            now = datetime.now()
-            hour = now.hour
-            
-            # Simple night detection (could be improved with astropy)
-            is_night = hour < 6 or hour >= 20
-            
-            return {
-                'hour': hour,
-                'is_astronomical_night': is_night,
-            }
-            
-        except Exception:
+            return compute_time_context(location=self._configured_location())
+        except Exception as e:
+            app_logger.debug(f"ML Service: time context failed: {e}")
             return {'hour': 12, 'is_astronomical_night': False}
+
+    def _configured_location(self):
+        """Observer (lat, lon, name) from the weather config, cached ~5 min so a
+        frame doesn't re-read config.json. The sun maths itself is per call —
+        the flag has to flip at the minute darkness arrives, not a cache TTL later."""
+        cached = getattr(self, '_location_cache', None)
+        now = time.time()
+        if cached and now - cached[0] < 300:
+            return cached[1]
+        location = get_configured_location()
+        self._location_cache = (now, location)
+        return location
 
 
 # Global singleton instance
