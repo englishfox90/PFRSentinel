@@ -52,6 +52,19 @@ class FisheyeModel:
                        trusted pole says otherwise.
                        '' = automatic fit admitted with no pole, or a
                        legacy file: no authority over its replacement.
+        final_tol_px : Match tolerance (px) the fit's n_matches and
+                       rms_residual were taken at — the joint fit's final
+                       re-match tolerance, or a guided solve's RMS limit.
+                       0.0 = not recorded (file from an earlier version).
+        chance_ratio : n_matches as a multiple of what a WRONG model would
+                       match by coincidence at final_tol_px
+                       (chance_matches). 0.0 = not recorded, or not
+                       applicable (guided solves are judged by their
+                       anchors, not by chance). Together with final_tol_px
+                       these let calibration_fit_merit tell a chance fit
+                       from a real one after the fact — issue #93's 606
+                       matches at RMS 10.9 px sat at 1.04x chance on a
+                       16.5 px tolerance and rated Good for a week.
     """
     cx: float = 960.0
     cy: float = 540.0
@@ -70,6 +83,8 @@ class FisheyeModel:
     image_width: int = 0   # width of image used for calibration (px); 0 = unknown
     image_height: int = 0  # height of image used for calibration (px); 0 = unknown
     provenance: str = ""   # 'guided' | 'pole' | '' (see class doc)
+    final_tol_px: float = 0.0   # match tolerance the fit was judged at; 0 = unknown
+    chance_ratio: float = 0.0   # n_matches / chance expectation; 0 = unknown
 
     def is_valid(self) -> bool:
         """True if model has been successfully calibrated."""

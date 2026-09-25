@@ -112,7 +112,14 @@ class AllSkyController(QObject):
 
     status_changed   = Signal(str)
     quality_changed  = Signal(str)   # CalibrationQuality level string
+    # Why the level is what it is — calibration_fit_merit's reason for a
+    # capped chance fit, '' otherwise. Emitted before every quality_changed.
+    quality_note_changed = Signal(str)
     attention_changed = Signal(str, str)
+    # (level, note) for the badge after a live verdict on the model on disk
+    # (CalibrationService.badge_quality_changed). Display only: unlike
+    # quality_upgraded nothing was saved, so no config or file side effects.
+    badge_quality_changed = Signal(str, str)
     calibration_done = Signal(dict)
     settings_changed = Signal()
 
@@ -129,6 +136,7 @@ class AllSkyController(QObject):
         self._cal_service.quality_upgraded.connect(self._on_quality_upgraded)
         self._cal_service.status_changed.connect(self.status_changed)
         self._cal_service.attention_changed.connect(self.attention_changed)
+        self._cal_service.badge_quality_changed.connect(self.badge_quality_changed)
 
         # Load existing model into both controller and service
         self._update_status()
@@ -331,7 +339,7 @@ class AllSkyController(QObject):
         self.status_changed.emit(
             "Calibration reset — auto-calibration will start over as frames "
             "accumulate, or use Guided Calibration.")
-        self.quality_changed.emit('none')
+        self._publish_quality('none')
         self.settings_changed.emit()
 
     @property
@@ -351,6 +359,12 @@ class AllSkyController(QObject):
             'cx': self._model.cx,
             'cy': self._model.cy,
         }
+
+    def _publish_quality(self, quality: str, model=None) -> None:
+        """Badge level plus the reason it is capped, if it is."""
+        from services.allsky.calibration_fit_merit import credibility_note
+        self.quality_note_changed.emit(credibility_note(model) if model else '')
+        self.quality_changed.emit(quality)
 
     def shutdown(self) -> None:
         """Stop any running calibration threads and background service."""
@@ -418,7 +432,7 @@ class AllSkyController(QObject):
         if note:
             msg += f" — {note}"
         self.status_changed.emit(msg)
-        self.quality_changed.emit(quality)
+        self._publish_quality(quality, model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
 
@@ -451,10 +465,10 @@ class AllSkyController(QObject):
                     f"Calibrated ({ts}): {model.n_matches} stars, "
                     f"RMS={model.rms_residual:.2f}px ({quality})"
                 )
-                self.quality_changed.emit(quality)
+                self._publish_quality(quality, model)
                 return
         self.status_changed.emit("Not calibrated — click 'Calibrate Now'")
-        self.quality_changed.emit('none')
+        self._publish_quality('none')
 
     def _on_quality_upgraded(self, quality: str, model) -> None:
         """Handle quality upgrade from the background service."""
@@ -468,7 +482,7 @@ class AllSkyController(QObject):
         self._mw.config.set('allsky_overlay', allsky_cfg)
         self._mw.config.save()
 
-        self.quality_changed.emit(quality)
+        self._publish_quality(quality, model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
 

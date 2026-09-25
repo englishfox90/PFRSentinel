@@ -348,9 +348,10 @@ def _fit_and_validate(
     # orientation between 60 and 90°, against 619 expected by chance).
     chance_ok, chance_msg, est = check_above_chance(
         model.n_matches, frames, model,
-        getattr(model, 'final_tol_px', 18.0 * _ts),
+        model.final_tol_px or 18.0 * _ts,
     )
     model.chance_expected = est.expected
+    model.chance_ratio = model.n_matches / max(est.expected, 1.0)
     if not chance_ok:
         raise CalibrationError(
             f"Refinement is at chance level: {chance_msg} — the match count "

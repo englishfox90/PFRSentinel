@@ -20,6 +20,7 @@ from services.logger import app_logger as log
 
 from .calibration import calibrate, CalibrationError
 from .calibration_validate import median_frame_resolution
+from .incumbent_chance import score_incumbent, score_tolerance_px
 from .incumbent_evidence import corroborate_incumbent
 from .model_admission import admission_evidence, admit_candidate, east_left_hint
 from .multi_calibrate import median_sky_r, refine_from_detections
@@ -40,6 +41,12 @@ class _RefineWorker(QThread):
     # The incumbent was stamped pole-corroborated in place this run
     # (incumbent_evidence); the service persists the stamp.
     incumbent_corroborated = Signal(str)   # message
+    # The incumbent's chance score on this run's frames (incumbent_chance
+    # .IncumbentScore, or None when the buffer can't judge it). Its own
+    # signal, not a field of result_ready: most runs on a rig that needs it
+    # end in `failed` (#93: 62 of 62), and the score has to reach the
+    # service on those too.
+    incumbent_scored = Signal(object)
 
     def __init__(self, frames, seed_model, n_images: int, span_min: float,
                  lat: float = 0.0, incumbent=None, pole_history=None,
@@ -88,6 +95,8 @@ class _RefineWorker(QThread):
                 pole_image_width=pole_w, pole_image_height=pole_h)
             if stamped:
                 self.incumbent_corroborated.emit(why)
+            self.incumbent_scored.emit(score_incumbent(
+                self._incumbent, self._frames, score_tolerance_px(sky_r)))
 
             model = refine_from_detections(
                 self._frames,

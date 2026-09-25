@@ -35,6 +35,9 @@ def test_clean_solve_reports_a_small_residual_for_every_anchor():
     assert all(given == used for given, used, _d in rows)
     assert all(d is not None and d < 5.0 for _g, _u, d in rows)
     assert model.guided_rms_limit > 0
+    # Persisted twin of the session-only limit; chance is not applicable.
+    assert model.final_tol_px == model.guided_rms_limit
+    assert model.chance_ratio == 0.0
 
 
 def test_excluded_anchor_is_reported_without_a_residual():

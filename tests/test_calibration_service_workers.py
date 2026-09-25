@@ -63,13 +63,13 @@ def _frames(n=6, span_minutes=30.0):
     } for i in range(n)]
 
 
-@pytest.fixture
-def fast_refine(monkeypatch):
+def _stub_refine(monkeypatch):
     """Make _RefineWorker.run() return immediately with an admitted model.
 
     Everything the worker calls out to is stubbed at module level, so the real
     QThread subclass — the thing whose lifetime is under test — still runs.
-    Records the frames list each run was handed.
+    Records the frames list each run was handed. Plain function so sibling
+    test modules can build the same fixture without re-importing this one.
     """
     seen = []
 
@@ -85,6 +85,11 @@ def fast_refine(monkeypatch):
     monkeypatch.setattr(cw, 'admit_candidate', lambda *a, **k: (True, 'ok'))
     monkeypatch.setattr(cw, 'admission_evidence', lambda *a, **k: False)
     return seen
+
+
+@pytest.fixture
+def fast_refine(monkeypatch):
+    return _stub_refine(monkeypatch)
 
 
 def _service(frames=None, model=None):
@@ -588,3 +593,4 @@ class TestEscapeExhaustion:
         assert svc._escape_backoff.fruitless_count == 0
         assert svc._escape_backoff.cooldown() == cs.ESCAPE_COOLDOWN_BASE_S
         assert svc._escape_backoff.exhausted(now=0.0) is False
+
