@@ -7,7 +7,8 @@ to include in calibration JSON files for validation and monitoring.
 This loader is dev-only: it feeds the calibration JSON export and is off when
 DEV_MODE_AVAILABLE=False. It is NOT the per-frame ML path. Production inference
 lives in services/ml_service.py and runs in every build when ml_models.enabled
-is on. Only training is dev-only.
+is on. Of the ML code, only this loader and model training (ml/train_*.py)
+are dev-only.
 
 Usage:
     from ui.controllers.ml_prediction import predict_roof_state, predict_sky_condition

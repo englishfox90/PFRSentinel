@@ -11,7 +11,7 @@ Development Mode enables features useful for debugging and ML training:
 
 **RAW16 camera mode is NOT part of dev mode** - it's a user-facing feature that remains available regardless.
 
-**Per-frame ML inference is NOT part of dev mode either.** `services/ml_service.py` runs in every build when `ml_models.enabled` is on (the "ML Models (Beta)" setting), and the installer bundles both ONNX models. Only model *training* (`ml/train_*.py`, PyTorch) is dev-only.
+**Per-frame ML inference is NOT part of dev mode either.** `services/ml_service.py` runs in every build when `ml_models.enabled` is on (the "ML Models (Beta)" setting), and the installer bundles both ONNX models. Of the ML code, only the calibration-export loader listed above and model *training* (`ml/train_*.py`, PyTorch) are dev-only.
 
 ### Production Build Process
 
