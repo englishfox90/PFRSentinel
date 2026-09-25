@@ -349,6 +349,33 @@ class TestNoStarsRule:
             verdict, reason, _ = _judge(GATE, star_count=strong, exposure='10s')
         assert verdict is True and reason == ''
 
+    def test_ml_saying_stars_are_visible_releases_a_block_at_the_floor(self):
+        self._no_stars(GATE_ML, NO_STARS_CONFIRM_FRAMES, roof='Open (95%)')
+        under_twice = RECOVERY_STAR_FACTOR * FLOOR - 1
+        for _ in range(RECOVERY_CONFIRM_FRAMES - 1):
+            assert _judge(GATE_ML, star_count=under_twice, exposure='10s',
+                          roof='Open (95%)', stars_visible=True)[0] is False
+        verdict, reason, _ = _judge(GATE_ML, star_count=FLOOR, exposure='10s',
+                                    roof='Open (95%)', stars_visible=True)
+        assert verdict is True and reason == ''
+
+    @pytest.mark.parametrize('stars_visible', [None, False])
+    def test_without_the_ml_verdict_a_count_under_twice_the_floor_stays_blocked(
+            self, stars_visible):
+        self._no_stars(GATE_ML, NO_STARS_CONFIRM_FRAMES, roof='Open (95%)')
+        for _ in range(RECOVERY_CONFIRM_FRAMES + 1):
+            verdict, reason, _ = _judge(
+                GATE_ML, star_count=RECOVERY_STAR_FACTOR * FLOOR - 1, exposure='10s',
+                roof='Open (95%)', stars_visible=stars_visible)
+        assert verdict is False and reason == 'no_stars'
+
+    def test_ml_verdict_below_the_floor_does_not_release_a_block(self):
+        self._no_stars(GATE_ML, NO_STARS_CONFIRM_FRAMES, roof='Open (95%)')
+        for _ in range(RECOVERY_CONFIRM_FRAMES + 1):
+            verdict, reason, _ = _judge(GATE_ML, star_count=FLOOR - 1, exposure='10s',
+                                        roof='Open (95%)', stars_visible=True)
+        assert verdict is False and reason == 'no_stars'
+
     def test_a_closed_roof_still_blocks_with_plenty_of_stars(self):
         for _ in range(ROOF_CLOSED_CONFIRM_FRAMES):
             verdict, reason, _ = _judge(GATE_ML, star_count=200, exposure='10s',

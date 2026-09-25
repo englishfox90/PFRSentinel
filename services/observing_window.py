@@ -62,6 +62,13 @@ NO_STARS_CONFIRM_FRAMES = 3
 # (thin cloud, the first stars at dusk) would otherwise flick the overlay on
 # and off every frame; at twice the floor the frame is unambiguously a
 # star field, and two frames rule out a single glint-rich frame.
+# A frame at or above the floor with ML's "stars visible" verdict counts as
+# strong too: the config comment promises that verdict vetoes a false block,
+# and a veto that only works on entry is no veto — a moon-washed night that
+# clears to 120-180 detections at the 100 floor would otherwise stay blocked
+# until the app restarted (there is no timeout). The floor still applies on
+# this path, so a Closed roof's 20-80 sources cannot release the gate on a
+# spurious verdict.
 RECOVERY_CONFIRM_FRAMES = 2
 RECOVERY_STAR_FACTOR = 2
 
@@ -290,7 +297,8 @@ def _no_star_evidence(metadata, signals, evidence, allsky_cfg, feature) -> bool:
         blocked = _no_stars_streak.blocked()
     else:
         no_stars = star_count < floor and signals['stars_visible'] is not True
-        strong = star_count >= RECOVERY_STAR_FACTOR * floor
+        strong = star_count >= RECOVERY_STAR_FACTOR * floor or (
+            star_count >= floor and signals['stars_visible'] is True)
         blocked = _no_stars_streak.observe(no_stars, strong)
     if blocked:
         app_logger.debug(
