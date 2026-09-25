@@ -258,6 +258,15 @@ Readings:
 Package 4's regression for all of this is `tests/test_allsky_pool_hygiene_real.py`
 (skips without the dataset).
 
+Exposure-midpoint timestamps, as shipped by package 4: the capture worker stamps
+`EXPOSURE_START_UTC` on every frame and `services/exposure_midpoint.py` turns it into
+start + exposure/2 for the calibration feed — that is the only source that reaches the
+service today, because camera mode is the only path that feeds it. `DATE-OBS` is handled
+but unreachable (`services/watcher.py` puts no FITS header into the metadata, and
+Directory Watch mode does not feed the calibration service); the receipt-time fallback
+is receipt − exposure/2, not the file-mtime rule package 4b specified, which needs the
+watcher to carry the path or mtime — a follow-up in the watcher.
+
 ## 1. Findings
 
 | # | Finding | Where | Package |

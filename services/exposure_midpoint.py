@@ -11,43 +11,41 @@ the instant a trailed star's centroid measures.
 
 Sources, in order of trust:
   1. 'EXPOSURE_START_UTC' (ISO 8601) — the capture worker records the SDK
-     exposure start; midpoint = start + exposure/2.
-  2. 'DATE-OBS' (ISO 8601, FITS convention: exposure start, UTC) — a watch
-     -mode frame whose header reached the metadata.
+     exposure start; midpoint = start + exposure/2. This is the only source
+     that reaches the calibration service today: camera mode is the only
+     path that feeds it (ui/controllers/image_processor), and the capture
+     worker stamps every frame.
+  2. 'DATE-OBS' (ISO 8601, FITS convention: exposure start, UTC). Handled
+     for a caller that has a FITS header in its metadata; nothing in
+     services/watcher.py puts one there today, and Directory Watch mode
+     does not feed the calibration service at all, so this source is
+     currently unreachable in production.
   3. Otherwise `received_at` minus half the exposure: the frame reached the
      processor after the exposure ended, so this is closer than the receipt
-     time itself and never later than it.
+     time itself and never later than it. The plan's watch-mode fallback
+     (file mtime minus half the sidecar exposure) needs the watcher to
+     carry the path or mtime into the metadata — a follow-up in the
+     watcher, not done here.
 An unparsable exposure yields `received_at` unchanged. Never raises.
 """
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-_NUMBER = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+from services.sky_evidence import parse_exposure_seconds
 
 
 def exposure_seconds(metadata: Optional[dict]) -> Optional[float]:
-    """Exposure length in seconds from 'EXPOSURE' ("20.66s", "20.66",
-    "500ms") or the FITS 'EXPTIME'; None when neither parses."""
+    """Exposure length in seconds from 'EXPOSURE' (the capture worker and
+    sidecars) or the FITS 'EXPTIME'; None when neither is present or
+    parses. The value itself is read by sky_evidence.parse_exposure_seconds,
+    the one exposure parser (formats and units are its tests' business)."""
     if not metadata:
         return None
     for key in ('EXPOSURE', 'EXPTIME', 'Exposure'):
-        raw = metadata.get(key)
-        if raw is None:
-            continue
-        if isinstance(raw, (int, float)):
-            return float(raw) if raw >= 0 else None
-        text = str(raw).strip()
-        m = _NUMBER.search(text)
-        if not m:
-            continue
-        value = float(m.group(0))
-        unit = text[m.end():].strip().lower()
-        if unit.startswith('ms'):
-            value /= 1000.0
-        elif unit.startswith('us') or unit.startswith('µs'):
-            value /= 1e6
-        return value if value >= 0 else None
+        if metadata.get(key) is not None:
+            value = parse_exposure_seconds(metadata[key])
+            if value is not None:
+                return value
     return None
 
 

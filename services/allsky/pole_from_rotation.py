@@ -13,14 +13,11 @@ pixel-space rigid fit the pole-anchor plan measured (100+ px) was.
 
 Two stages:
 
-1. Coarse axis by Hough vote. For a frame pair with rotation angle α, a
-   pair of detections (v₁, v₂) at chord angle d ≤ α determines the axis
-   exactly (two solutions: in the plane bisecting the chord, at polar
-   distance ρ with sin ρ = sin(d/2)/sin(α/2)). Every detection pair casts
-   its two votes into a 2° histogram over axis direction; the true axis
-   collects one vote per star per frame pair while chance pairings scatter
-   over the sphere. Cost is one 200×200 dot product per frame pair — no
-   axis × scale × mirror score tensor is ever built.
+1. Coarse axis by Hough vote (axis_vote): every detection pair casts its
+   two exact axis solutions into a 2° histogram over axis direction; the
+   true axis collects one vote per star per frame pair while chance
+   pairings scatter over the sphere. Run at a few seed scales, seeds
+   pooled by absolute votes.
 
 2. Refine over (axis, plate scale, optical centre, cubic shape) by iterated closest
    point in PIXEL space: each frame-1 detection is rotated and re-projected
@@ -56,6 +53,9 @@ from scipy.spatial import cKDTree
 from services.logger import app_logger as log
 
 from .calibration_validate import a1_from_sky_radius, median_frame_resolution, tol_scale
+from .axis_vote import (  # re-exported: the vote is stage 1 of this fit
+    AXIS_BIN_DEG, CHORD_SLACK, MIN_POLAR_DISTANCE_DEG, REFINE_SEEDS, AxisBins,
+    distinct_seeds, hough_axis)
 from .pole_estimate import SIDEREAL_DEG_PER_MIN, PoleEstimate
 
 # Input requirements. 8 frames over 45 min give ≥ 20 frame pairs 15 min
@@ -88,21 +88,6 @@ HOUGH_MIN_PAIRS = 8
 # scale win (it crowds the vectors round the boresight, so its median bin
 # empties) and sent every refine seed 30° off (5 of 20 reference runs).
 HOUGH_SCALE_STEPS = (1.0, 1.25, 1.55, 0.8)
-# Detection pairs closer than this to a candidate axis do not vote: their
-# chord is ~0 and the construction returns the detection itself as the
-# axis, which is how a field of static lights (before stripping) produced
-# a 46× peak at every light. Real stars inside 1° of the pole are lost to
-# the vote only, not to the refine.
-MIN_POLAR_DISTANCE_DEG = 1.0
-
-# Hough bin width. 2° at 1300 px/rad is ~45 px at the pole: coarse enough
-# that a 20 % scale error on the seed still piles the votes into one bin,
-# fine enough that the refine starts inside its basin.
-AXIS_BIN_DEG = 2.0
-# Chord/arc slack for the seed's lens error: a pair whose chord exceeds the
-# rotation arc by more than this cannot be one star under any lens the
-# refine is allowed to reach (A1_BOUNDS).
-CHORD_SLACK = 0.2
 # The winning bin must hold this many times the median bin's votes for the
 # refine to be attempted at all. This only rejects a flat vote: a field of
 # random detections measured 4.8–7.5× (the maximum of ~4000 Poisson bins),
@@ -110,9 +95,6 @@ CHORD_SLACK = 0.2
 # refine — a static-only field votes 50× (its configuration is invariant,
 # so every frame pair agrees) and then explains 3 % of the detections.
 HOUGH_MIN_PEAK_RATIO = 3.0
-# Distinct bins refined from the vote (the refine picks by support).
-REFINE_SEEDS = 3
-
 # Refinement bounds around the seed. The plan's 0.7–1.5× ceiling is
 # raised to the a1 gate's own hard ceiling (calibration_validate
 # .validate_a1_scale, 1.8): the sky-circle seed on an obstructed aperture
@@ -263,10 +245,10 @@ def fit_rotation(
     seeds, peak_ratio = [], 0.0
     for s in HOUGH_SCALE_STEPS:
         vecs = [lens.scaled(s, 0.0, 0.0).unproject(p) for p in xy]
-        cand, ratio = _hough_axis(vecs, vote_pairs, vote_alphas)
+        cand, ratio = hough_axis(vecs, vote_pairs, vote_alphas)
         peak_ratio = max(peak_ratio, ratio)
         seeds.extend((axis, sign, votes, s) for axis, sign, votes in cand)
-    seeds = _distinct_seeds(seeds)
+    seeds = distinct_seeds(seeds)
     if peak_ratio < HOUGH_MIN_PEAK_RATIO or not seeds:
         none.peak_ratio = peak_ratio
         none.reason = (f"no rotation axis in the vote (peak {peak_ratio:.1f}x the "
@@ -408,107 +390,12 @@ def _select_pairs(t_min: np.ndarray, max_gap: float = float('inf')
     return [pairs[i] for i in dict.fromkeys(idx.tolist())]
 
 
-def _distinct_seeds(seeds):
-    """Seeds by descending votes, one per axis neighbourhood and sign."""
-    out = []
-    for axis, sign, votes, s in sorted(seeds, key=lambda t: -t[2]):
-        if any(sgn == sign and float(np.dot(axis, prev)) > np.cos(np.radians(2.5 * AXIS_BIN_DEG))
-               for prev, sgn, _v, _s in out):
-            continue
-        out.append((axis, sign, votes, s))
-    return out
-
-
 def _alphas(t_min: np.ndarray, pairs: Sequence[Tuple[int, int]]) -> np.ndarray:
     """Rotation angle (rad) of each pair."""
     if not pairs:
         return np.zeros(0)
     return np.radians(SIDEREAL_DEG_PER_MIN * (t_min[[j for _, j in pairs]]
                                               - t_min[[i for i, _ in pairs]]))
-
-
-# ---------------------------------------------------------------------------
-# Stage 1: Hough vote over the axis direction
-# ---------------------------------------------------------------------------
-
-class _AxisBins:
-    """Equal-area-ish bins over the z ≥ 0 hemisphere: rings of AXIS_BIN_DEG
-    in polar angle, each split in azimuth so bins stay ~AXIS_BIN_DEG wide."""
-
-    def __init__(self, bin_deg: float = AXIS_BIN_DEG):
-        self.step = np.radians(bin_deg)
-        self.n_rings = int(np.ceil(np.pi / 2 / self.step))
-        mids = (np.arange(self.n_rings) + 0.5) * self.step
-        self.n_phi = np.maximum(1, np.round(2 * np.pi * np.sin(mids) / self.step)).astype(int)
-        self.offset = np.concatenate([[0], np.cumsum(self.n_phi)[:-1]])
-        self.total = int(self.n_phi.sum())
-
-    def index(self, n: np.ndarray) -> np.ndarray:
-        theta = np.arccos(np.clip(n[:, 2], -1.0, 1.0))
-        ring = np.minimum((theta / self.step).astype(int), self.n_rings - 1)
-        phi = np.arctan2(n[:, 1], n[:, 0]) % (2 * np.pi)
-        k = np.minimum((phi / (2 * np.pi) * self.n_phi[ring]).astype(int),
-                       self.n_phi[ring] - 1)
-        return self.offset[ring] + k
-
-    def centre(self, flat: int) -> np.ndarray:
-        ring = int(np.searchsorted(self.offset, flat, side='right') - 1)
-        k = flat - self.offset[ring]
-        theta = (ring + 0.5) * self.step
-        phi = (k + 0.5) / self.n_phi[ring] * 2 * np.pi
-        return np.array([np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi),
-                         np.cos(theta)])
-
-
-def _hough_axis(vecs: List[np.ndarray], pairs: Sequence[Tuple[int, int]],
-                alphas: np.ndarray) -> Tuple[List[Tuple[np.ndarray, int, int]], float]:
-    """Top axis hypotheses [(axis, sign, votes)] and peak/median vote ratio."""
-    bins = _AxisBins()
-    hist = np.zeros((2, bins.total), dtype=np.int32)   # [sign index][bin]
-    for (i, j), alpha in zip(pairs, alphas):
-        v1, v2 = vecs[i], vecs[j]
-        cos_d = np.clip(v1 @ v2.T, -1.0, 1.0)
-        d = np.arccos(cos_d)
-        ii, jj = np.nonzero(d <= alpha * (1.0 + CHORD_SLACK))
-        if len(ii) == 0:
-            continue
-        a, b = v1[ii], v2[jj]
-        dd = d[ii, jj]
-        m = a + b
-        m /= np.maximum(np.linalg.norm(m, axis=1), 1e-12)[:, None]
-        c = np.cross(a, b)
-        c /= np.maximum(np.linalg.norm(c, axis=1), 1e-12)[:, None]
-        sin_rho = np.minimum(1.0, np.sin(dd / 2.0) / np.sin(alpha / 2.0))
-        far = sin_rho >= np.sin(np.radians(MIN_POLAR_DISTANCE_DEG))
-        if not far.any():
-            continue
-        a, b, dd, m, c, sin_rho = a[far], b[far], dd[far], m[far], c[far], sin_rho[far]
-        rho = np.arcsin(sin_rho)
-        beta = np.arccos(np.clip(np.cos(rho) / np.cos(dd / 2.0), -1.0, 1.0))
-        cb, sb = np.cos(beta)[:, None], np.sin(beta)[:, None]
-        # The two axes about which +alpha carries a onto b (verified
-        # numerically); their antipodes carry it by -alpha.
-        for n_plus in (cb * m + sb * c, -cb * m + sb * c):
-            flip = n_plus[:, 2] < 0
-            n_plus = np.where(flip[:, None], -n_plus, n_plus)
-            sign_idx = flip.astype(int)   # 0: +alpha, 1: -alpha
-            np.add.at(hist, (sign_idx, bins.index(n_plus)), 1)
-
-    median = float(np.median(hist))
-    peak = int(hist.max())
-    ratio = peak / max(median, 1.0)
-    order = np.argsort(hist, axis=None)[::-1]
-    seeds: List[Tuple[np.ndarray, int, int]] = []
-    for flat in order[:REFINE_SEEDS * 8]:
-        s_idx, b = divmod(int(flat), bins.total)
-        axis = bins.centre(b)
-        if any(np.dot(axis, prev) > np.cos(2.5 * bins.step) and sgn == (1 if s_idx == 0 else -1)
-               for prev, sgn, _ in seeds):
-            continue
-        seeds.append((axis, 1 if s_idx == 0 else -1, int(hist[s_idx, b])))
-        if len(seeds) >= REFINE_SEEDS:
-            break
-    return seeds, ratio
 
 
 # ---------------------------------------------------------------------------

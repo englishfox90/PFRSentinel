@@ -23,9 +23,13 @@ applied to (cheap: one KD-tree per frame). strip_* return new frame dicts
 with shallow-copied metadata and filtered 'detected' lists — the buffer's
 own dicts are shared with the GUI thread and are never mutated.
 
-The equipment map is duck-typed (package 1 of the plan may not exist yet):
-any object with sky_mask_for(width, height) -> bool ndarray (True = sky) or
-None; a None map, or a None mask, leaves the frames unchanged.
+The equipment map is obstruction_map.ObstructionMap (plan package 1),
+reached only through sky_mask_for(width, height) -> bool ndarray (True =
+sky) or None, so any object with that method serves. The map is learned on
+the output frame and stamped with its size and crop; the calibration
+buffer is fed the pre-crop frame, so with an output crop configured the
+map answers None for the buffer's size and the frames pass through
+unchanged — it is never rescaled. A None map likewise changes nothing.
 """
 from typing import List, Optional, Sequence, Tuple
 

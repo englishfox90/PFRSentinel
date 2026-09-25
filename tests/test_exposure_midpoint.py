@@ -9,15 +9,14 @@ NOW = datetime(2026, 9, 18, 5, 0, 30, tzinfo=timezone.utc)
 
 
 class TestExposureSeconds:
-    @pytest.mark.parametrize('raw, expected', [
-        ('20.66s', 20.66), ('13.0s', 13.0), ('500ms', 0.5), ('0.5', 0.5),
-        (13, 13.0), (2.5, 2.5), ('  30 s ', 30.0),
-    ])
-    def test_parses_the_capture_worker_and_sidecar_forms(self, raw, expected):
-        assert exposure_seconds({'EXPOSURE': raw}) == pytest.approx(expected)
+    # Value formats are sky_evidence.parse_exposure_seconds's contract
+    # (tests/test_sky_evidence.py); here only the key lookup is tested.
+    def test_exposure_key_is_read_through_the_shared_parser(self):
+        assert exposure_seconds({'EXPOSURE': '20.66s'}) == pytest.approx(20.66)
 
     def test_fits_exptime_is_a_fallback(self):
         assert exposure_seconds({'EXPTIME': 12.0}) == 12.0
+        assert exposure_seconds({'EXPOSURE': 'N/A', 'EXPTIME': '4s'}) == 4.0
 
     def test_missing_or_garbage_is_none(self):
         assert exposure_seconds(None) is None

@@ -23,7 +23,7 @@ from .calibration_validate import median_frame_resolution, model_in_frame
 from .incumbent_chance import score_incumbent, score_tolerance_px
 from .incumbent_evidence import corroborate_incumbent
 from .model_admission import (
-    admission_evidence, admit_candidate, east_left_hint, is_user_anchored)
+    admission_evidence, admit_candidate, east_left_hint, is_guided, is_user_anchored)
 from .multi_calibrate import median_sky_r, refine_from_detections
 from .pole_consensus import PoleHistory
 from .pole_finder import find_pole
@@ -38,7 +38,7 @@ def _rotation_seed(incumbent, frames):
     anchored basin whose scale is locked (pole-anchor plan P7: never a
     distrusted model; a 'pole'-stamped one may have been vouched for by
     the very light the fit is meant to see past, issue #93)."""
-    if incumbent is None or getattr(incumbent, 'provenance', '') != 'guided':
+    if not is_guided(incumbent):
         return None
     w, h = median_frame_resolution(frames)
     return model_in_frame(incumbent, w, h)
@@ -74,7 +74,8 @@ class _RefineWorker(QThread):
         self._span_min = span_min
         self._lat = lat
         # Long-baseline frame ring (frame_ring) for the rotation-pole fit,
-        # and the equipment map (plan package 1; None until it exists).
+        # and the equipment map (obstruction_map.ObstructionMap, the
+        # service's singleton; None only when the service has none).
         self._ring = ring
         self._obstruction_map = obstruction_map
 

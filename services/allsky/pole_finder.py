@@ -20,7 +20,7 @@ it live behind one entry point, find_pole:
 find_pole runs the Polaris path first and the rotation path when it is
 allowed to (the refine worker; the manual paths pass rotation=False
 because the fit is seconds, not milliseconds). When both return an
-estimate they must agree within 3·sigma_px + AGREEMENT_SLACK_PX or the
+estimate they must agree within 3·sigma_px + AGREEMENT_SLACK_REF_PX (scaled) or the
 result is None with a WARNING naming both pixels: a disagreeing Polaris is
 a light near a hidden pole, a disagreeing rotation fit is a contaminated
 field. Neither is trusted over the other.
@@ -162,12 +162,13 @@ _ROTATION_TIE_FRACTION = 0.9
 # Frames sampled from large buffers (clustering and voting are O(frames²)ish).
 _MAX_SAMPLE_FRAMES = 12
 
-# Slack added to 3·sigma_px when the two paths are compared. A Polaris-path
-# estimate is the mean of Polaris's 0.65° orbit over the window — up to
-# ~14.5 px from the pole at reference scale — and the rotation path's own
-# lens-model bias measured 4–6 px on the reference preset; 20 px covers
-# both without admitting the issue #93 light, which sat 100 px off.
-AGREEMENT_SLACK_PX = 20.0
+# Slack added to 3·sigma_px when the two paths are compared, at reference
+# resolution (× tol_scale). A Polaris-path estimate is the mean of
+# Polaris's 0.65° orbit over the window — up to ~14.5 px from the pole at
+# reference scale — and the rotation path's own lens-model bias measured
+# 4–6 px on the reference preset; 20 px covers both without admitting the
+# issue #93 light, which sat 100 px off.
+AGREEMENT_SLACK_REF_PX = 20.0
 
 
 def find_pole(
@@ -187,24 +188,31 @@ def find_pole(
     contaminated field, the two paths disagreeing) — callers must treat the
     pole as an *optional* extra constraint, never a requirement.
 
-    `ring` is the long-baseline frame ring (frame_ring); the rotation path
-    prefers it to `frames` when it meets that path's requirements.
+    `ring` is the long-baseline frame ring (frame_ring); both paths prefer
+    it to `frames` when it meets the rotation path's requirements.
     `rotation=False` skips the rotation path (seconds of work) — the GUI-
     thread manual paths. `seed_model` seeds the rotation path's radial
     function when the caller trusts it (a guided incumbent, in the frames'
     resolution); the sky circle seeds it otherwise.
     """
-    polaris = _find_polaris_pole(frames, lat_deg, sky_cx, sky_cy, sky_r)
+    # Both paths take the widest span on hand (plan 4a): a 60-frame buffer
+    # at a 30 s cadence spans ~30 min, under the Polaris path's separable
+    # floor at every plate scale in the field, so on the ring alone can it
+    # fire at all.
+    pool = list(ring) if ring and _ring_usable(ring) else frames
+    polaris = _find_polaris_pole(pool, lat_deg, sky_cx, sky_cy, sky_r)
     if not rotation:
         return polaris
-    pool = list(ring) if ring and _ring_usable(ring) else frames
+    if sky_r is None:
+        rs = [f.get('sky_r') for f in pool if f.get('sky_r')]
+        sky_r = float(np.median(rs)) if rs else None
     rot = pole_from_rotation(pool, lat_deg, sky_cx, sky_cy, sky_r, seed_model)
     if rot is None:
         return polaris
     if polaris is None:
         return rot
     gap = float(np.hypot(polaris.x - rot.x, polaris.y - rot.y))
-    limit = 3.0 * rot.sigma_px + AGREEMENT_SLACK_PX
+    limit = 3.0 * rot.sigma_px + AGREEMENT_SLACK_REF_PX * tol_scale(sky_r)
     if gap > limit:
         log.warning(
             f"Pole estimate withheld: the Polaris track at ({polaris.x:.0f}, "

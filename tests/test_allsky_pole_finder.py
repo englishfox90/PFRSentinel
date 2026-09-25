@@ -376,6 +376,19 @@ class TestOrchestrator:
         find_pole(frames, REPORTER.lat, ring=ring[:3])   # too short: the buffer
         assert seen == [20, 12]
 
+    def test_polaris_path_takes_the_ring_the_buffer_is_too_short_for(self):
+        """A 60-frame buffer at 30 s spans 30 min: under the separable
+        floor at reference scale, so the Polaris path withholds on it; on
+        the ring (one frame per 10 min over 3 h) it finds Polaris."""
+        buffer = synth_frames(REFERENCE, instants(60, 30), seed=9)
+        ring = synth_frames(REFERENCE, instants(19, 180), seed=9)
+        assert _polaris_only(buffer, REFERENCE.lat) is None
+        est = find_pole(buffer, REFERENCE.lat, ring=ring, rotation=False)
+        pole = true_pole(REFERENCE)
+        assert est is not None and est.source == 'polaris'
+        assert np.hypot(est.x - pole[0], est.y - pole[1]) < 20.0
+        assert est.n_frames == 12 and est.span_minutes == pytest.approx(180.0)
+
     def test_southern_site_gets_a_rotation_pole(self):
         from tests.allsky_synth import SOUTHERN
         frames = synth_frames(SOUTHERN, instants(12, 60), seed=8)
