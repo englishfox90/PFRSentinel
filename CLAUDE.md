@@ -366,6 +366,7 @@ Standalone (not in pytest suite):
 - [`docs/METEOR_DETECTION_PLAN.md`](docs/METEOR_DETECTION_PLAN.md) — meteor detection rework for the long-exposure regime; read before touching `services/meteor/`
 - [`docs/FEATURE_HARDENING_PLAN.md`](docs/FEATURE_HARDENING_PLAN.md) — prioritized hardening backlog (web server, ASCOM roof safety file, timelapse) from the 2026-06-28 deep review; P0/P1/P2 + sizing + file:line pointers
 - [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
+- [`docs/ALLSKY_HOSTING_SITE_PLAN.md`](docs/ALLSKY_HOSTING_SITE_PLAN.md) — issue #93: hidden-Polaris pole from the rotating field, chance-aware quality, external roof source, overlay gate; five independently mergeable packages with agent briefs
 - [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
 
 Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).
