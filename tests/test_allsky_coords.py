@@ -63,6 +63,42 @@ class TestPrecession:
         ra2, dec2 = precess_from_j2000(ra, dec, datetime(2026, 1, 1, tzinfo=timezone.utc))
         assert ra2.shape == (2,) and dec2.shape == (2,)
 
+    def test_matches_meeus_worked_example_21b(self):
+        """Published apparent position (plan #93 5d'): Meeus, Astronomical
+        Algorithms 2nd ed., Example 21.b — θ Persei with proper motion applied
+        (α 2h44m12.975s, δ +49°13'39.90") precessed to 2028 Nov 13.19 TD
+        (JD 2462088.69) is α 2h46m11.331s, δ +49°20'54.54". The IAU 1976
+        rotation lands within 0.01" of it; a wrong sign convention or a
+        dropped term would miss by arcminutes."""
+        from datetime import timedelta
+        from services.allsky.coords import julian_date, precess_from_j2000
+        dt = datetime(2028, 11, 13, tzinfo=timezone.utc) + timedelta(days=0.19)
+        assert julian_date(dt) == pytest.approx(2462088.69, abs=1e-6)
+        ra, dec = precess_from_j2000((2 + 44 / 60 + 12.975 / 3600) * 15.0,
+                                     49 + 13 / 60 + 39.90 / 3600, dt)
+        exp_ra = (2 + 46 / 60 + 11.331 / 3600) * 15.0
+        exp_dec = 49 + 20 / 60 + 54.54 / 3600
+        assert abs(float(ra) - exp_ra) * 3600 < 0.01
+        assert abs(float(dec) - exp_dec) * 3600 < 0.01
+
+    def test_calibration_catalogue_is_of_date(self):
+        """The bright-star catalogue every calibration matches against is
+        precessed to the epoch of the load, not left at J2000: Vega's stored
+        position must equal its J2000 position precessed to now (~0.18° apart for Vega, up to 0.4° elsewhere
+        in 2026 — 3–7 px at the reporter's plate scale, not a rigid rotation
+        the fit could absorb)."""
+        import math
+        from services.allsky.catalogs import get_bright_stars
+        from services.allsky.coords import precess_from_j2000
+        vega = next(s for s in get_bright_stars(max_mag=1.0) if str(s['hr']) == '7001')
+        ra_now, dec_now = precess_from_j2000(279.23473, 38.78369,
+                                             datetime.now(timezone.utc))
+        assert abs(vega['ra_deg'] - float(ra_now)) < 0.01
+        assert abs(vega['dec_deg'] - float(dec_now)) < 0.01
+        sep_j2000 = math.hypot((vega['ra_deg'] - 279.23473) * math.cos(math.radians(38.8)),
+                               vega['dec_deg'] - 38.78369)
+        assert sep_j2000 > 0.1
+
 
 # ===================================================================
 # Topocentric (diurnal) parallax — significant for the Moon (~1°)

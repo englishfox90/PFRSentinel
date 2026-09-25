@@ -267,6 +267,85 @@ Directory Watch mode does not feed the calibration service); the receipt-time fa
 is receipt − exposure/2, not the file-mtime rule package 4b specified, which needs the
 watcher to carry the path or mtime — a follow-up in the watcher.
 
+### 0.7 Package 5 replay (2026-09-25)
+
+Same night, same dump, rebuilt from the library JPEGs with the package-4 detector
+and the text rects (59 frames, 235 min, 152 detections per frame in the median),
+static lights stripped (21 lights, 8382 → 7140 detections) — the "sigma fix +
+rules + `strip_static`" pool of §0.6. Truth is the guided model rescaled to 750 px
+(a1 283, axis_alt 72.6°). Before = `main` with packages 0–4, after = package 5, both
+on this pool. Timings are the CI container's single core.
+
+| Run | Before (packages 0–4) | After (package 5) |
+|---|---|---|
+| Rotation pole | (402.2, 103.1) ± 3.8 px, a1 276 (0.975× guided), support 14 % | same |
+| Guided model vs that pole | 11.5 px; flat gate 27 px at this scale | 11.5 px; calibrated gate **40 px** (×3.5 margin) |
+| Seeded refinement (guided seed) | rejected, 2219 vs 1129 (**1.97×**) at 6.6 px, axis_alt 71.7°, a1 0.944× | rejected, 2243 vs 1137 (**1.97×**) at 6.6 px, axis_alt 71.5°, a1 0.945× — the pole term moved the projected pole by 0.6 px |
+| Cold start, pole-seeded | — | 213 cells, 6 candidates in 0.3 s; candidate 1 **admitted**: 1985 matches vs 918 (**2.16×**) at 5.7 px, RMS 2.44, 3/3 anchor frames, a1 269 (0.951×), pole 21 px from the guided model's and 32 px from the measured; 49 s in all |
+| Cold start, unseeded | 6 candidates, all at a1 222 (0.78×, the sky-circle seed), all **rejected** at 1.01–1.29× chance; 50 s | 6760 cells, 8 candidates in 1.1 s; candidate 1 **admitted**: 1248 vs 449 (**2.78×**) at 3.8 px, RMS 2.37, a1 271 (0.955×), pole 23 px from the guided model's; 69 s in all |
+
+Readings:
+
+- **The cold start is fixed on this rig, with or without the pole.** The scale scan
+  is what does it: every pre-package-5 candidate carried the sky-circle seed a1 = 222
+  and could not reach 283 inside the fit's basin; the vote's winning cells sit at
+  a1 265–272. The roll vote's score in σ ranked the admitted basin first in both
+  modes (8.0σ seeded, 8.8σ unseeded) over a field of 213 / 6760 cells, and the whole
+  search costs 0.3–1.1 s here — the joint fits of the candidates are the cost
+  (8 s each). The unseeded path stands on its own, as §6 required.
+- **Two admissible models of one rig differ at the pole by a tenth of the pole's
+  radius.** Every joint fit that passed the anchor gate on all three recent frames
+  — seeded from the guided model or found from cold — solved a1 at 0.945–0.955×
+  the guided model's and put the pole 21–23 px from the guided model's and 29–32 px
+  from the rotation pole (r_p = 290 px here); the guided model itself sits 11.5 px
+  from it. The plan's 5d tolerance (3σ + 30 px reference model error, floored at
+  40) is 17 px at this scale: it passes the guided model and rejects every one of
+  those fits. Forcing a fit onto the measured pole (5c at a 1 px sigma, or ten
+  times the weight) costs it 80 % of its matches and every anchor frame — the
+  measured pole and the star field disagree about the pole by that much under the
+  joint fit's lens model. So the model-error allowance is proportional to the pole's
+  distance from the optical centre (`pole_tolerance.POLE_TOL_RADIAL_FRACTION = 0.10`,
+  the same band `model_admission` admits as one rig's plate scale, which alone moves
+  the pole by 0.1·r_p), giving 40 px here: the guided model at ×3.5, the fits at
+  ×1.25–1.4. The issue asked for the gate to be tightened; the measurement says it
+  can only be calibrated — tighter than the flat 140 px for a pole near the centre
+  of the frame, looser for one at the edge of a well-measured field.
+- **The pole pseudo-observation (5c) is a soft prior, not a leash.** At the sigma
+  the gate implies it never disturbs a fit that is right (synthetic presets: RMS
+  identical; this night: 0.6 px at the pole) and cannot lift a fit out of a wrong
+  basin — the wrong matches resist, not the weight (a 2.5°-tilted seed stays at
+  RMS 11 px with 30 matches at any weight below the one that harms real fits). It
+  helps only near the basin: a seed rolled 6° off (pole 114 px off at full
+  resolution) ends at RMS 4.2 instead of 6.7 px on the reference preset. The
+  plan's "cannot walk away during the tolerance schedule" is not achievable
+  without the harm above; the orientation search's pole filter (5b) and the gate
+  (5d) are the defences, and the term stays because it is free and never hurts.
+- **The axis-from-the-pole shortcut (5b as written) does not work and was not
+  taken.** The pole pixel fixes the axis only up to a rotation about the pole
+  direction, and walking that circle through the seed lens is fragile: on the
+  reporter preset the family's nearest cell sat 3.6° from the truth and scored
+  6.6σ against 35σ at the true cell (the seed's cubic term, the scale step and the
+  pole's own error each move the circle). The pole instead seeds the scale scan
+  (0.7–1.5× the rotation fit's a1, against 0.7–1.8× — the a1 gate's own band — of
+  the sky-circle seed) and filters the voted cells to those whose model projects
+  the pole within the gate tolerance plus the cell's granularity. Same search,
+  robust either way, 1.4–3.2 s on the synthetic presets.
+- **Precession (5d′) was already in place** — `coords.precess_from_j2000`, applied to
+  every catalogue at load since PR #15 — so the plan's "precession no" in §6 was
+  wrong. It matches Meeus's worked example 21.b to 0.005″ (`test_allsky_coords`
+  now pins it) and the calibration catalogue is verified of-date.
+- **The rival test (5e) has a near miss on record**: in the pole-seeded cold start a
+  fourth candidate also passed (879 matches, excess 513 against the winner's
+  1067, 0.48×), just under the 0.5× rival threshold. It fitted the same basin,
+  so no rival would have been declared either way.
+- The seeded refinement is unchanged at 1.97×: package 3's chance gate, at the
+  tolerance the schedule stops at (§0.6), is what decides it — the model it produces
+  is the same one the cold start admits at 2.16–2.78× from a coarser start. That
+  gate's dependence on where the schedule stops is the open item this replay leaves.
+
+Package 5's regression for all of this is `tests/test_allsky_pole_constrained_real.py`
+(skips without the dataset).
+
 ## 1. Findings
 
 | # | Finding | Where | Package |

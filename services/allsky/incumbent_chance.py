@@ -45,7 +45,7 @@ from .model_admission import is_user_anchored
 from .multi_calibrate import _build_all_matches, _joint_rms
 
 # The joint fit's final re-match tolerance at reference resolution
-# (multi_calibrate._joint_iterative_fit: tol_scale * max(18, 50 - 5 * i)).
+# (joint_fit.joint_iterative_fit: tol_scale * max(18, 50 - 5 * i)).
 # The incumbent is judged at the same tolerance a candidate's final match
 # count is, so its ratio is comparable with the gate every candidate passed.
 SCORE_TOL_REF_PX = 18.0

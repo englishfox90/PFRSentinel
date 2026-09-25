@@ -52,6 +52,12 @@ class PoleEstimate:
     # 'polaris' — the brightest coherent near-stationary track;
     # 'rotation' — the axis the whole field rotates about.
     source: str = 'polaris'
+    # Plate scale (px/rad, linear term) the rotation fit solved alongside
+    # the axis, in the same frame as x/y; the orientation search scans
+    # scale around it (issue #93 package 5b) because on an obstructed
+    # aperture the sky circle is not a measurement. 0.0 = none (Polaris
+    # path, or an estimate from before this field existed).
+    a1_px_per_rad: float = 0.0
 
 
 def predicted_polaris_arc_px(sky_r: float, span_minutes: float) -> float:

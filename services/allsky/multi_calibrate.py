@@ -35,187 +35,36 @@ import numpy as np
 
 from services.logger import app_logger as log
 
-# Pre-import scipy at module level so background threads never trigger
-# a first-time import (causes segfault in PyInstaller builds).
-try:
-    from scipy.optimize import least_squares as _least_squares
-except Exception as _e:
-    _least_squares = None
-    log.error(f"scipy.optimize import failed in multi_calibrate: {type(_e).__name__}: {_e}")
-
 from .star_centroid import detect_stars, estimate_sky_circle
 from .fisheye import FisheyeModel
 from .catalogs import get_bright_stars
-from .coords import radec_to_altaz
 from .calibration import (
     CalibrationError,
     _get_image_size,
     _catalog_altaz,
-    _brightness_match,
-    _params_to_model,
-    _compute_rms,
     calibrate,
 )
 from .calibration_validate import (
-    A3_MAX,
-    A3_MIN,
-    A3_SEED_DEFAULT,
-    ORIENT_AXIS_ALT,
-    ORIENT_AXIS_AZ,
-    ORIENT_ROLL_DEG,
-    REG_A3,
-    REG_A5,
-    a1_from_sky_radius,
+    median_sky_r,
     validate_a1_scale,
     validate_bright_anchors,
     validate_lens_polynomial,
     tol_scale,
 )
 from .chance_matches import check_above_chance
-from .bootstrap_selection import chance_excess, select_bootstrap_winner
-# Re-exported for existing callers in this module (extracted to
-# joint_fit_diagnostics.py to stay under the file-size cap).
-from .joint_fit_diagnostics import collect_diagnostics as _collect_diagnostics
-
-
-# ---------------------------------------------------------------------------
-# Radial-polynomial regularisation (ridge prior toward the seed)
-# ---------------------------------------------------------------------------
-#
-# On obstructed installs (pier cameras with the telescope OTA/mount in frame)
-# the matched stars cluster in the unblocked sky region, leaving the radial
-# polynomial (a3, a5) under-constrained. With even a slightly stale seed the
-# optimiser bends a3 toward its bound to absorb an *orientation* error — landing
-# in a low-RMS false minimum where roll/axis are wrong and the bright anchors
-# are 50-90 px off (observed in production as the recurring "a3=25.0 outside
-# plausible range" refinement failure). A soft ridge penalty pulling a3/a5 back
-# toward the seed values forces the orientation parameters to take the
-# correction instead. The penalty is weighted by sqrt(N residuals) so its
-# strength relative to the data is independent of how many stars matched: when
-# coverage genuinely constrains the polynomial the data still dominates; when it
-# doesn't, the physical prior wins instead of the bound.
-# Ridge weights REG_A3 / REG_A5 are shared with the guided fit (calibration_validate).
-
-
-def median_sky_r(frames) -> float:
-    """Median trimmed sky radius across frames, or 0.0 if unknown.
-
-    Used to scale match tolerances to the frame resolution (F10). Frames built
-    by dev scripts may omit 'sky_r'; 0.0 makes tol_scale() neutral.
-    Public: also used by CalibrationService for the pole gate.
-    """
-    rs = [f.get('sky_r') for f in frames if f.get('sky_r')]
-    return float(np.median(rs)) if rs else 0.0
+from .bootstrap_selection import (
+    chance_excess, describe_orientation, find_rival, select_bootstrap_winner)
+# Extracted to joint_fit.py / orientation_search.py (file-size cap); the
+# underscored names are re-exported here for existing callers and tests.
+from .joint_fit import (  # noqa: F401
+    _build_all_matches, _joint_iterative_fit, _joint_rms, pole_constraint_for)
+from .orientation_search import (  # noqa: F401
+    _coarse_orientation_candidates, centre_offset_vote, search_frames)
 
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
-
-# Cold-start orientation search: coarse grid over the mount/orientation
-# parameters, scored across ALL accumulated frames at once.
-_BOOT_MAX_FRAMES = 8     # frames sampled for the orientation search (speed)
-_BOOT_MAX_CAT = 150      # brightest catalog stars used for scoring
-# Orientation grid (ORIENT_AXIS_ALT / ORIENT_AXIS_AZ / ORIENT_ROLL_DEG) is shared
-# with the guided fit (calibration_validate).
-
-
-_BOOT_TOP_K = 6          # coarse candidates handed to the joint fit
-
-
-def _coarse_orientation_candidates(
-    frames: List[dict],
-    k: int = _BOOT_TOP_K,
-    east_left_hint: Optional[bool] = None,
-):
-    """Return up to k coarse orientation seeds, best-first, from a cross-frame grid.
-
-    A single obstructed frame can't determine the full 8-parameter pose (the
-    matched stars cluster in the unblocked sky region), so per-frame methods
-    like triangle hashing settle on a wrong axis_alt/roll. The TRUE pose is the
-    one that matches stars in *every* frame's clear window as the sky rotates; a
-    false pose only fits one frame. This grid scores each (east_left, axis_alt,
-    axis_az, roll) candidate by total matches summed across the sampled frames.
-
-    Coarse scoring alone is not perfectly discriminative, so we return the top-k
-    candidates: the caller joint-fits each and keeps the one that passes the
-    bright-anchor gate (a false basin won't). cx/cy come from the reliable
-    sky-circle estimate, a1 from the sky radius; the joint fit refines the rest.
-
-    east_left_hint: when the field-rotation direction has been measured
-    (pole_finder), the wrong mirror half of the grid is skipped entirely —
-    the mirrored basin is the main wrong-basin failure mode.
-    """
-    from scipy.spatial import cKDTree
-
-    # Evenly sample frames across the buffer for the search.
-    n = len(frames)
-    if n > _BOOT_MAX_FRAMES:
-        idx = np.linspace(0, n - 1, _BOOT_MAX_FRAMES).round().astype(int)
-        sample = [frames[i] for i in dict.fromkeys(idx.tolist())]
-    else:
-        sample = frames
-
-    cx = float(np.median([f.get('sky_cx', 0.0) for f in sample]))
-    cy = float(np.median([f.get('sky_cy', 0.0) for f in sample]))
-    sky_r = median_sky_r(sample)
-    a1 = a1_from_sky_radius(sky_r) if sky_r else 600.0
-    # Generous tolerance: coarse grid points (5° alt / 15° roll apart) place
-    # stars only approximately, so matching must be forgiving to score the
-    # right basin highest. The joint fit tightens from here.
-    tol = max(35.0, 50.0 * tol_scale(sky_r))
-
-    # Precompute per-frame: KDTree of detections + brightest catalog alt/az.
-    prepared = []
-    for f in sample:
-        det = f.get('detected', [])
-        if len(det) < 4:
-            continue
-        tree = cKDTree(np.array([(d[0], d[1]) for d in det], dtype=float))
-        ah = f.get('above_horizon', [])[:_BOOT_MAX_CAT]
-        alts = np.array([a for _s, a, _z in ah], dtype=float)
-        azs = np.array([z for _s, _a, z in ah], dtype=float)
-        prepared.append((tree, alts, azs))
-
-    if not prepared:
-        raise CalibrationError("Bootstrap: no frames with enough detections.")
-
-    mirrors = (True, False) if east_left_hint is None else (bool(east_left_hint),)
-    scored = []  # (n_match, east_left, axis_alt, axis_az, roll_deg)
-    for east_left in mirrors:
-        for axis_alt in ORIENT_AXIS_ALT:
-            for axis_az in ORIENT_AXIS_AZ:
-                for roll_deg in ORIENT_ROLL_DEG:
-                    m = FisheyeModel(
-                        cx=cx, cy=cy, a1=a1, a3=A3_SEED_DEFAULT, a5=0.0,
-                        roll=np.radians(roll_deg), axis_alt=float(axis_alt),
-                        axis_az=float(axis_az), east_left=east_left,
-                    )
-                    n_match = 0
-                    for tree, alts, azs in prepared:
-                        px, py, vis = m.altaz_array_to_pixels(alts, azs)
-                        if not np.any(vis):
-                            continue
-                        pts = np.column_stack([px[vis], py[vis]])
-                        d, _ = tree.query(pts, distance_upper_bound=tol)
-                        n_match += int(np.count_nonzero(np.isfinite(d)))
-                    scored.append((n_match, east_left, axis_alt, axis_az, roll_deg))
-
-    scored.sort(key=lambda t: -t[0])
-    img_w = frames[0].get('image_width', 0)
-    img_h = frames[0].get('image_height', 0)
-    out = []
-    for n_match, east_left, axis_alt, axis_az, roll_deg in scored[:k]:
-        m = FisheyeModel(
-            cx=cx, cy=cy, a1=a1, a3=A3_SEED_DEFAULT, a5=0.0,
-            roll=np.radians(roll_deg), axis_alt=float(axis_alt),
-            axis_az=float(axis_az), east_left=east_left,
-        )
-        m.image_width, m.image_height = img_w, img_h
-        out.append(m)
-        log.info(f"Bootstrap candidate: matches={n_match} east_left={east_left} "
-                 f"axis_alt={axis_alt} axis_az={axis_az} roll={roll_deg}° a1={a1:.0f}")
-    return out
 
 
 def refine_from_detections(
@@ -225,6 +74,9 @@ def refine_from_detections(
     min_total_matches: int = 20,
     max_residual_px: float = 20.0,
     east_left_hint: Optional[bool] = None,
+    pole=None,
+    lat_deg: Optional[float] = None,
+    ring: Optional[List[dict]] = None,
 ) -> FisheyeModel:
     """
     Joint calibration from pre-processed frame data.
@@ -243,6 +95,12 @@ def refine_from_detections(
         max_residual_px: maximum accepted median residual (pixels).
         east_left_hint: measured mirror convention (pole_finder); restricts
             the cold-start orientation search to the correct mirror.
+        pole: the trusted measured pole (pole_consensus) in the frames'
+            resolution, or None. With `lat_deg` it seeds and filters the
+            cold-start orientation search and is a pseudo-observation in
+            the joint fit (joint_fit.POLE_WEIGHT) — never a requirement.
+        ring: the long-baseline frame ring (frame_ring) the orientation
+            search prefers to `frames`.
 
     Returns:
         Refined FisheyeModel.
@@ -253,12 +111,15 @@ def refine_from_detections(
     if len(frames) < 1:
         raise CalibrationError("No frames provided for refinement.")
 
+    constraint = pole_constraint_for(pole, lat_deg, frames, seed_model)
+
     # --- Warm path: refine an existing model ---
     if seed_model is not None:
-        log.info(f"Refining from {len(frames)} pre-processed frame(s)")
+        log.info(f"Refining from {len(frames)} pre-processed frame(s)"
+                 + (" with the measured pole as a constraint" if constraint else ""))
         return _fit_and_validate(
             frames, seed_model, min_matches_per_image,
-            min_total_matches, max_residual_px,
+            min_total_matches, max_residual_px, pole=constraint,
         )
 
     # --- Cold start: fit EVERY coarse orientation candidate through the joint
@@ -267,7 +128,9 @@ def refine_from_detections(
     # near-identical counts for every orientation (issue #33), so ranking by it
     # chooses between contradictory basins at random. See bootstrap_selection
     # for the ordering that replaced it. ---
-    candidates = _coarse_orientation_candidates(frames, east_left_hint=east_left_hint)
+    candidates = _coarse_orientation_candidates(
+        frames, east_left_hint=east_left_hint, pole=pole, lat_deg=lat_deg, ring=ring)
+    vote_frames = search_frames(frames, ring)
     passed = []
     last_err = None
     for i, seed in enumerate(candidates):
@@ -275,6 +138,7 @@ def refine_from_detections(
             model = _fit_and_validate(
                 frames, seed, min_matches_per_image,
                 min_total_matches, max_residual_px,
+                pole=constraint, centre_vote_frames=vote_frames,
             )
             passed.append(model)
             log.info(f"Bootstrap candidate {i + 1}/{len(candidates)} passed: "
@@ -291,6 +155,13 @@ def refine_from_detections(
         )
 
     best, why = select_bootstrap_winner(passed, frames)
+    rival = find_rival(passed, best)
+    if rival is not None:
+        raise CalibrationError(
+            "Cold-start bootstrap withheld: two incompatible solutions explain "
+            f"the frames — {describe_orientation(best)} and "
+            f"{describe_orientation(rival)} share under half their matched "
+            "stars; more sky is needed before either can be trusted.")
     log.info(f"Cold-start bootstrap: selected best of {len(passed)} passing "
              f"candidate(s) by excess over chance, then bright-anchor hits "
              f"({why})")
@@ -303,9 +174,24 @@ def _fit_and_validate(
     min_matches_per_image: int,
     min_total_matches: int,
     max_residual_px: float,
+    pole=None,
+    centre_vote_frames: Optional[List[dict]] = None,
 ) -> FisheyeModel:
-    """Joint-fit from a seed and enforce the residual + sanity gates."""
+    """Joint-fit from a seed and enforce the residual + sanity gates.
+
+    `pole` is a joint_fit PoleConstraint (or None). `centre_vote_frames`
+    turns on the centre-offset vote for a coarse cold-start seed: the
+    bright stars correct cx/cy before the first match, which the fit's own
+    ±100 px centre bound could not (orientation_search).
+    """
     _ts = tol_scale(median_sky_r(frames))
+    if centre_vote_frames:
+        dx, dy, votes = centre_offset_vote(centre_vote_frames, seed_model,
+                                           median_sky_r(frames))
+        if votes:
+            log.info(f"Centre offset vote: ({dx:+.0f}, {dy:+.0f}) px on {votes} votes")
+            seed_model = dataclasses.replace(seed_model, cx=seed_model.cx + dx,
+                                             cy=seed_model.cy + dy)
     all_matches = _build_all_matches(frames, seed_model, tol_px=50.0 * _ts,
                                      min_per_image=min_matches_per_image)
     total = sum(len(m) for m in all_matches)
@@ -319,7 +205,7 @@ def _fit_and_validate(
     model, rms = _joint_iterative_fit(
         all_matches, frames, seed_model,
         min_matches_per_image, min_total_matches, max_residual_px,
-        tol_scale_factor=_ts,
+        tol_scale_factor=_ts, pole=pole,
     )
 
     if rms > max_residual_px:
@@ -533,202 +419,3 @@ def _best_single_frame_model(frames, lat, lon, cx0, cy0) -> FisheyeModel:
         a1_guess = min(img_w, img_h) * 0.5 * 0.75 / (np.pi / 2.0)
         return FisheyeModel(cx=cx0, cy=cy0, a1=a1_guess)
 
-
-def _build_all_matches(frames, model, tol_px: float,
-                       min_per_image: int,
-                       max_vmag: Optional[float] = None,
-                       _log: bool = True) -> List[list]:
-    """Match each frame's detections to catalog using the current model."""
-    all_matches = []
-    discarded = 0
-    total_matched = 0
-    for f in frames:
-        horizon = f['above_horizon']
-        if max_vmag is not None:
-            horizon = [(s, a, z) for s, a, z in horizon if s.get('vmag', 9.0) <= max_vmag]
-        matches = _brightness_match(f['detected'], horizon, model, tol_px=tol_px)
-        if len(matches) >= min_per_image:
-            all_matches.append(matches)
-            total_matched += len(matches)
-        else:
-            discarded += 1
-    # One summary line per call rather than one per frame: at ~60 frames over
-    # 10 tightening iterations the per-frame form emitted ~600 DEBUG lines per
-    # refinement cycle (every couple of minutes). The per-iteration INFO summary
-    # in _joint_iterative_fit covers the convergence story.
-    if _log:
-        log.debug(f"  tol={tol_px:.0f}px: kept {len(all_matches)} frames "
-                  f"({total_matched} matches), discarded {discarded} "
-                  f"(min={min_per_image}/frame)")
-    return all_matches
-
-
-def _joint_iterative_fit(
-    all_matches, frames, seed_model, min_per_image, min_total, max_residual,
-    cx_range: float = 100.0,
-    cy_range: float = 100.0,
-    tol_scale_factor: float = 1.0,
-) -> Tuple[FisheyeModel, float]:
-    """
-    Iterative joint optimisation over all matched frames.
-
-    Each iteration:
-      1. Run scipy least_squares on the pooled residuals.
-      2. Re-match every frame at a tightening tolerance.
-      3. Discard frames that fall below min_per_image matches.
-
-    cx_range / cy_range: maximum allowed drift of the optical centre from
-    the seed value (pixels).  Keeps the optimizer from drifting to a
-    degenerate local minimum — the sky-circle centre is a hard physical
-    constraint that orientation/polynomial parameters cannot compensate for.
-    """
-    if _least_squares is None:
-        raise CalibrationError("scipy is required for calibration.")
-
-    # Work on a copy from here on. For a seeded refinement, seed_model can be
-    # the live CalibrationService._model the GUI thread renders from — if
-    # least_squares throws on iteration 0 the loop below breaks with
-    # `model is seed_model`, and writing n_matches/rms_residual/etc onto that
-    # shared object (and should_replace comparing it with itself) would
-    # corrupt the incumbent in place instead of just failing the refinement.
-    model = dataclasses.replace(seed_model)
-
-    # Anchor cx/cy within cx_range/cy_range of the seed model.
-    # east_left is discrete — fixed from seed, not part of continuous optimisation.
-    seed_cx, seed_cy = model.cx, model.cy
-    east_left = model.east_left
-
-    # Polynomial regularisation toward the seed (physical prior). See the
-    # ridge-prior note above _joint_iterative_fit and REG_A3/REG_A5 rationale.
-    seed_a3, seed_a5 = model.a3, model.a5
-
-    # Bright anchor matches: kept at a fixed large tolerance throughout all iterations
-    # so that easily-identified bright stars (vmag < 3.5) always participate in the
-    # loss even when the tightening regular tolerance would exclude them.  Without
-    # this, the optimizer can settle into a false minimum where hundreds of dim stars
-    # match well but Arcturus/Vega/Antares/Deneb are 50-90 px off.
-    _ANCH_TOL = 100.0 * tol_scale_factor
-    _ANCH_MAX_VMAG = 3.5
-    _ANCH_WEIGHT = 4.0  # multiply residuals → 16x contribution to squared loss
-    anchor_matches = _build_all_matches(
-        frames, model, tol_px=_ANCH_TOL, min_per_image=0,
-        max_vmag=_ANCH_MAX_VMAG, _log=False,
-    )
-
-    # Tolerance `all_matches` currently reflects. Tracked rather than recomputed
-    # by the caller because the loop can break early (converged, or a failed
-    # least_squares), and the chance-match gate must be judged at the tolerance
-    # the surviving matches were actually built at.
-    final_tol = 50.0 * tol_scale_factor
-
-    for iteration in range(10):
-        params = np.array([
-            model.cx, model.cy, model.a1, model.a3, model.a5,
-            model.roll, model.axis_alt, model.axis_az,
-        ])
-
-        # Capture by name; both are reassigned after _least_squares returns.
-        current_matches = all_matches
-        current_anchor = anchor_matches
-
-        def residuals(p):
-            m = _params_to_model(p, east_left)
-            res = []
-            for img_matches in current_matches:
-                for (dx, dy), _star, (alt, az) in img_matches:
-                    xy = m.altaz_to_pixel(alt, az)
-                    if xy is None:
-                        res.extend([30.0, 30.0])
-                    else:
-                        res.extend([dx - xy[0], dy - xy[1]])
-            # Bright anchor terms: fixed large tolerance, high weight.
-            # These prevent the false minimum where dim-star density produces low RMS
-            # but the easily-identified bright anchors are far from any detection.
-            for img_anchors in current_anchor:
-                for (dx, dy), _star, (alt, az) in img_anchors:
-                    xy = m.altaz_to_pixel(alt, az)
-                    if xy is None:
-                        res.extend([30.0 * _ANCH_WEIGHT, 30.0 * _ANCH_WEIGHT])
-                    else:
-                        res.extend([(dx - xy[0]) * _ANCH_WEIGHT,
-                                    (dy - xy[1]) * _ANCH_WEIGHT])
-            # Ridge prior on the radial polynomial (see note above). Weighted by
-            # sqrt(N) so the prior's strength tracks the data volume.
-            if res and (REG_A3 > 0 or REG_A5 > 0):
-                w = float(np.sqrt(len(res)))
-                res.append(REG_A3 * w * (m.a3 - seed_a3))
-                res.append(REG_A5 * w * (m.a5 - seed_a5))
-            return res
-
-        try:
-            # a3/a5 bounds match single-image fit: physical fisheye range.
-            # axis_alt lower bound is 60° (not 45°) to match the grid-search floor —
-            # allowing lower values lets the optimizer drift to a zenith-magnified false
-            # minimum where dim stars cluster densely but bright anchors are missed.
-            result = _least_squares(
-                residuals, params,
-                bounds=(
-                    [seed_cx - cx_range, seed_cy - cy_range,
-                     50,  A3_MIN, -1500.0, -np.pi, 60.0, -180.0],
-                    [seed_cx + cx_range, seed_cy + cy_range,
-                     2000,  A3_MAX,   500.0,  np.pi, 90.0,  540.0],
-                ),
-                method='trf',
-                max_nfev=12000,
-                ftol=1e-5,
-            )
-            raw = result.x.copy()
-            raw[7] = raw[7] % 360.0   # normalise axis_az to [0, 360)
-            model = _params_to_model(raw, east_left)
-        except Exception as e:
-            log.warning(f"Joint fit iteration {iteration} failed: {e}")
-            break
-
-        # Re-match every frame at tightening tolerance (schedule shape fixed;
-        # endpoints scaled to the sky radius for resolution-independence, F10).
-        # Floor at 18px (≈11px at this sky radius): on real frames a 5-8px floor
-        # over-prunes — centroid noise + residual model error drop good matches
-        # below min_per_image, the frames get discarded, and a genuinely correct
-        # fit collapses to a handful of matches (observed: a correct orientation
-        # held 79 matches at 9px then fell to 4 at 5px). A moderate floor keeps
-        # the match set populated so correct fits survive and degenerate ones
-        # are still distinguished by far lower counts.
-        tol = tol_scale_factor * max(18.0, 50.0 - iteration * 5.0)
-        final_tol = tol
-        all_matches = _build_all_matches(frames, model, tol_px=tol,
-                                         min_per_image=min_per_image)
-        # Rebuild anchor matches with updated model (fixed large tolerance)
-        anchor_matches = _build_all_matches(
-            frames, model, tol_px=_ANCH_TOL, min_per_image=0,
-            max_vmag=_ANCH_MAX_VMAG, _log=False,
-        )
-
-        total   = sum(len(m) for m in all_matches)
-        rms     = _joint_rms(all_matches, model)
-        n_imgs  = len(all_matches)
-        log.info(f"  Iter {iteration}: {total} matches / {n_imgs} frames, "
-                 f"RMS={rms:.2f}px, tol={tol:.0f}px, "
-                 f"axis_alt={model.axis_alt:.3f}")
-
-        if rms < 2.5 and total >= min_total:
-            break
-
-    total = sum(len(m) for m in all_matches)
-    rms   = _joint_rms(all_matches, model)
-
-    model.n_matches    = total
-    model.rms_residual = float(rms)
-    model.final_tol_px = float(final_tol)
-    model.matched_stars = _collect_diagnostics(all_matches, model, frames)
-    return model, rms
-
-
-def _joint_rms(all_matches, model) -> float:
-    """Median pixel residual across all matches in all frames."""
-    residuals = []
-    for img_matches in all_matches:
-        for (dx, dy), _star, (alt, az) in img_matches:
-            xy = model.altaz_to_pixel(alt, az)
-            if xy is not None:
-                residuals.append(float(np.hypot(dx - xy[0], dy - xy[1])))
-    return float(np.median(residuals)) if residuals else 999.0

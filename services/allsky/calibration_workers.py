@@ -142,6 +142,7 @@ class _RefineWorker(QThread):
                 self._seed,
                 max_residual_px=MAX_RESIDUAL_PX,
                 east_left_hint=east_left_hint(self._incumbent, pole, drought),
+                pole=pole, lat_deg=self._lat, ring=ring,
             )
             ok, msg = admit_candidate(
                 model, self._incumbent, self._lat, pole, sky_r,
