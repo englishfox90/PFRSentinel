@@ -34,13 +34,33 @@ Rules, in order:
    matches), a margin that is noise between two fits of one lens. Two
    uncorroborated fits are symmetric ignorance and a coin-flip RMS must
    not decide between them.
-3. Basin escape over an incumbent that FAILED the bright-anchor gate:
-   replace, whatever the RMS says. CalibrationService only lets an escape
-   run when the incumbent misses the bright stars on the recent frames — a
-   healthy incumbent cancels it in _maybe_refine — and the candidate was
-   admitted having passed that same gate on those same frames. A model
-   that cannot find the bright stars has no standing to veto on RMS one
-   that can. Without this rule the guard below reads the incumbent's RMS
+   The bypass also demands merit from the CANDIDATE: its own RMS-to-
+   tolerance and chance ratios must pass calibration_fit_merit. Evidence
+   says only that a pole or an authoritative incumbent existed this run —
+   nothing about the fit — and on the #93 rig the "trusted pole" was a
+   light on the pier, so the bypass installed a fit that was 1.0x chance.
+   A candidate that fails it falls through to the normal comparison.
+3. Basin escape over an incumbent that is DISCREDITED — it failed the
+   bright-anchor gate, or matched the live buffer at chance level in
+   consecutive runs (incumbent_chance) — by a candidate that passes
+   fit_is_credible: replace, whatever the incumbent's RMS says.
+   CalibrationService only lets an escape run when the incumbent misses
+   the bright stars on the recent frames — a healthy incumbent cancels it
+   in _maybe_refine, so the chance-streak path of this rule is reached
+   only with anchor health None or False, never over a model that still
+   hits its anchors — and the candidate was admitted having passed that
+   same gate on those same frames. A model that cannot find the bright
+   stars has no standing to veto on RMS one that can; nor has one whose
+   matches are coincidences (#93: the anchor gate read None all night on
+   that obstructed rig, so the chance score is the verdict that reaches
+   this rule there). Like rule 2, this bypass demands merit from the
+   CANDIDATE (calibration_fit_merit), for either source of discredit: a
+   discredited incumbent losing its veto is right, but what replaces it
+   must itself be sky-worthy — on the #93 rig the Sep 19 candidate cleared
+   the per-run chance gate at ~1.0x and was installed, and with the chance
+   streak now able to discredit incumbents the next such fit would walk in
+   here. A candidate without merit falls through to the normal comparison.
+   Without this rule the guard below reads the incumbent's RMS
    first and the escape never reaches the question of the candidate's own
    merit: on the #33 rig a single-image fit to five stars (2.43 px, 8
    parameters over 5 points) turned away a 726-match joint fit 41 times in
@@ -90,6 +110,7 @@ Rules, in order:
 """
 from typing import Tuple
 
+from .calibration_fit_merit import fit_is_credible
 from .calibration_quality import CalibrationQuality
 from .model_admission import is_guided
 
@@ -123,32 +144,49 @@ def should_replace(
     escape: bool = False,
     evidence: bool = False,
     incumbent_failed_anchors: bool = False,
+    incumbent_chance_level_twice: bool = False,
 ) -> Tuple[bool, str]:
     """(replace?, reason). `escape`: the candidate came from a seedless basin
     escape; `evidence`: model_admission.admission_evidence for its admission;
     `incumbent_failed_anchors`: the incumbent failed the bright-anchor gate on
     the frames that licensed the escape (incumbent_evidence, tri-state — only
-    a definite failure counts, and it buys nothing against a guided
-    incumbent).
+    a definite failure counts); `incumbent_chance_level_twice`: it matched the
+    live buffer at chance level in consecutive runs
+    (incumbent_chance.IncumbentChanceStreak.discredited). Either discredits
+    the incumbent for rule 3; neither buys anything against a guided one.
     """
     if incumbent is None:
         return True, "no incumbent"
 
-    if escape and evidence:
+    credible, merit = fit_is_credible(candidate) if escape else (True, "")
+    incumbent_discredited = incumbent_failed_anchors or incumbent_chance_level_twice
+    bypass = escape and (evidence or (incumbent_discredited
+                                      and not is_guided(incumbent)))
+    if bypass and not credible:
+        evidence_note = ("basin escape with the RMS guard waived, but the "
+                         f"candidate has no merit of its own ({merit}) — held "
+                         "to the normal comparison with a material-gain floor: ")
+    else:
+        evidence_note = ""
+
+    if escape and evidence and credible:
         return True, (
             "basin escape admitted on evidence — replacing the "
             f"repeatedly-rejected model (RMS {incumbent.rms_residual:.1f}px) "
             f"with the re-calibrated one (RMS {candidate.rms_residual:.1f}px) "
             "without the RMS guard")
 
-    if escape and incumbent_failed_anchors and not is_guided(incumbent):
+    if escape and incumbent_discredited and credible and not is_guided(incumbent):
+        what = ("fails the bright-anchor check on the recent frames"
+                if incumbent_failed_anchors
+                else "matched the live buffer at chance level in consecutive runs")
         return True, (
-            "basin escape over a model that fails the bright-anchor check on "
-            f"the recent frames (RMS {incumbent.rms_residual:.2f}px over "
-            f"{incumbent.n_matches} matches) — the candidate passed the same "
-            f"check (RMS {candidate.rms_residual:.2f}px over "
-            f"{candidate.n_matches} matches); a model that misses the bright "
-            "stars does not get an RMS veto")
+            f"basin escape over a model that {what} "
+            f"(RMS {incumbent.rms_residual:.2f}px over "
+            f"{incumbent.n_matches} matches) — the candidate passed the "
+            f"bright-anchor and chance checks (RMS {candidate.rms_residual:.2f}px "
+            f"over {candidate.n_matches} matches); a model that misses the "
+            "sky does not get an RMS veto")
 
     rank_up = (CalibrationQuality.rank(candidate_quality)
                > CalibrationQuality.rank(incumbent_quality))
@@ -164,9 +202,11 @@ def should_replace(
         f"the incumbent's RMS {incumbent.rms_residual:.2f}px is not "
         f"comparable ({incumbent.n_matches} matches over "
         f"{incumbent.n_images} image(s)) — ")
-    prefix = ("basin escape without evidence (uncorroborated incumbent, no "
-              "trusted pole) — held to the normal comparison with a "
-              "material-gain floor: "
+    if not comparable:
+        note = evidence_note + note   # a refused bypass is named either way
+    prefix = (evidence_note or "basin escape without evidence (uncorroborated "
+              "incumbent, no trusted pole) — held to the normal comparison "
+              "with a material-gain floor: "
               if escape else "")
     if comparable:
         if candidate.rms_residual > incumbent.rms_residual * RMS_REGRESSION_TOLERANCE:

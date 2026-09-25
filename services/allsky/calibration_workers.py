@@ -20,8 +20,10 @@ from services.logger import app_logger as log
 
 from .calibration import calibrate, CalibrationError
 from .calibration_validate import median_frame_resolution, model_in_frame
+from .incumbent_chance import score_incumbent, score_tolerance_px
 from .incumbent_evidence import corroborate_incumbent
-from .model_admission import admission_evidence, admit_candidate, east_left_hint
+from .model_admission import (
+    admission_evidence, admit_candidate, east_left_hint, is_user_anchored)
 from .multi_calibrate import median_sky_r, refine_from_detections
 from .pole_consensus import PoleHistory
 from .pole_finder import find_pole
@@ -53,6 +55,12 @@ class _RefineWorker(QThread):
     # The incumbent was stamped pole-corroborated in place this run
     # (incumbent_evidence); the service persists the stamp.
     incumbent_corroborated = Signal(str)   # message
+    # The incumbent's chance score on this run's frames (incumbent_chance
+    # .IncumbentScore, or None when the buffer can't judge it). Its own
+    # signal, not a field of result_ready: most runs on a rig that needs it
+    # end in `failed` (#93: 62 of 62), and the score has to reach the
+    # service on those too.
+    incumbent_scored = Signal(object)
 
     def __init__(self, frames, seed_model, n_images: int, span_min: float,
                  lat: float = 0.0, incumbent=None, pole_history=None,
@@ -119,6 +127,14 @@ class _RefineWorker(QThread):
                 pole_image_width=pole_w, pole_image_height=pole_h)
             if stamped:
                 self.incumbent_corroborated.emit(why)
+            # The guided solve itself is never scored: a 7-anchor solve is
+            # not expected to meet the joint fit's final tolerance across the
+            # whole sky, its authority is the user's, and the anchor-health
+            # caution already covers a moved camera. A joint fit descended
+            # from it (same provenance stamp) is scored like any other.
+            if not is_user_anchored(self._incumbent):
+                self.incumbent_scored.emit(score_incumbent(
+                    self._incumbent, frames, score_tolerance_px(sky_r)))
 
             model = refine_from_detections(
                 frames,

@@ -132,3 +132,58 @@ class TestServiceWiring:
             svc._on_refine_failed("rejected")
         svc.clear_model()
         assert seen[-1] == ''
+
+
+class TestIncumbentChanceLevel:
+    """#93: the incumbent's own chance score on the live buffer, two runs at
+    chance level (IncumbentChanceStreak.discredited), flags the model
+    whatever the failure count or the anchor verdict says — that rig's
+    anchor check read None all night."""
+
+    def test_flagged_misaligned_with_no_failures_and_unknown_health(self, health):
+        health['value'] = None
+        level, msg = ca.calibration_attention(_model(), 0, [],
+                                              incumbent_chance_level=True)
+        assert level == ca.LEVEL_MISALIGNED
+        assert 'chance' in msg and 'preliminary' in msg
+        assert 'unchanged' in msg and 'Guided Calibration' in msg
+
+    def test_outranks_a_healthy_anchor_verdict(self, health):
+        health['value'] = True
+        level, _ = ca.calibration_attention(_model(), 5, [],
+                                            incumbent_chance_level=True)
+        assert level == ca.LEVEL_MISALIGNED
+
+    def test_says_when_auto_calibration_has_paused(self, health):
+        _level, msg = ca.calibration_attention(
+            _model(), 0, [], escape_paused=True, incumbent_chance_level=True)
+        assert 'paused' in msg
+
+    def test_no_model_still_needs_nothing(self, health):
+        assert ca.calibration_attention(None, 0, [],
+                                        incumbent_chance_level=True) == ('', '')
+
+    def test_default_is_off(self, health):
+        health['value'] = None
+        assert ca.calibration_attention(_model(), 0, []) == ('', '')
+
+    def test_guided_solve_is_never_misaligned_from_chance(self, health):
+        health['value'] = None
+        guided = _model()
+        guided.provenance = 'guided'
+        guided.n_images = 1
+        assert ca.calibration_attention(guided, 0, [],
+                                        incumbent_chance_level=True) == ('', '')
+        # A joint fit that inherited the stamp (n_images 20, ratio 1.0) is not
+        # the solve itself and is flagged like any automatic fit.
+        descended = _model()
+        descended.provenance = 'guided'
+        descended.chance_ratio = 1.0
+        level, _ = ca.calibration_attention(descended, 0, [],
+                                            incumbent_chance_level=True)
+        assert level == ca.LEVEL_MISALIGNED
+        # The anchor-health caution still applies to it.
+        health['value'] = False
+        level, _ = ca.calibration_attention(guided, 4, [],
+                                            incumbent_chance_level=True)
+        assert level == ca.LEVEL_MISALIGNED

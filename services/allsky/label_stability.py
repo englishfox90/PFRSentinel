@@ -11,7 +11,10 @@ of state that lets consecutive frames agree:
   * ``SkyMaskHistory`` — majority vote over recent detection masks, plus a
     hold-over for frames that produce no usable mask (too few detections), so
     neither a noisy frame nor a run of them — an exposure change lasts many
-    frames, not one — can flip a region between sky and obstruction.
+    frames, not one — can flip a region between sky and obstruction. The vote
+    is never thrown away for lack of frames: after the hold it is *stale*,
+    and the caller (``sky_region``) lets the persisted equipment map take
+    over until real detections return.
   * ``StickySelection`` — objects already on screen keep their slot while they
     stay visible and within a rank margin of the budget. A newcomer displaces
     an incumbent only when it out-ranks it by more than that margin.
@@ -24,7 +27,7 @@ recalibration or size change is handled inside each piece.
 import math
 import threading
 from collections import deque
-from typing import Deque, Dict, List, Optional, Set
+from typing import Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -42,75 +45,181 @@ RANK_MARGIN = 3           # incumbents survive up to this far past the budget
 
 # The vote is kept at reduced resolution. Fifteen full-resolution masks of a
 # 3552 px frame are ~190 MB; the mask is made of circles no smaller than 15 px
-# in radius, so nothing a label test can see is lost at this size.
+# in radius, so nothing a label test can see is lost at this size. The
+# equipment map (obstruction_map) shares this grid, so the two combine
+# without resampling.
 MASK_VOTE_MAX_EDGE = 512
 
 
+def vote_grid(full_shape) -> Tuple[int, Tuple[int, int]]:
+    """(step, (rows, cols)) of the reduced grid for a full-resolution shape."""
+    h, w = int(full_shape[0]), int(full_shape[1])
+    step = max(1, math.ceil(max(h, w) / MASK_VOTE_MAX_EDGE))
+    return step, ((h + step - 1) // step, (w + step - 1) // step)
+
+
+def to_grid(plane, full_shape) -> np.ndarray:
+    """A plane on the grid passes through; one at full resolution is strided
+    down (a view, no copy). Anything else is a caller error."""
+    step, small = vote_grid(full_shape)
+    arr = np.asarray(plane)
+    if arr.shape[:2] == small:
+        return arr
+    if arr.shape[:2] == (int(full_shape[0]), int(full_shape[1])):
+        return arr[::step, ::step]
+    raise ValueError(f"plane {arr.shape} is neither full {tuple(full_shape[:2])} "
+                     f"nor grid {small}")
+
+
+def upsample(small: np.ndarray, full_shape) -> np.ndarray:
+    """Nearest-neighbour back to full resolution."""
+    step, _ = vote_grid(full_shape)
+    h, w = int(full_shape[0]), int(full_shape[1])
+    if step == 1:
+        return small
+    return np.repeat(np.repeat(small, step, axis=0), step, axis=1)[:h, :w]
+
+
 class SkyMaskHistory:
-    """Temporal majority vote over per-frame sky-visibility masks."""
+    """Temporal majority vote over per-frame sky-visibility masks.
+
+    Each frame contributes two grid planes: where it saw sky, and where it
+    was in a position to say anything at all (``counted``). A full frame
+    counts everywhere outside the Moon's glare; a sparse frame
+    (``add_partial``) counts only inside its own detection discs, so it can
+    add sky but never take it away. A pixel no frame could judge is left to
+    the equipment map and reads as sky here.
+    """
 
     def __init__(self, depth: int = MASK_VOTE_DEPTH,
                  hold_frames: int = MASK_HOLD_FRAMES):
         self._depth = max(1, min(255, int(depth)))   # votes are summed in uint8
         self._hold = max(0, int(hold_frames))
-        self._frames: Deque[np.ndarray] = deque()    # reduced-resolution bools
-        self._votes: Optional[np.ndarray] = None     # running sum of _frames
+        self._frames: Deque[tuple] = deque()         # (sky, counted), on the grid
+        self._votes: Optional[np.ndarray] = None     # running sum of sky
+        self._counts: Optional[np.ndarray] = None    # running sum of counted
         self._shape: Optional[tuple] = None          # full-resolution shape
-        self._vote: Optional[np.ndarray] = None
+        self._small: Optional[np.ndarray] = None     # vote on the grid, 0/255
+        self._full: Optional[np.ndarray] = None      # materialised on demand
         self._misses = 0
 
     @property
     def depth(self) -> int:
         return len(self._frames)
 
+    @property
+    def small_vote(self) -> Optional[np.ndarray]:
+        """The vote on the reduced grid (0/255 uint8), fresh or stale."""
+        return self._small
+
+    @property
+    def vote(self) -> Optional[np.ndarray]:
+        """The vote at full resolution. Built on first use after a fold and
+        held until the next one, so a run of held frames returns one array.
+        The renderer works on the grid and never asks for this."""
+        if self._small is None:
+            return None
+        if self._full is None:
+            self._full = upsample(self._small, self._shape)
+        return self._full
+
+    @property
+    def is_stale(self) -> bool:
+        """True when the vote has outlived its hold with no new evidence.
+
+        The vote is still returned — it is the best per-night knowledge there
+        is — but the caller should prefer the equipment map where one exists
+        (discussion #76: a cloudy hour used to wipe the vote and hand the
+        labels to a raw-brightness test that passed lit equipment).
+        """
+        return self._small is not None and self._misses > self._hold
+
     def reset(self) -> None:
-        self._frames.clear()
-        self._votes = None
+        self._clear_frames()
         self._shape = None
-        self._vote = None
+        self._small = None
+        self._full = None
         self._misses = 0
 
-    def update(self, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    def _clear_frames(self) -> None:
+        self._frames.clear()
+        self._votes = None
+        self._counts = None
+
+    def update(self, mask: Optional[np.ndarray],
+               exclude: Optional[np.ndarray] = None,
+               full_shape: Optional[tuple] = None) -> Optional[np.ndarray]:
         """Fold this frame's mask in and return the smoothed mask.
 
         ``mask`` is a 0/255 uint8 array, or None when the frame yielded no
-        usable detection mask. A None frame returns the previous vote for up to
-        ``hold_frames`` consecutive misses, then None so the caller can fall
-        back; the history is cleared at that point because a fresh stretch of
-        frames should not be out-voted by stale ones.
+        usable detection mask. A None frame returns the previous vote; after
+        ``hold_frames`` consecutive misses that vote is ``is_stale`` but still
+        returned. The first real mask after a stale run replaces the history
+        rather than being out-voted by it.
+
+        ``exclude`` (bool) marks pixels this frame cannot judge — the Moon's
+        glare disc, where the glare itself blanks the detections — and they
+        are left out of the frame count there. Planes are full resolution,
+        or on the grid for ``full_shape`` when that is given.
         """
         if mask is None:
-            self._misses += 1
-            if self._vote is not None and self._misses <= self._hold:
-                return self._vote
-            self.reset()
-            return None
+            self.note_miss()
+        else:
+            self.fold_grid(mask, exclude=exclude, full_shape=full_shape)
+        return self.vote
 
-        full = np.asarray(mask)
-        if self._shape is not None and self._shape != full.shape:
+    def add_partial(self, mask: np.ndarray,
+                    exclude: Optional[np.ndarray] = None,
+                    full_shape: Optional[tuple] = None) -> Optional[np.ndarray]:
+        """Fold a sparse frame in: it votes sky inside its discs and abstains
+        elsewhere. Three to nine detections on a moonlit or hazy frame are
+        real sky, but too few to say where the sky is *not*."""
+        self.fold_grid(mask, partial=True, exclude=exclude, full_shape=full_shape)
+        return self.vote
+
+    def note_miss(self) -> None:
+        """A frame with no usable mask: the vote is held, then goes stale."""
+        self._misses += 1
+
+    def fold_grid(self, mask: np.ndarray, *, partial: bool = False,
+                  exclude: Optional[np.ndarray] = None,
+                  full_shape: Optional[tuple] = None) -> None:
+        """Advance the vote without materialising the full-resolution result:
+        the production path, which works on the grid throughout."""
+        counted = (np.asarray(mask) > 0) if partial else None
+        full_shape = tuple(full_shape[:2]) if full_shape else np.asarray(mask).shape[:2]
+        if self._shape is not None and self._shape != full_shape:
             self.reset()
-        self._shape = full.shape
-        step = max(1, math.ceil(max(full.shape) / MASK_VOTE_MAX_EDGE))
-        sky = np.ascontiguousarray(full[::step, ::step] > 0)
+        elif self.is_stale:
+            self._clear_frames()
+        self._shape = full_shape
+        sky = np.ascontiguousarray(to_grid(mask, full_shape) > 0)
+        if counted is None:
+            seen = np.ones(sky.shape, dtype=bool)
+        else:
+            seen = np.ascontiguousarray(to_grid(counted, full_shape) > 0)
+        if exclude is not None:
+            seen &= ~(to_grid(exclude, full_shape) > 0)
+        sky &= seen
 
         self._misses = 0
         if self._votes is None:
             self._votes = np.zeros(sky.shape, dtype=np.uint8)
-        self._frames.append(sky)
+            self._counts = np.zeros(sky.shape, dtype=np.uint8)
+        self._frames.append((sky, seen))
         self._votes += sky
+        self._counts += seen
         while len(self._frames) > self._depth:
-            self._votes -= self._frames.popleft()
+            old_sky, old_seen = self._frames.popleft()
+            self._votes -= old_sky
+            self._counts -= old_seen
 
-        # "Sky in at least half the frames, rounding up": one frame is itself,
-        # two frames is either, three frames needs two.
-        n = len(self._frames)
-        small = np.where(self._votes.astype(np.uint16) * 2 >= n, 255, 0).astype(np.uint8)
-        if step == 1:
-            self._vote = small
-        else:
-            self._vote = np.repeat(np.repeat(small, step, axis=0), step, axis=1)[
-                :full.shape[0], :full.shape[1]]
-        return self._vote
+        # "Sky in at least half the frames that could tell, rounding up": one
+        # frame is itself, two frames is either, three frames needs two. A
+        # pixel no frame could judge is sky here; the equipment map decides.
+        self._small = np.where(self._votes.astype(np.uint16) * 2 >= self._counts,
+                               255, 0).astype(np.uint8)
+        self._full = None
 
 
 class StickySelection:
@@ -166,6 +275,22 @@ class LabelStabilizer:
         with self._lock:
             return self.masks.update(mask)
 
+    def fold_mask(self, mask: Optional[np.ndarray], full_shape: tuple,
+                  exclude: Optional[np.ndarray] = None, partial: bool = False) -> None:
+        """Advance the vote with grid planes; nothing is materialised."""
+        with self._lock:
+            if mask is None:
+                self.masks.note_miss()
+            else:
+                self.masks.fold_grid(mask, partial=partial, exclude=exclude,
+                                     full_shape=full_shape)
+
+    def current_small_vote(self) -> tuple:
+        """(vote on the grid, is_stale) without advancing the vote — a
+        reprocess of the same capture must not count the frame twice."""
+        with self._lock:
+            return self.masks.small_vote, self.masks.is_stale
+
     def select(self, ranked: List[str], top_n: int) -> Set[str]:
         with self._lock:
             return self.selection.select(ranked, top_n)
@@ -186,5 +311,6 @@ def get_label_stabilizer() -> LabelStabilizer:
 
 
 def reset_label_stability() -> None:
-    """Forget all frame-to-frame state (tests, and a new capture session)."""
+    """Forget all frame-to-frame state: a new capture session, a new or
+    cleared calibration model (the projection every label rests on), tests."""
     _stabilizer.reset()

@@ -116,13 +116,51 @@ renderer serves one live frame stream; `reset_label_stability()` clears it.
 
 | Piece | What it does | Constant |
 |---|---|---|
-| `SkyMaskHistory` | Majority vote over the last N detection masks; a frame with no usable mask reuses the last vote for up to M frames before the renderer falls back to raw grayscale | `MASK_VOTE_DEPTH = 3`, `MASK_HOLD_FRAMES = 3` |
+| `SkyMaskHistory` | Majority vote over the last N detection masks; a frame with no usable mask reuses the last vote for up to M frames, after which the vote is `is_stale` and the equipment map takes over. Frames with 3–9 detections vote sky inside their discs only (`add_partial`); the Moon's glare disc is left out of the denominator | `MASK_VOTE_DEPTH = 15`, `MASK_HOLD_FRAMES = 15` |
 | `StickySelection` | An object already on screen stays eligible up to `top_n + margin` and competes with a `margin`-rank bonus, so a newcomer must out-rank it by more than the margin (a rising Moon still displaces it) | `RANK_MARGIN = 3` |
 | `LabelGrid(slot_memory=…)` | The candidate slot a label used last frame is tried first, so a new neighbour does not flip it to the other side of its star | — |
 
-A real change (roof closing, cloud) is adopted after two frames; a sustained
-detection failure releases the mask hold and clears the history so stale
-frames cannot out-vote fresh ones.
+A lasting change (a telescope parked across the field) is adopted after about
+eight frames. A sustained detection failure never wipes the vote: it goes stale,
+and the first real mask afterwards replaces the history rather than being
+out-voted by it. The stabilizer is reset at capture start and whenever the
+calibration model is set or cleared; a reprocess of the same capture
+(`observing_window.SAME_CAPTURE_KEY`) reads the vote without advancing it.
+
+### Visibility plane and the equipment map
+
+`sky_region.visibility_plane` decides where labels may go on each frame:
+
+| Source | When | Module |
+|---|---|---|
+| Fresh vote ∧ equipment map | the vote is fresh and a map exists — a pixel must be sky in both | `sky_region` |
+| Fresh vote | no map yet | `label_stability` |
+| Equipment map | the vote is stale | `obstruction_map` |
+| Model sky disc `a1 · (π/2) · (1 − SKY_TRIM_FRACTION)`, translated for the output crop | neither exists (first frames of a first session) | `sky_region.model_sky_disc` |
+
+There is no raw-grayscale fallback any more: it passed lit equipment on a
+moonlit frame and nothing on a dark one (issue #93, H9).
+
+`obstruction_map.ObstructionMap` is a float32 sky-probability plane on the
+vote's 512 px grid, stamped with the output frame size and `OUTPUT_CROP`
+(a different stamp starts a new map, never a rescaled one). Frames with
+≥ 10 detections pull their discs toward sky; frames with ≥ 40 pull pixels of
+the model disc more than two disc radii from every detection toward
+equipment, the Moon's glare disc excepted. The update is a running mean up
+to `HEAL_FRAMES = 600` frames of evidence per pixel and an EMA with that
+time constant after, so a moved scope is forgotten over about two nights.
+Only frames the preview path rendered (past the observing-window check;
+package 2's observable-sky gate will supply the verdict) teach it. It is
+saved to `<app-data>/allsky_obstruction.npz` at most every 10 minutes, at
+capture stop and at shutdown; loaded by `AllSkyController` at startup; cleared
+by **Reset Calibration** and **Reset Equipment Map**. Saves are atomic
+(temp file + `os.replace`) and serialised by their own lock; a truncated or
+foreign file is logged and ignored at startup. Resource budget (plan §8),
+measured idle on the development container: the in-place update on
+preallocated planes p50 2.15 ms / p95 6.8 ms at 3552 px (budget 10 ms); the
+plane selection, including the one full-resolution upsample, p50 10.8 ms /
+p95 15.5 ms (budget 30 ms). The timed tests log these and assert only a 5x
+ceiling, so a loaded runner never fails them. No new threads or timers.
 
 ---
 

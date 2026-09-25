@@ -160,6 +160,12 @@ class _MainWindowSettingsMixin:
         if cfg.get('_action') == 'reset_calibration':
             self.allsky_controller.reset_calibration()
             return
+        if cfg.get('_action') == 'dump_buffer':
+            self.allsky_controller.dump_calibration_buffer()
+            return
+        if cfg.get('_action') == 'reset_equipment_map':
+            self.allsky_controller.reset_equipment_map()
+            return
         # Preserve calibration_file from existing config
         existing = self.config.get('allsky_overlay', {})
         cfg['calibration_file'] = existing.get('calibration_file', '')

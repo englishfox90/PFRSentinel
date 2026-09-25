@@ -68,3 +68,23 @@ def get_calibration_backup_path() -> str:
     """Where the previous calibration goes before an automatic save
     overwrites it — the one-step undo for a bad model replacement."""
     return os.path.join(get_app_data_dir(), 'allsky_calibration.previous.json')
+
+
+def get_allsky_buffer_dir(create: bool = True) -> str:
+    """Where calibration buffer dumps go: ``<app-data>/allsky/``.
+
+    Created on demand by the dump itself; readers (the diagnostics bundle)
+    pass ``create=False`` so looking for a dump never leaves an empty folder
+    behind on a rig that has never written one.
+    """
+    path = os.path.join(get_app_data_dir(), 'allsky')
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_obstruction_map_path() -> str:
+    """Where the all-sky equipment map (services/allsky/obstruction_map.py)
+    persists between sessions. Per-installation like the calibration: it
+    records where THIS rig's scopes and pier sit in the frame."""
+    return os.path.join(get_app_data_dir(), 'allsky_obstruction.npz')

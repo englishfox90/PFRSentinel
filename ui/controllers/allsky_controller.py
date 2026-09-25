@@ -7,6 +7,7 @@ Manages:
   - Config save/load for allsky_overlay section
   - Signals to panel for status updates
 """
+import threading
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 
@@ -112,7 +113,14 @@ class AllSkyController(QObject):
 
     status_changed   = Signal(str)
     quality_changed  = Signal(str)   # CalibrationQuality level string
+    # Why the level is what it is — calibration_fit_merit's reason for a
+    # capped chance fit, '' otherwise. Emitted before every quality_changed.
+    quality_note_changed = Signal(str)
     attention_changed = Signal(str, str)
+    # (level, note) for the badge after a live verdict on the model on disk
+    # (CalibrationService.badge_quality_changed). Display only: unlike
+    # quality_upgraded nothing was saved, so no config or file side effects.
+    badge_quality_changed = Signal(str, str)
     calibration_done = Signal(dict)
     settings_changed = Signal()
 
@@ -122,6 +130,7 @@ class AllSkyController(QObject):
         self._worker: Optional[CalibrationWorker] = None
         self._model = None
         self._aspect_note: Optional[str] = None  # non-square-frame warning
+        self._dump_in_flight = False  # one buffer-dump writer at a time
 
         # Background calibration accumulation service
         from services.allsky.calibration_service import CalibrationService
@@ -129,9 +138,18 @@ class AllSkyController(QObject):
         self._cal_service.quality_upgraded.connect(self._on_quality_upgraded)
         self._cal_service.status_changed.connect(self.status_changed)
         self._cal_service.attention_changed.connect(self.attention_changed)
+        self._cal_service.badge_quality_changed.connect(self.badge_quality_changed)
 
         # Load existing model into both controller and service
         self._update_status()
+
+        # The equipment map is loaded here, on the GUI thread at startup:
+        # no capture is running yet, so nothing races the renderer thread
+        # that will read and update it. It is saved by the renderer every
+        # ten minutes, at capture stop and at shutdown.
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        get_obstruction_map().load(get_obstruction_map_path())
 
     # ------------------------------------------------------------------
     # Public API (called by panel)
@@ -319,6 +337,7 @@ class AllSkyController(QObject):
 
         self._model = None
         self._cal_service.clear_model()
+        self._forget_equipment_map()
 
         # Clear the config pointer so the overlay renderer stops immediately;
         # the next successful calibration re-sets it.
@@ -331,8 +350,51 @@ class AllSkyController(QObject):
         self.status_changed.emit(
             "Calibration reset — auto-calibration will start over as frames "
             "accumulate, or use Guided Calibration.")
-        self.quality_changed.emit('none')
+        self._publish_quality('none')
         self.settings_changed.emit()
+
+    def dump_calibration_buffer(self) -> None:
+        """Write the service's frame buffer to a replay dump for a bug report.
+
+        Runs on a daemon thread: the write is a few milliseconds, but the
+        status line must not wait on disk either way. The result reaches the
+        panel through status_changed, which Qt queues onto the GUI thread.
+        """
+        if self._dump_in_flight:
+            return
+        self._dump_in_flight = True
+        self.status_changed.emit("Saving calibration buffer…")
+        threading.Thread(target=self._dump_calibration_buffer,
+                         name='allsky-buffer-dump-ui', daemon=True).start()
+
+    def _dump_calibration_buffer(self) -> None:
+        try:
+            path = self._cal_service.dump_now()
+        finally:
+            self._dump_in_flight = False
+        if path is None:
+            self.status_changed.emit(
+                "Calibration buffer is empty — nothing to save. Frames are "
+                "collected while capture runs with the overlay enabled.")
+        else:
+            self.status_changed.emit(f"Calibration buffer saved: {path}")
+
+    def reset_equipment_map(self) -> None:
+        """Forget the learned equipment map (Reset Equipment Map button).
+
+        For a rearranged rig: the map heals on its own over about two
+        nights, but a scope parked where sky used to be keeps its labels
+        off until then, and nothing else clears it.
+        """
+        ok = self._forget_equipment_map()
+        self.status_changed.emit(
+            "Equipment map reset — it relearns where the equipment is over "
+            "the next clear nights." if ok else
+            "Reset failed — could not delete the equipment map file. (See logs)")
+
+    def on_capture_stopped(self) -> None:
+        """Persist what the map learned this session."""
+        self._save_equipment_map()
 
     @property
     def calibration_service(self):
@@ -352,12 +414,40 @@ class AllSkyController(QObject):
             'cy': self._model.cy,
         }
 
+    def _publish_quality(self, quality: str, model=None) -> None:
+        """Badge level plus the reason it is capped, if it is."""
+        from services.allsky.calibration_fit_merit import credibility_note
+        self.quality_note_changed.emit(credibility_note(model) if model else '')
+        self.quality_changed.emit(quality)
+
     def shutdown(self) -> None:
         """Stop any running calibration threads and background service."""
         if self._worker and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait(3000)
         self._cal_service.shutdown()
+        self._save_equipment_map()
+
+    def _save_equipment_map(self) -> None:
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        try:
+            get_obstruction_map().save_if_dirty(get_obstruction_map_path())
+        except Exception as e:
+            log.warning(f"Equipment map save failed: {e}")
+
+    def _forget_equipment_map(self) -> bool:
+        """Clear the in-memory map and its file; True when the file is gone.
+        Saving an empty map is how the file is removed — the file I/O stays
+        in the service module."""
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        obs_map = get_obstruction_map()
+        obs_map.reset()
+        ok = obs_map.save(get_obstruction_map_path())
+        if ok:
+            log.info("All-sky equipment map reset by user")
+        return ok
 
     # ------------------------------------------------------------------
     # Internal
@@ -418,7 +508,7 @@ class AllSkyController(QObject):
         if note:
             msg += f" — {note}"
         self.status_changed.emit(msg)
-        self.quality_changed.emit(quality)
+        self._publish_quality(quality, model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
 
@@ -451,10 +541,10 @@ class AllSkyController(QObject):
                     f"Calibrated ({ts}): {model.n_matches} stars, "
                     f"RMS={model.rms_residual:.2f}px ({quality})"
                 )
-                self.quality_changed.emit(quality)
+                self._publish_quality(quality, model)
                 return
         self.status_changed.emit("Not calibrated — click 'Calibrate Now'")
-        self.quality_changed.emit('none')
+        self._publish_quality('none')
 
     def _on_quality_upgraded(self, quality: str, model) -> None:
         """Handle quality upgrade from the background service."""
@@ -468,7 +558,7 @@ class AllSkyController(QObject):
         self._mw.config.set('allsky_overlay', allsky_cfg)
         self._mw.config.save()
 
-        self.quality_changed.emit(quality)
+        self._publish_quality(quality, model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
 

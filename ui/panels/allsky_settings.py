@@ -192,6 +192,7 @@ class QualityBadge(QFrame):
         self.setFixedHeight(26)
         self._level = 'none'
         self._attention = ''
+        self._note = ''
         self.set_quality('none')
 
     # Amber, whatever the rating: a green pill over a calibration the app
@@ -204,6 +205,13 @@ class QualityBadge(QFrame):
         self._attention = attention if attention in self._ATTENTION_SUFFIX else ''
         self.set_quality(self._level)
 
+    def set_note(self, note: str) -> None:
+        """Why the rating is what it is (a capped chance fit); '' for none.
+        Shown in the tooltip, where the level's stock description would
+        otherwise call a 60-frame chance fit a "single image"."""
+        self._note = note or ''
+        self.set_quality(self._level)
+
     def set_quality(self, level: str) -> None:
         from services.allsky.calibration_service import CalibrationQuality
         self._level = level
@@ -213,6 +221,11 @@ class QualityBadge(QFrame):
         if self._attention and level != 'none':
             bg, text = self._ATTENTION_COLOURS
             label = f"{label} — {self._ATTENTION_SUFFIX[self._attention]}"
+        # The note is the specific reason and names the saved rating itself;
+        # the generic suffix is for a caution with no measurement behind it.
+        if self._note and level != 'none':
+            desc = f"{desc}. {self._note}"
+        elif self._attention and level != 'none':
             desc = f"{desc} (rating from when it was saved)"
 
         self._label.setText(label)
@@ -313,6 +326,21 @@ class AllSkySettingsPanel(QScrollArea):
         self._reset_btn = PushButton("Reset Calibration…", icon=mdi('delete'))
         self._reset_btn.clicked.connect(self._on_reset_clicked)
         vl.addWidget(self._reset_btn)
+
+        # Support handle: writes the frames auto-calibration is working from
+        # to a small file the diagnostics bundle picks up (no images).
+        self._dump_btn = PushButton("Dump calibration buffer", icon=mdi('database-export'))
+        self._dump_btn.setToolTip(
+            "Save the star detections collected for automatic calibration to a "
+            "file for a bug report. No images are saved.")
+        self._dump_btn.clicked.connect(self._on_dump_clicked)
+        vl.addWidget(self._dump_btn)
+
+        # The learned equipment map outlives the calibration on purpose; this
+        # is the way to forget it after the rig is rearranged.
+        self._reset_map_btn = PushButton("Reset Equipment Map…", icon=mdi('delete'))
+        self._reset_map_btn.clicked.connect(self._on_reset_map_clicked)
+        vl.addWidget(self._reset_map_btn)
 
         self._layout.addWidget(card)
 
@@ -430,6 +458,15 @@ class AllSkySettingsPanel(QScrollArea):
 
     def set_quality(self, level: str) -> None:
         """Update the calibration quality badge."""
+        self._quality_badge.set_quality(level)
+
+    def set_quality_note(self, note: str) -> None:
+        """Badge tooltip detail: why a rating is capped ('' clears it)."""
+        self._quality_badge.set_note(note)
+
+    def set_badge_quality(self, level: str, note: str) -> None:
+        """Level and reason together (a live verdict on the saved model)."""
+        self._quality_badge.set_note(note)
         self._quality_badge.set_quality(level)
 
     def set_attention(self, level: str, message: str) -> None:
@@ -557,6 +594,26 @@ class AllSkySettingsPanel(QScrollArea):
         box.cancelButton.setText("Cancel")
         if box.exec():
             self.settings_changed.emit({'_action': 'reset_calibration'})
+
+    def _on_dump_clicked(self):
+        """Signal main_window to dump the calibration buffer."""
+        self.settings_changed.emit({'_action': 'dump_buffer'})
+
+    def _on_reset_map_clicked(self):
+        """Confirm, then signal main_window to forget the equipment map."""
+        box = MessageBox(
+            "Reset equipment map?",
+            "This forgets where Sentinel has learned that telescopes, mounts "
+            "and other equipment sit in the frame. Labels may land on "
+            "equipment for a while; the map relearns it over the next "
+            "clear nights."
+            "\n\nUse this after moving the camera or rearranging the rig.",
+            self.window(),
+        )
+        box.yesButton.setText("Reset")
+        box.cancelButton.setText("Cancel")
+        if box.exec():
+            self.settings_changed.emit({'_action': 'reset_equipment_map'})
 
     def _on_setting_changed(self, *_):
         self.settings_changed.emit(self.get_config())
