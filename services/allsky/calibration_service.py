@@ -48,6 +48,7 @@ from .frame_detection import (  # detect_calibration_frame re-exported (was _det
     SkippedFrameSummary, detect_calibration_frame)
 from .incumbent_chance import IncumbentChanceStreak, calibrated_status
 from .incumbent_evidence import incumbent_anchor_health
+from .label_stability import reset_label_stability
 from .model_admission import admit_manual
 from .model_replacement import should_replace
 from .multi_calibrate import median_sky_r
@@ -211,6 +212,7 @@ class CalibrationService(QObject):
         self._clear_escape_state()
         self._escape_backoff.reset()
         self._chance_streak.reset()
+        reset_label_stability()
         self._publish_attention()
         if self._quality != CalibrationQuality.NONE:
             self._quality = CalibrationQuality.NONE
@@ -229,6 +231,7 @@ class CalibrationService(QObject):
         self._clear_escape_state()
         self._escape_backoff.reset()
         self._chance_streak.reset()
+        reset_label_stability()
         new_q = model_quality(model, model.n_images, model.span_minutes)
         with self._lock:
             self._frames.clear()

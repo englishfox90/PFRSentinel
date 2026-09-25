@@ -12,107 +12,37 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from services.logger import app_logger as log
+from services.observing_window import SAME_CAPTURE_KEY
 from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
-
-# Pre-import scipy at module level so background threads never trigger
-# a first-time import (causes segfault in PyInstaller builds).
-try:
-    from scipy.spatial.distance import cdist as _cdist
-except Exception as _e:
-    _cdist = None
-    log.error(f"scipy.spatial import failed in overlay_renderer: {type(_e).__name__}: {_e}")
 
 from .fisheye import FisheyeModel
 from .label_collision import LabelGrid
-from .label_stability import get_label_stabilizer
+from .label_stability import get_label_stabilizer, upsample
+from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
 from .render_objects import render_messier, render_ngc, render_planets, _is_sky_visible
 from .render_stars import render_bright_stars, star_uid, star_display_name
-from .star_centroid import detect_stars, estimate_sky_circle
+from .sky_region import (  # sky_region pre-imports scipy for the worker thread
+    FULL_MASK_MIN_DETECTIONS, detect_sky_evidence, visibility_plane,
+)
 
 # One-shot guard so the model-scaling INFO log fires once per scale factor
 # rather than on every rendered frame (Phase 3.1).
 _last_scale_logged: Optional[float] = None
 
-# Local brightness, as a fraction of the frame's sky level, at which a
-# detection's claim on the sky around it is smallest (equipment edge) and
-# largest (open sky). 20/110 and 60/110: the former absolute thresholds at the
-# sky level of the frame they were tuned on.
-_DIM_FRACTION = 0.18
-_SKY_FRACTION = 0.55
-
 
 def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
-    """Build a sky visibility mask from actual star detections.
-
-    Each detected star claims a circular region whose radius is based on
-    the 2nd-nearest-neighbour distance (robust to isolated edge stars)
-    and weighted by local image brightness — bright open sky gets full
-    radius, dim equipment edges get small radii so labels don't bleed
-    onto obstructed areas.
-
-    Returns a uint8 array (0 = obstructed, 255 = open sky) that is a
-    drop-in replacement for the grayscale image in ``_is_sky_visible()``,
-    or None when the frame yields no usable mask (< 10 stars detected,
-    detection error). The caller decides how to fall back.
-    """
-    try:
-        sky_cx, sky_cy, sky_r = estimate_sky_circle(img)
-        detections = detect_stars(
-            img, max_stars=200,
-            sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
-        )
-    except Exception:
+    """A frame's detection mask when it rests on enough stars for a full
+    vote, else None. Kept for existing callers; the renderer itself reads
+    ``sky_region.visibility_plane``."""
+    evidence = detect_sky_evidence(img)
+    if evidence.n_detections < FULL_MASK_MIN_DETECTIONS:
         return None
-
-    if len(detections) < 10:
-        return None
-
-    w, h = img.size
-    det_xy = np.array([(x, y) for x, y, _ in detections])
-
-    # 2nd nearest neighbour distance (more robust than 1st to outliers)
-    if _cdist is None:
-        return None
-    dists = _cdist(det_xy, det_xy)
-    np.fill_diagonal(dists, 1e9)
-    nn2_dist = np.sort(dists, axis=1)[:, 1]
-    base_radii = np.clip(nn2_dist * 0.8, 50, 250)
-
-    # Brightness weight: detections in dim areas (near equipment) get 30% of
-    # their base radius, detections in open sky get 100%.  This prevents
-    # equipment-edge stars from claiming nearby obstructed regions.
-    #
-    # "Dim" is judged against this frame's own sky level, not a fixed grey
-    # value. The thresholds were 20 and 60 on a 0-255 scale, which is right
-    # for a frame whose sky sits near 110 and wrong for every other: one
-    # auto-exposure step, or dusk fading, moved the whole sky across them and
-    # the mask shrank to a third — taking the labels over that sky with it
-    # (discussion #76). The fractions below are those same two thresholds
-    # expressed against the reference frame's sky level.
-    gray = np.array(img.convert('L'))
-    bw = 25  # brightness sample half-window
-    brightness = np.array([
-        float(np.median(gray[max(0, int(y) - bw):int(y) + bw + 1,
-                              max(0, int(x) - bw):int(x) + bw + 1]))
-        for x, y in det_xy
-    ])
-    # Most detections are in open sky, so their median IS the sky level.
-    sky_level = max(float(np.median(brightness)), 1.0)
-    relative = brightness / sky_level
-    weight = np.clip((relative - _DIM_FRACTION) / (_SKY_FRACTION - _DIM_FRACTION),
-                     0.3, 1.0)
-    radii = (base_radii * weight).astype(int)
-
-    mask = Image.new('L', (w, h), 0)
-    draw = ImageDraw.Draw(mask)
-    for (x, y), r in zip(det_xy, radii):
-        draw.ellipse([(x - r, y - r), (x + r, y + r)], fill=255)
-    return np.array(mask)
+    return upsample(evidence.mask, evidence.full_shape)
 
 
 def render_allsky_overlay(
@@ -125,7 +55,10 @@ def render_allsky_overlay(
 
     Reads calibration model path from config['calibration_file'].
     Observer location from config keys '_lat', '_lon', '_elevation'
-    (injected by the pipeline callers).
+    (injected by the pipeline callers). '_frame_is_observable' (set by
+    render_allsky_for_preview past the observing-window check) lets the
+    equipment map learn from the frame; '_obstruction_map_path' is where it
+    is saved. Direct callers leave both out and never touch the map.
 
     Args:
         img: PIL Image (RGB or RGBA) to annotate.
@@ -201,16 +134,17 @@ def render_allsky_overlay(
     stabilizer = get_label_stabilizer()
     grid_cfg = LabelGrid(w, h, slot_memory=stabilizer.slot_memory)
 
-    # Build a sky visibility mask from star detections.  Pixels near
-    # detected stars are 255 (open sky); all others are 0 (obstructed).
-    # This replaces the old brightness-threshold approach which was
-    # fragile across different FITS stretches and scattered light levels.
-    # The stabilizer votes the mask over recent frames and holds the last
-    # vote through a short run of frames with too few detections; only a
-    # sustained failure falls back to the raw grayscale (issues #31, #13).
-    gray = stabilizer.smooth_mask(_detect_sky_mask(img))
-    if gray is None:
-        gray = np.array(img.convert('L'))
+    # Where labels may go: the voted detection mask while it is fresh, the
+    # persisted equipment map once it is stale, the model's own sky disc
+    # before either exists (sky_region). 255 = open sky, 0 = obstructed.
+    # A reprocess of a capture already counted reads the vote without
+    # advancing it; the map learns only from frames the observing gate passed.
+    gray = visibility_plane(
+        img, model, dt, lat, lon, stabilizer, get_obstruction_map(),
+        advance=not metadata.get(SAME_CAPTURE_KEY, False),
+        frame_is_observable=bool(config.get('_frame_is_observable', False)),
+        crop=_crop_stamp(crop), save_path=config.get('_obstruction_map_path'),
+    )
 
     # Layer order: grid first (background), then constellations, then objects
     try:
@@ -291,6 +225,12 @@ def render_allsky_for_preview(
         cfg['_lon'] = float(weather_cfg.get('longitude', 0) or 0)
         cfg['_elevation'] = float(weather_cfg.get('elevation', 0) or 0)
         cfg['_obs_utc'] = datetime.now(timezone.utc).isoformat()
+        # The render only happens past the observing-window check, so this
+        # frame is one the equipment map may learn from. Package 2's
+        # observable-sky gate will supply the verdict here.
+        cfg['_frame_is_observable'] = True
+        from services.app_config import get_obstruction_map_path
+        cfg['_obstruction_map_path'] = get_obstruction_map_path()
         return render_allsky_overlay(output_img.copy(), cfg, metadata)
     except Exception as e:
         log.debug(f"All-sky preview render skipped: {e}")
@@ -300,6 +240,14 @@ def render_allsky_for_preview(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _crop_stamp(crop: Optional[CropBox]) -> Optional[tuple]:
+    """The OUTPUT_CROP as the equipment map's stamp: a moved or resized crop
+    puts the equipment at different pixels, so the map must start over."""
+    if crop is None:
+        return None
+    return (crop.x, crop.y, crop.width, crop.height, crop.frame_width, crop.frame_height)
+
 
 def _scale_model_to(
     model: FisheyeModel, w_target: int, h_target: int,

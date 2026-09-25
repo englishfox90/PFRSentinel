@@ -74,7 +74,7 @@ The calibration is saved to `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.json`
 
 ### Lens Calibration card
 
-The **Lens Calibration** card shows a coloured quality badge (hover it for a description), a status line such as "Calibrated: 142 stars, RMS=6.20px (good)", and four buttons:
+The **Lens Calibration** card shows a coloured quality badge (hover it for a description), a status line such as "Calibrated: 142 stars, RMS=6.20px (good)", and five buttons:
 
 | Button | What it does |
 |--------|--------------|
@@ -82,6 +82,7 @@ The **Lens Calibration** card shows a coloured quality badge (hover it for a des
 | **Guided Calibration…** | Opens a dialog where you identify bright stars by hand. The dependable option for obstructed, tilted, or hazy views where automatic calibration cannot work out the orientation. See [Guided Calibration](#guided-calibration). |
 | **Reset Calibration…** | Deletes the saved calibration after a confirmation prompt. See [Reset Calibration](#reset-calibration). |
 | **Dump calibration buffer** | Saves the star positions automatic calibration has collected to a small file for a bug report. See [Dump calibration buffer](#dump-calibration-buffer). |
+| **Reset Equipment Map…** | Forgets where the app has learned that telescopes, mounts and other equipment sit in the frame, after a confirmation prompt. New in the next release. See [Equipment avoidance](#equipment-avoidance). |
 
 When **Calibrate Now** or **Guided Calibration** succeeds, a notification is posted if **Post Calibration** is enabled in your [Hermes Notifications](Hermes-Notifications) settings. Improvements made by automatic calibration do not send a notification.
 
@@ -223,6 +224,8 @@ If the full set of stars does not fit well and you identified more than five, th
 
 After a reset the badge returns to **None** and the overlay stops drawing. Automatic calibration starts over using the frames already collected, or you can run Guided Calibration straight away. A reset cannot run while a calibration is in progress.
 
+From the next release a reset also forgets the learned [equipment map](#equipment-avoidance). To forget only the map and keep the calibration, use **Reset Equipment Map…** instead.
+
 ---
 
 ## Dump calibration buffer
@@ -260,6 +263,8 @@ Labels named bright stars. Labels only, with no marker — the star itself is th
 | Color | Yellow | — | Label colour. |
 
 Star labels are placed beside their star and never on top of it, or on top of any other labelled star. Bright stars share the **Max objects visible** budget with the other object layers.
+
+Leave **Max magnitude** at 3 unless you have a reason to change it. Magnitude 2 leaves only about ten stars in the whole sky — too few to fill a **Max objects visible** budget of 15 on a moonlit night, when fainter objects are hidden.
 
 ---
 
@@ -308,6 +313,21 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 - **Max objects visible** picks the brightest visible objects.
 - Label text scales with the image size, so labels look the same at any resolution.
 
+### Equipment avoidance
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+Labels are only placed on open sky. On each frame, the stars that were detected mark out where the sky is, and those results are combined over the last 15 frames. On its own that knowledge is short-lived: it starts from nothing every session and fades during a cloudy or moonlit spell. In version 3.7.7 and earlier, once it faded the app fell back to judging the raw brightness of the image, which put labels on lit telescopes on a bright night and nowhere at all on a dark one.
+
+From the next release the app also keeps an **equipment map**: a slow memory of where telescopes, mounts, the pier and other obstructions sit in the frame, built up over hundreds of frames and saved between sessions.
+
+- **What teaches it.** Only frames taken when the overlay is allowed to draw (sun down, roof not reported closed). A frame with plenty of detected stars marks the sky it saw as sky, and the parts of the sky circle where it saw no stars at all as equipment. A frame with few stars — thin cloud, a bright Moon — can only add sky, never take it away, and the Moon's own glare is left out, so glare never reads as equipment.
+- **How it heals.** The map changes slowly: a telescope moved to a new place is learned over about a night, and the place it left is forgotten over about two. It removes places from labelling; it never switches labelling off.
+- **How it is used.** While the recent frames have a good view of the sky, a label needs both the recent frames and the map to agree that its spot is sky. When the recent frames lose the sky (cloud, the Moon), the map alone decides, so labels keep their places instead of disappearing. Before either exists — the first minutes of a first session — labels are placed anywhere inside the calibrated sky circle, so they may briefly sit on equipment.
+- **Resetting it.** **Reset Equipment Map…** on the Lens Calibration card forgets the map after a confirmation; use it after moving the camera or rearranging the rig. **Reset Calibration…** forgets it too. Changing the image size or the output crop starts a new map automatically.
+
+The map is saved in the app's data folder as `allsky_obstruction.npz`, at most every ten minutes and when capture stops. Like the calibration, it belongs to one installation: do not copy it to another rig.
+
 ### Stable labels from frame to frame
 
 > **New in the next release** — not available in version 3.7.6 or earlier.
@@ -330,6 +350,10 @@ From the next release:
 
 - Open sky is combined over the last **15 frames** (about 7 minutes at 30-second exposures), and the last good result is kept for up to 15 frames when too few stars are detected. Labels ride through an exposure change instead of following it. A lasting change, such as a telescope parked across the view, is still picked up, after about 8 frames.
 - Open sky is judged against **each frame's own sky brightness**, so a darker or brighter frame of the same sky gives the same result.
+- The combined result is **never thrown away** for lack of stars. After 15 frames without a usable view it is set aside and the [equipment map](#equipment-avoidance) takes over; the first good frame afterwards starts afresh rather than being outvoted by old frames. In 3.7.7, a long run of starless frames wiped the result and labels were placed from the raw image brightness instead.
+- Frames with only **3 to 9 detected stars** still count: they mark the sky around their stars as open and say nothing about the rest. In 3.7.7 such frames were ignored entirely.
+- The **Moon's glare** is left out of the count, so the sky the Moon washes out is not treated as an obstruction.
+- Label memory is cleared when capture starts and whenever the calibration changes, and a frame that is re-processed after a settings change is not counted twice.
 
 On a recorded sequence with a simulated exposure ramp, this cut label changes from 62 to 18 over 40 frames, most of the remainder being real changes in the scene.
 
@@ -352,6 +376,8 @@ The All-Sky page does not draw a compass. To show N/E/S/W on your image, add a *
 | Overlay used to be right but is now offset or rotated everywhere | The camera was moved | Reset the calibration and recalibrate. |
 | Overlay is badly wrong and does not improve | A bad saved calibration is holding back refinement | Click **Reset Calibration…**, then run Guided Calibration. |
 | Overlay does not appear at all | Sun above -6 degrees, roof reported closed, no calibration, or image cropped | Check the quality badge, the time of day, and the ML roof status. |
+| Labels sit on a telescope, the mount or the pier | The equipment map has not learned that spot yet — a first session, a rig that was just rearranged, or a map that was reset | Let capture run on a clear night; the map learns the equipment within an hour or so and forgets a moved scope over about two nights. If a scope was moved, **Reset Equipment Map…** speeds this up. Not available in 3.7.7 or earlier, where labels follow the stars detected on each frame only. |
+| Labels for a whole region vanish during cloud or moonlight and come back later | The recent frames lost sight of the stars there | From the next release the equipment map holds the labels in place through such spells. In 3.7.7 and earlier this is expected. |
 | Few stars detected and the image looks dark | Auto-exposure is at maximum exposure and still below target | The [Logs](Logs) show a warning that auto-exposure is pinned at max exposure. Lower the target brightness or raise gain — see [Auto-Exposure](Auto-Exposure). |
 | Guided solve fails with a large error on one star | That star was misidentified or mis-clicked | It is marked in red and selected in the dialog, with your other stars kept: remove or re-identify it and solve again. Identify 6 or more stars so the solver can recover automatically. |
 | Guided Calibration shows **Check your stars** | The stars identified so far do not agree with each other or with the frame | Re-check the most recent star first. The warning clears as soon as the identifications agree. |
