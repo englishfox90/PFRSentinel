@@ -415,8 +415,13 @@ class ImageProcessorWorker(QThread):
                         cal_lon = float(weather_cfg.get('longitude', 0) or 0)
                         if cal_lat != 0 or cal_lon != 0:
                             from datetime import timezone as _tz
+                            from services.exposure_midpoint import exposure_midpoint
+                            # Mid-exposure, not receipt time: the star
+                            # positions belong to the middle of the exposure.
                             self._calibration_service.feed_frame(
-                                stretched_for_preview, datetime.now(_tz.utc), cal_lat, cal_lon,
+                                stretched_for_preview,
+                                exposure_midpoint(metadata, datetime.now(_tz.utc)),
+                                cal_lat, cal_lon,
                             )
                 except Exception as e:
                     app_logger.warning(f"Calibration feed skipped: {e}")

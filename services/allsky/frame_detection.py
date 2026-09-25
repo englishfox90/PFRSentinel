@@ -21,6 +21,7 @@ from typing import Optional
 from services.logger import app_logger as log
 
 from .frame_catalog import above_horizon_stars
+from .detection_filters import DetectionFilters
 from .star_centroid import detect_stars, measure_sky_circle
 
 
@@ -37,6 +38,7 @@ def detect_calibration_frame(image, dt: datetime, lat: float, lon: float
         detected = detect_stars(
             image, max_stars=200,
             sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
+            filters=DetectionFilters(),
         )
         if len(detected) < 5:
             log.debug(f"CalibrationService: {len(detected)} stars — "

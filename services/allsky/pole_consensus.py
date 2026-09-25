@@ -285,7 +285,51 @@ def consensus(
         pool = [v for v in _in_frame(votes, ref_w, ref_h)
                 if v is not None and v.east_left is not None
                 and np.hypot(v.x - latest.x, v.y - latest.y) <= link]
-    return replace(latest, east_left=consensus_east_left(pool))
+    mean_x, mean_y, sigma = cluster_mean_and_sigma(found)
+    return replace(latest, x=mean_x, y=mean_y, sigma_px=sigma,
+                   east_left=consensus_east_left(pool))
+
+
+def cluster_mean_and_sigma(members: Sequence[PoleEstimate]
+                           ) -> Tuple[float, float, float]:
+    """(x, y, sigma_px) of a dominant cluster: the mean position and the
+    scatter of its INDEPENDENT windows about it, floored at the latest
+    run's own sigma.
+
+    The mean, not the latest run (plan #93 H4): every member is the same
+    pole measured again, and a Polaris-path estimate walks its 0.65° orbit
+    over a night. Scatter is measured over members whose buffer windows do
+    not overlap — consecutive runs share most of one buffer and would make
+    a single window look like a tight cluster; with fewer than two
+    independent windows the scatter is unknown (0) and the floor rules.
+    """
+    xs = np.array([e.x for e in members], dtype=float)
+    ys = np.array([e.y for e in members], dtype=float)
+    mean_x, mean_y = float(xs.mean()), float(ys.mean())
+    independent = _independent_members(members)
+    scatter = 0.0
+    if len(independent) >= 2:
+        dx = np.array([e.x - mean_x for e in independent])
+        dy = np.array([e.y - mean_y for e in independent])
+        scatter = float(np.sqrt(np.mean(dx * dx + dy * dy)))
+    per_run = float(getattr(members[-1], 'sigma_px', 0.0) or 0.0)
+    return mean_x, mean_y, max(scatter, per_run)
+
+
+def _independent_members(members: Sequence[PoleEstimate]) -> List[PoleEstimate]:
+    """A largest set of members with pairwise disjoint windows (the greedy
+    earliest-end selection of independent_windows, returning the members).
+    Unstamped members count as their own window."""
+    stamped = [e for e in members
+               if getattr(e, 'window_start', None) is not None
+               and getattr(e, 'window_end', None) is not None]
+    out = [e for e in members if e not in stamped]
+    last_end = None
+    for e in sorted(stamped, key=lambda e: e.window_end):
+        if last_end is None or e.window_start >= last_end:
+            out.append(e)
+            last_end = e.window_end
+    return out
 
 
 class PoleHistory:

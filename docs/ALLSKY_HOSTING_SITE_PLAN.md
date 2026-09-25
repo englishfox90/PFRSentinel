@@ -158,6 +158,115 @@ buffer dump from it, judged against its guided model, is ground truth for packag
 fixed. The July field test already showed `sample_images/` no longer describes this
 camera's orientation.
 
+### 0.6 First replay (2026-09-25)
+
+The package-0 dump built from the reference rig's 2026-09-18 library night (59 finished
+750 px JPEGs, local 00:00–04:00, 235 min span, `sample_images/reference_rig_2026-09/`)
+replayed against the guided model of 2026-09-15 rescaled to the 750 px crop, on `main`
+before package 4:
+
+- `detect_stars` returned **exactly 200 detections on every frame** — the `max_stars`
+  cap. Rerun on the JPEGs without the cap: a median of **443 candidates per frame**
+  (321–488). The pool was equipment texture, JPEG grain, the burned-in overlay and, on
+  the first five frames, a closed roof (`library.db`: roof Closed 00:00–00:20, Open
+  after).
+- Refinement seeded from the guided model held the basin (axis_alt 72.8° → 74.1°
+  against the guided 72.6°, RMS 2.5 px at a 4 px tolerance) and was **rejected by the
+  chance gate: 784 matches vs 683 expected (1.15×)**. The reporter's mechanism on the
+  maintainer's rig: junk in the pool inflates the chance expectation until a correct
+  fit cannot clear 2×.
+- Cold-start replay of the same dump: all six bootstrap candidates were seeded at
+  a1 = 222 against a true 283 at that scale (0.78×, the sky-circle seed again), axis_alt
+  60–70° against the guided 72.6°, and all six were rejected at chance (1.02–1.21×,
+  e.g. 764 vs 749 expected at 3.8 px). The pole finder withheld (best support 1.58×).
+  Two conclusions for the record: the detection pool must be cleaned before any solver
+  change can show (package 4), and the bootstrap must search scale (package 5).
+
+**Root cause of the 200-cap pool, found in package 4:** `detect_stars` clipped the
+background-subtracted residual to ≥ 0 *before* taking the noise sigma from it. On a
+noise-only region the clipped residual is half zeros, its median and MAD read ~0, sigma
+sat on the 1.5 floor and the threshold was ~6 grey levels — every grain of a stretched
+sky was a detection. (Package 2 measured it independently: ~950 "stars" on a dark closed
+roof at 750 px with the clipped estimate, 20–80 with the signed one.) Fixed by taking
+sigma from the signed residual; regression `tests/test_allsky_star_centroid.py::
+TestSignedNoiseSigma`.
+
+**Before / after on the same night** (guided seed, `refine_from_detections`, chance
+expectation from `chance_matches.estimate_chance` at 3.8 px over the 59 frames;
+"stars" = detections within 4 px of a catalogue star projected through the guided model,
+a weak label at 750 px — 23 % of random pixels pass it):
+
+| Pool | Detections / frame (median, max) | Chance expected @ 3.8 px | Guided-seed refinement |
+|---|---|---|---|
+| `main`, capped at 200 | 200, 200 (443 uncapped) | 447 | rejected, 784 vs 683 (**1.15×**) at 3.8 px |
+| sigma fix | **152, 185** (uncapped: the cap no longer binds) | 315 | **admitted, 2233 vs 1013 (2.20×)** at 5.7 px, axis_alt 70.9°, a1 267 (0.94× guided) |
+| sigma fix + `ignore_rects` + streak rule | 151, 185 | 315 | admitted, 2.21× |
+| sigma fix + rules + `strip_static` (25 lights) | 128, 166 | **268** | rejected, 2218 vs 1123 (**1.97×**) at 6.6 px, axis_alt 71.2° |
+
+Readings:
+
+- The sigma fix alone takes the pool off the cap and the correct seed clears 2×. It is
+  the finding of this replay; the filters are second-order on these frames.
+- The text rects (`README.md` of the dataset) remove nothing here: all four boxes lie
+  outside the measured sky circle, which `detect_stars` masks anyway. The streak rule
+  removes 0.3 % (no trails that night). Both stay on: they cost nothing and the replay
+  of a rig whose text overlaps the disc needs the rects.
+- The **dark-neighbourhood rule is off by default**. With the plan's constants (floor
+  35, radius 10 px) it dropped 33 % of all candidates and 35 % of the ones on catalogue
+  stars — the same proportion, no discrimination — and a twelve-cell sweep (floor 15–35,
+  radius 4–10 px) did the same at every setting. On these frames a dark pixel within
+  10 px is vignetted sky or JPEG grain, not a silhouette; the rule is a radial cut in
+  disguise, which is the equipment map's job. It remains available for a caller who has
+  measured it on full-resolution frames.
+- `strip_static` needed a presence rule before it could be used on a pool this dense: at
+  150 detections a frame a 6 px disc collects ~4 chance hits a night, hits that fit no
+  line, so "≥ 3 hits" called 1379 seeds lights and stripped 85 % of the pool including
+  most real stars. With six hits in ≥ 70 % of the frames they span it finds 25 lights
+  (equipment texture that survives the sigma fix), lowers the chance expectation from
+  315 to 268, and takes 14 % of the star-labelled detections with them — what the
+  label's 23 % chance rate predicts for the 1240 removed detections, plus a star
+  passing within 6 px of a light now and then, not star tracks.
+- The 1.97× after stripping is **not** a worse pool: the fit's tolerance schedule
+  stopped at 6.6 px on the stripped pool and at 5.7 px on the unstripped one (the
+  expectation grows as tol²), and at equal tolerance the stripped pool's expectation is
+  15 % lower. The final verdict depends on where the schedule stops, which is package
+  3/5 territory. On the stripped pool with the five roof-closed frames removed (package
+  2's gate), the guided seed reads 1.76× at 3.4 px; on the unstripped, 1.19×.
+- Remaining junk on the cleaned pool: ~4500 of 7100 detections are not within 4 px of a
+  catalogue star, 46 % of them in the 0.5–0.8 sky-radius band (the equipment ring and
+  the rendered overlay labels, which move with the sky and exist only on finished
+  frames), 27 % inside 0.5 (overlay lines and labels, faint stars below the label's
+  reach), 27 % outside 0.8 (silhouette rims). The equipment map (package 1) and a
+  replay from pre-overlay frames (package 0's dump, once a night of it exists) are the
+  next two reductions; nothing in package 4 can tell a rendered "Capella" label from a
+  star.
+- The pole finder on this night. Polaris path: withheld (predicted arc 2.6 px at 750 px
+  over the full 235-min span, under the 3 px separable floor — the negative control of
+  §7.1 holds). Rotation path on the cleaned pool: the vote peaks 5° from the axis the
+  guided model implies (565 votes, 40× the median bin) and the refine from it lands
+  **11.5–13.3 px from the guided model's projected pole** at 750 px (≈ 55–60 px at
+  full resolution — the same order as the 50–70 px by which the known-good reference
+  model has always projected the NCP from measured Polaris, pole-anchor plan), a1 276–278
+  against the guided 283 (0.98×), east_left correct, sigma_px 3.8 (RMS 1.9 px, jackknife
+  1.4–1.7). Its support is only 13–14 % of the detections, because the junk is most of
+  the pool; the true axis itself explains 13–17 % here. `MIN_SUPPORT_FRACTION` was set
+  to 0.12 on this evidence (synthetic clean pools 0.55–0.9, negative controls 0.00–0.05),
+  and the model-error allowance package 5 adds to the gate tolerance is what covers the
+  remaining offset — sigma_px measures the fit's own scatter, not the lens model's
+  regional error, and must not pretend to.
+
+Package 4's regression for all of this is `tests/test_allsky_pool_hygiene_real.py`
+(skips without the dataset).
+
+Exposure-midpoint timestamps, as shipped by package 4: the capture worker stamps
+`EXPOSURE_START_UTC` on every frame and `services/exposure_midpoint.py` turns it into
+start + exposure/2 for the calibration feed — that is the only source that reaches the
+service today, because camera mode is the only path that feeds it. `DATE-OBS` is handled
+but unreachable (`services/watcher.py` puts no FITS header into the metadata, and
+Directory Watch mode does not feed the calibration service); the receipt-time fallback
+is receipt − exposure/2, not the file-mtime rule package 4b specified, which needs the
+watcher to carry the path or mtime — a follow-up in the watcher.
+
 ## 1. Findings
 
 | # | Finding | Where | Package |

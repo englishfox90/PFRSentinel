@@ -159,13 +159,16 @@ class TestReadWithoutRecording:
     def test_current_on_empty_history(self):
         assert PoleHistory().current(1563.0) is None
 
-    def test_current_uses_latest_found_run(self):
+    def test_current_reports_the_cluster_mean(self):
+        # Was "uses the latest found run" until plan #93 H4: the position
+        # is now the dominant cluster's mean, its members being one pole
+        # measured repeatedly.
         h = PoleHistory()
         h.record(est(1718, 646), 1563.0)
         h.record(est(1720, 648), 1563.0)
         h.record(None, 1563.0)               # a miss does not erase the consensus
         r = h.current(1563.0)
-        assert r is not None and (r.x, r.y) == (1720.0, 648.0)
+        assert r is not None and (r.x, r.y) == (1719.0, 647.0)
         assert r.east_left is True
 
     def test_current_applies_the_same_trust_rules(self):
@@ -494,7 +497,7 @@ class TestResolution:
         h.record(at_res(1718, 646, 3552, 3552), 1563.0)
         h.record(at_res(1720, 648, 3552, 3552), 1563.0)
         r = h.current(781.5, image_width=1776, image_height=1776)
-        assert r.x == pytest.approx(860.0) and r.y == pytest.approx(324.0)
+        assert r.x == pytest.approx(859.5) and r.y == pytest.approx(323.5)
 
     def test_crop_is_dropped_not_compared(self):
         h = PoleHistory()
@@ -561,3 +564,58 @@ class TestWithheldRunKeepsConsensus:
         for x, y in ISSUE_10_RUNS[:6]:
             h.record(est(x, y), 1563.0)
         assert h.record(None, 1563.0) is None
+
+
+# ---------------------------------------------------------------------------
+# Mean position and sigma (plan #93 H4)
+# ---------------------------------------------------------------------------
+
+def rot(x, y, sigma, start_min, end_min):
+    """A rotation-path estimate with its own sigma and buffer window."""
+    from datetime import timedelta
+    t0 = datetime(2026, 9, 18, 2, 0, tzinfo=timezone.utc)
+    return PoleEstimate(x=float(x), y=float(y), east_left=True, sign=-1,
+                        n_frames=12, span_minutes=end_min - start_min,
+                        drift_px=0.0, flux=0.0, sign_votes=(0, 300),
+                        window_start=t0 + timedelta(minutes=start_min),
+                        window_end=t0 + timedelta(minutes=end_min),
+                        sigma_px=sigma, source='rotation')
+
+
+class TestMeanAndSigma:
+    def test_position_is_the_mean_of_the_dominant_cluster(self):
+        h = PoleHistory()
+        for x, y in [(1700, 640), (1710, 650), (1720, 660)]:
+            r = h.record(rot(x, y, 4.0, 0, 60), 1563.0)
+        assert (r.x, r.y) == (1710.0, 650.0)
+
+    def test_sigma_is_floored_at_the_per_run_sigma(self):
+        h = PoleHistory()
+        r = h.record(rot(1700, 640, 6.0, 0, 60), 1563.0)
+        assert r.sigma_px == 6.0
+        r = h.record(rot(1700, 640, 6.0, 5, 65), 1563.0)   # overlapping window
+        assert r.sigma_px == 6.0                            # one window: no scatter
+
+    def test_sigma_grows_with_scatter_across_independent_windows(self):
+        h = PoleHistory()
+        h.record(rot(1700, 640, 3.0, 0, 60), 1563.0)
+        h.record(rot(1700, 640, 3.0, 30, 90), 1563.0)        # overlaps the first
+        r = h.record(rot(1730, 640, 3.0, 100, 160), 1563.0)  # independent, 30 px off
+        assert r.x == pytest.approx(1710.0)
+        # Independent members: the first and the third, ±10 and ±20 from the
+        # mean of all three -> RMS sqrt((100 + 400) / 2) ≈ 15.8
+        assert r.sigma_px == pytest.approx(15.81, abs=0.1)
+
+    def test_outliers_outside_the_dominant_mode_do_not_enter_the_mean(self):
+        h = PoleHistory()
+        for _ in range(4):
+            h.record(rot(1700, 640, 3.0, 0, 60), 1563.0)
+        h.record(rot(1100, 900, 3.0, 70, 130), 1563.0)       # one-off outlier
+        r = h.record(rot(1700, 640, 3.0, 140, 200), 1563.0)
+        assert r is not None and (r.x, r.y) == (1700.0, 640.0)
+
+    def test_legacy_estimates_default_to_zero_sigma_and_polaris(self):
+        e = est(1718, 646)
+        assert e.sigma_px == 0.0 and e.source == 'polaris'
+        r = PoleHistory().record(e, 1563.0)
+        assert r.sigma_px == 0.0

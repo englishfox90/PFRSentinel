@@ -2,31 +2,56 @@
 Celestial-pole localisation from buffered star detections.
 
 The pole is the one piece of ground truth the sky gives us for free: over a
-long-enough window, every star arcs around the projected celestial pole at the
-sidereal rate while the pole itself stays put. Polaris (mag 2.0, 0.65° from the
-NCP) is the brightest near-stationary detection on any northern-hemisphere
-install, so its mean position IS the pole to within ~1° of pixel scale — no
-fisheye model required. The rotation *direction* of the surrounding field
-determines the image mirror convention (east_left) outright.
+long-enough window, every star arcs around the projected celestial pole at
+the sidereal rate while the pole itself stays put. Two ways of measuring
+it live behind one entry point, find_pole:
+
+  Polaris path (this module). Polaris (mag 2.0, 0.65° from the NCP) is the
+  brightest near-stationary detection on any northern install, so its mean
+  position IS the pole to within ~1° of pixel scale — no fisheye model
+  required. The rotation *direction* of the surrounding field determines
+  the image mirror convention (east_left) outright.
+
+  Rotation path (pole_from_rotation). The axis the whole field rotates
+  about, fitted in angle space through the lens's radial function, with an
+  uncertainty. Needs no pole star: it is the path for a rig whose pier
+  hides Polaris (issue #93) and for the southern hemisphere.
+
+find_pole runs the Polaris path first and the rotation path when it is
+allowed to (the refine worker; the manual paths pass rotation=False
+because the fit is seconds, not milliseconds). When both return an
+estimate they must agree within 3·sigma_px + AGREEMENT_SLACK_REF_PX (scaled) or the
+result is None with a WARNING naming both pixels: a disagreeing Polaris is
+a light near a hidden pole, a disagreeing rotation fit is a contaminated
+field. Neither is trusted over the other.
 
 Both facts are admission gates for calibration models (calibration_validate.
 validate_pole): a wrong-basin fit places the pole hundreds of pixels away
 and/or mirrors the sky, so this kills the degenerate fits that survive
 residual-based checks on coincidental matches.
 
-Contaminant rejection (validated against sample_images, 2026-07-01):
+Contaminant rejection on the Polaris path (validated against sample_images,
+2026-07-01, and against the issue #93 negative control, 2026-09-25):
   - Equipment LEDs are bright and perfectly stationary → rejected by the
-    edge margin (they sit at the sky-circle boundary) and the drift band
-    (they drift ~0.2× the predicted Polaris arc; Polaris drifts ~1.0×).
+    edge margin (they sit at the sky-circle boundary), the drift band
+    (they drift ~0.2× the predicted Polaris arc; Polaris drifts ~1.0×) and,
+    since #93, the time-coherence test (track_coherence): a saturated
+    light's centroid jitter reads 3–4 px of *extent* over a dozen frames,
+    inside the band on a small plate scale, but time explains none of it,
+    whereas Polaris progresses along a line.
   - Lights on a moving telescope are bright and *semi*-stationary → they
     drift 5–10× the predicted arc, outside the band.
-  - A whole-field rigid-rotation fit is NOT used for position: fisheye
-    distortion biases the aggregate fixed-point estimate by 100+ px. It is
-    only used to vote on the rotation sign, which it gets right robustly.
+  - A whole-field rigid-rotation fit in PIXEL space is NOT used for
+    position: fisheye distortion biases the aggregate fixed-point estimate
+    by 100+ px. It is only used to vote on the rotation sign, which it gets
+    right robustly. (The rotation path fits in angle space instead.)
+  - When the predicted Polaris arc over the available span is under
+    MIN_SEPARABLE_ARC_PX the Polaris path withholds rather than decides: at
+    a1 ≈ 1100 px/rad that is any window under ~55 min, where no track can
+    be told from noise. The buffer's full span is used, sampled.
 
 Rotation support (issue #10, 2026-09-05): the drift band cannot separate
-Polaris from a light on a *tracking* mount (or a static LED whose centroid
-jitters 2–5 px in a stretched preview) — both sit inside the band, and
+Polaris from a light on a *tracking* mount — both sit inside the band, and
 "brightest in-band track" then picks the light every run, self-consistently
 (measured: 26/26 runs on the reference frames with one synthetic 2×-flux
 tracking light). The discriminator is that the star field demonstrably
@@ -43,25 +68,28 @@ Operates on the CalibrationService buffer format: a list of dicts with keys
 'dt' (aware datetime) and 'detected' ([(x, y, flux), ...]); 'sky_cx'/'sky_cy'/
 'sky_r' are used when present.
 
-Southern hemisphere: there is no bright pole star (σ Oct is mag 5.5), so this
-module returns None below the equator rather than guess. The sign→east_left
-mapping is still written hemisphere-aware for when a southern path exists.
+Southern hemisphere: there is no bright pole star (σ Oct is mag 5.5), so the
+Polaris path returns None below the equator; the rotation path finds the
+SCP the same way it finds the NCP (hemisphere from the latitude sign).
 """
-from dataclasses import dataclass
-from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from services.logger import app_logger as log
 
-from .calibration_validate import SKY_TRIM_FRACTION, median_frame_resolution, tol_scale
+from .calibration_validate import median_frame_resolution, tol_scale
+from .pole_estimate import (  # re-exported for existing callers
+    POLARIS_POLAR_DEG, SIDEREAL_DEG_PER_MIN, PoleEstimate, predicted_polaris_arc_px)
+from .pole_from_rotation import (
+    MIN_FRAMES as ROTATION_MIN_FRAMES, MIN_SPAN_MINUTES as ROTATION_MIN_SPAN_MINUTES,
+    pole_from_rotation)
+from .track_coherence import is_coherent, track_coherence
 
-# Sidereal rotation rate.
-SIDEREAL_DEG_PER_MIN = 360.0 / (23.9345 * 60.0)
-
-# Polaris's angular distance from the NCP (~0.65° epoch-2026; shrinks slowly).
-POLARIS_POLAR_DEG = 0.65
+__all__ = [
+    'PoleEstimate', 'find_pole', 'predicted_polaris_arc_px',
+    'SIDEREAL_DEG_PER_MIN', 'POLARIS_POLAR_DEG',
+]
 
 # Window requirements. Below ~35 min the predicted Polaris arc (~2 px at
 # reference resolution) is too close to centroid noise to separate a true
@@ -91,6 +119,14 @@ DRIFT_BAND = (0.35, 2.5)
 # out-flux Polaris and poison every pole check. Centroid noise is
 # resolution-independent, so the floor is absolute pixels.
 STATIC_NOISE_FLOOR_PX = 1.5
+
+# Below this predicted arc the Polaris path withholds: twice the static
+# noise floor, so a genuine track must progress at least as far again as
+# a static light's jitter extent before the two are compared. On the
+# reporter's rig (a1 = 1097) the arc over the 35-min minimum is 1.9 px and
+# the light that was accepted as Polaris measured 3.6 px of "drift"; 3 px
+# is reached at ~55 min there, ~52 min at reference scale (issue #93 H1).
+MIN_SEPARABLE_ARC_PX = 2.0 * STATIC_NOISE_FLOOR_PX
 
 # Candidates closer than this fraction of sky_r to the circle edge are
 # equipment/horizon lights, not sky (Polaris sits well inside for any
@@ -126,40 +162,13 @@ _ROTATION_TIE_FRACTION = 0.9
 # Frames sampled from large buffers (clustering and voting are O(frames²)ish).
 _MAX_SAMPLE_FRAMES = 12
 
-
-@dataclass
-class PoleEstimate:
-    """Measured celestial-pole pixel position + field-rotation direction."""
-    x: float
-    y: float
-    east_left: Optional[bool]   # None when the sign vote was inconclusive
-    sign: int                   # -1 = clockwise in array coords (y down)
-    n_frames: int
-    span_minutes: float
-    drift_px: float             # measured drift of the pole-star track
-    flux: float                 # median flux of the pole-star track
-    sign_votes: Tuple[int, int]  # (matches for +1, matches for -1)
-    # The buffer window the estimate was measured over. Two estimates are
-    # independent evidence only when their windows do not overlap
-    # (pole_consensus); consecutive refine runs share most of one rolling
-    # buffer. None = unknown (an estimate not produced by find_pole).
-    window_start: Optional[datetime] = None
-    window_end: Optional[datetime] = None
-    # Resolution of the frames x/y were measured on; 0 = unknown. The
-    # history compares and rescales positions across resize changes.
-    image_width: int = 0
-    image_height: int = 0
-
-
-def predicted_polaris_arc_px(sky_r: float, span_minutes: float) -> float:
-    """Pixel arc Polaris sweeps around the pole over the window.
-
-    px/deg is approximated from the untrimmed sky radius spanning ~90° of
-    altitude — measured to match the reference rig within a few percent.
-    """
-    px_per_deg = (float(sky_r) / (1.0 - SKY_TRIM_FRACTION)) / 90.0
-    rot_rad = np.radians(SIDEREAL_DEG_PER_MIN * float(span_minutes))
-    return POLARIS_POLAR_DEG * px_per_deg * rot_rad
+# Slack added to 3·sigma_px when the two paths are compared, at reference
+# resolution (× tol_scale). A Polaris-path estimate is the mean of
+# Polaris's 0.65° orbit over the window — up to ~14.5 px from the pole at
+# reference scale — and the rotation path's own lens-model bias measured
+# 4–6 px on the reference preset; 20 px covers both without admitting the
+# issue #93 light, which sat 100 px off.
+AGREEMENT_SLACK_REF_PX = 20.0
 
 
 def find_pole(
@@ -168,13 +177,74 @@ def find_pole(
     sky_cx: Optional[float] = None,
     sky_cy: Optional[float] = None,
     sky_r: Optional[float] = None,
+    *,
+    ring: Optional[Sequence[dict]] = None,
+    rotation: bool = True,
+    seed_model=None,
 ) -> Optional[PoleEstimate]:
     """Locate the celestial pole from buffered detections, or None.
 
     None is a normal outcome (short window, cloudy pole, obstructed Polaris,
-    southern hemisphere) — callers must treat the pole as an *optional* extra
-    constraint, never a requirement.
+    contaminated field, the two paths disagreeing) — callers must treat the
+    pole as an *optional* extra constraint, never a requirement.
+
+    `ring` is the long-baseline frame ring (frame_ring); both paths prefer
+    it to `frames` when it meets the rotation path's requirements.
+    `rotation=False` skips the rotation path (seconds of work) — the GUI-
+    thread manual paths. `seed_model` seeds the rotation path's radial
+    function when the caller trusts it (a guided incumbent, in the frames'
+    resolution); the sky circle seeds it otherwise.
     """
+    # Both paths take the widest span on hand (plan 4a): a 60-frame buffer
+    # at a 30 s cadence spans ~30 min, under the Polaris path's separable
+    # floor at every plate scale in the field, so on the ring alone can it
+    # fire at all.
+    pool = list(ring) if ring and _ring_usable(ring) else frames
+    polaris = _find_polaris_pole(pool, lat_deg, sky_cx, sky_cy, sky_r)
+    if not rotation:
+        return polaris
+    if sky_r is None:
+        rs = [f.get('sky_r') for f in pool if f.get('sky_r')]
+        sky_r = float(np.median(rs)) if rs else None
+    rot = pole_from_rotation(pool, lat_deg, sky_cx, sky_cy, sky_r, seed_model)
+    if rot is None:
+        return polaris
+    if polaris is None:
+        return rot
+    gap = float(np.hypot(polaris.x - rot.x, polaris.y - rot.y))
+    limit = 3.0 * rot.sigma_px + AGREEMENT_SLACK_REF_PX * tol_scale(sky_r)
+    if gap > limit:
+        log.warning(
+            f"Pole estimate withheld: the Polaris track at ({polaris.x:.0f}, "
+            f"{polaris.y:.0f}) and the field-rotation axis at ({rot.x:.0f}, "
+            f"{rot.y:.0f}) ± {rot.sigma_px:.0f} px disagree by {gap:.0f} px "
+            f"(limit {limit:.0f}) — a light near a hidden pole, or a contaminated "
+            "field; neither is trusted"
+        )
+        return None
+    log.info(f"Pole estimate: Polaris track agrees with the rotation axis "
+             f"({gap:.0f} px apart, limit {limit:.0f}); using the rotation fit")
+    return rot
+
+
+def _ring_usable(ring: Sequence[dict]) -> bool:
+    dts = [f['dt'] for f in ring if f.get('detected') and f.get('dt') is not None]
+    if len(dts) < ROTATION_MIN_FRAMES:
+        return False
+    return (max(dts) - min(dts)).total_seconds() / 60.0 >= ROTATION_MIN_SPAN_MINUTES
+
+
+# ---------------------------------------------------------------------------
+# Polaris path
+# ---------------------------------------------------------------------------
+
+def _find_polaris_pole(
+    frames: List[dict],
+    lat_deg: float,
+    sky_cx: Optional[float],
+    sky_cy: Optional[float],
+    sky_r: Optional[float],
+) -> Optional[PoleEstimate]:
     if lat_deg < MIN_LATITUDE_DEG:
         return None
     usable = [f for f in frames if f.get('detected') and f.get('dt') is not None]
@@ -195,6 +265,17 @@ def find_pole(
         sky_cy = float(np.median([r[1] for r in rs]))
         sky_r = float(np.median([r[2] for r in rs]))
 
+    arc = predicted_polaris_arc_px(sky_r, span_min)
+    if arc < MIN_SEPARABLE_ARC_PX:
+        need = span_min * MIN_SEPARABLE_ARC_PX / max(arc, 1e-6)
+        log.info(
+            f"Polaris path withheld: predicted Polaris arc {arc:.1f} px over "
+            f"{span_min:.0f} min is under the {MIN_SEPARABLE_ARC_PX:.0f} px static "
+            f"floor at sky_r {sky_r:.0f} — a window of ~{need:.0f} min is needed "
+            "before a pole star can be told from a static light"
+        )
+        return None
+
     sample = _sample_frames(usable, _MAX_SAMPLE_FRAMES)
     dets = [np.asarray([(d[0], d[1], d[2]) for d in f['detected']], dtype=float)
             for f in sample]
@@ -202,6 +283,9 @@ def find_pole(
     tol = CLUSTER_TOL_REF_PX * tol_scale(sky_r)
     candidates = _stationary_candidates(
         dets, sample, sky_cx, sky_cy, sky_r, tol, span_min)
+    if not candidates:
+        return None
+    candidates = _coherent_candidates(candidates, usable, tol, arc)
     if not candidates:
         return None
 
@@ -278,8 +362,10 @@ def _stationary_candidates(
     Returns [(x, y, drift, flux, n_hits), ...]. Seeds come from three probe
     frames (first / middle / last) so a pole star occluded at the window
     start is still found; presence is then counted against every sampled
-    frame. Which survivor is the pole is decided by rotation support in
-    find_pole — brightness alone picks a tracking-mount light every time.
+    frame. The extent band here is a pre-filter: _coherent_candidates then
+    asks whether time explains the motion. Which survivor is the pole is
+    decided by rotation support in find_pole — brightness alone picks a
+    tracking-mount light every time.
     """
     probes = [dets[0], dets[len(dets) // 2], dets[-1]]
     seeds = np.vstack(probes)[:, :2]
@@ -318,6 +404,51 @@ def _stationary_candidates(
         out.append((float(h[:, 0].mean()), float(h[:, 1].mean()),
                     drift, flux, len(hits)))
     return out
+
+
+def _coherent_candidates(
+    candidates: List[Tuple[float, float, float, float, int]],
+    usable: List[dict],
+    tol: float,
+    arc: float,
+) -> List[Tuple[float, float, float, float, int]]:
+    """Candidates whose track progresses with time (track_coherence).
+
+    Hits are gathered from EVERY usable frame, not the twelve sampled ones:
+    a jittering light's random-walk residue over twelve hits reaches 2.6×
+    its scatter, over sixty it stays under 1.3× (measured, tests/
+    test_track_coherence.py).
+    """
+    t0 = usable[0]['dt']
+    t_all = np.array([(f['dt'] - t0).total_seconds() / 60.0 for f in usable])
+    dets_all = [np.asarray([(d[0], d[1]) for d in f['detected']], dtype=float)
+                for f in usable]
+    keep = []
+    best = None
+    for cand in candidates:
+        cx, cy = cand[0], cand[1]
+        t, xs, ys = [], [], []
+        for tk, det in zip(t_all, dets_all):
+            d = np.hypot(det[:, 0] - cx, det[:, 1] - cy)
+            j = int(np.argmin(d))
+            if d[j] <= tol:
+                t.append(tk)
+                xs.append(det[j, 0])
+                ys.append(det[j, 1])
+        track = track_coherence(t, xs, ys)
+        if is_coherent(track, arc, DRIFT_BAND, STATIC_NOISE_FLOOR_PX):
+            keep.append(cand)
+        elif track is not None and (best is None or track.ratio > best[0]):
+            best = (track.ratio, track.progression_px, track.scatter_px, cx, cy)
+    if not keep and best is not None:
+        ratio, prog, scatter, cx, cy = best
+        log.info(
+            f"Pole estimate withheld: {len(candidates)} in-band track(s) but none "
+            f"progresses with time (best at ({cx:.0f}, {cy:.0f}): {prog:.1f} px "
+            f"fitted over the window against {scatter:.1f} px scatter, ratio "
+            f"{ratio:.1f}; predicted arc {arc:.1f} px) — static lights, not Polaris"
+        )
+    return keep
 
 
 def _rotation_votes(

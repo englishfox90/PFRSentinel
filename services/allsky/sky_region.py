@@ -50,6 +50,7 @@ from .calibration_validate import SKY_TRIM_FRACTION
 from .fisheye import FisheyeModel
 from .label_stability import LabelStabilizer, upsample, vote_grid
 from .obstruction_map import ObstructionMap
+from .detection_filters import DetectionFilters
 from .star_centroid import detect_stars, estimate_sky_circle
 
 # Detections a frame needs before its mask can say where the sky is NOT: the
@@ -121,6 +122,7 @@ def detect_sky_evidence(img: Image.Image, gray: Optional[np.ndarray] = None) -> 
         detections = detect_stars(
             img, max_stars=200,
             sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
+            filters=DetectionFilters(),
         )
     except Exception:
         return SkyEvidence(None, None, 0, full_shape)

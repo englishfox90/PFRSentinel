@@ -35,6 +35,8 @@ from PySide6.QtCore import QObject, Signal
 
 from services.logger import app_logger as log
 
+from .frame_ring import FrameRing
+from .obstruction_map import get_obstruction_map
 from .fisheye import FisheyeModel
 from .buffer_dump import BufferDumpTrigger
 from .calibration_attention import calibration_attention
@@ -167,6 +169,7 @@ class CalibrationService(QObject):
         # Cross-run pole consensus (pole_consensus.py). Survives set_model /
         # clear_model: it describes the field, not the model.
         self._pole_history = PoleHistory()
+        self._ring = FrameRing()   # long-baseline, same-night frames (frame_ring)
         # Chance-level runs on the model on disk (incumbent_chance): UI + rule 3 only.
         self._chance_streak = IncumbentChanceStreak()
         self._attention = ('', '')
@@ -273,6 +276,7 @@ class CalibrationService(QObject):
             self._frames.append(frame)
             if len(self._frames) > MAX_BUFFER:
                 self._frames.pop(0)
+        self._ring.offer(frame)
 
         # ------ Fast path: instant single-image fix on easy skies ------
         # While no model exists, also try a single-image calibration so clear,
@@ -335,7 +339,8 @@ class CalibrationService(QObject):
             sky_r = median_sky_r(frames)
             pole_w, pole_h = median_frame_resolution(frames)
         try:
-            fresh = find_pole(frames, self._lat) if frames else None
+            # rotation=False: the rotation fit is seconds of work, GUI thread.
+            fresh = find_pole(frames, self._lat, rotation=False) if frames else None
             pole = self._pole_history.evaluate(fresh, sky_r, pole_w, pole_h)
         except Exception as e:
             log.debug(f"Pole consensus failed (non-fatal): {e}")
@@ -459,7 +464,8 @@ class CalibrationService(QObject):
         self._refine_worker = _RefineWorker(
             frames_copy, None if cold_start else self._model, n, span_min,
             lat=self._lat, incumbent=self._model,
-            pole_history=self._pole_history,
+            pole_history=self._pole_history, ring=self._ring.frames(),
+            obstruction_map=get_obstruction_map(),
         )
         self._refine_worker.result_ready.connect(self._on_refine_done)
         self._refine_worker.failed.connect(self._on_refine_failed)
