@@ -100,7 +100,10 @@ class TestSkyClassifierONNX:
 
 
 class TestProductionPredictionAPI:
-    """The production path in `ui/controllers/ml_prediction.py` gates on dev mode."""
+    """The dev-only export loader in `ui/controllers/ml_prediction.py` gates on dev mode.
+
+    Production per-frame inference is `services/ml_service.py` and is not gated.
+    """
 
     @pytest.fixture(autouse=True)
     def _enable_dev_mode(self, monkeypatch):

@@ -327,6 +327,15 @@ class AllSkySettingsPanel(QScrollArea):
         self._reset_btn.clicked.connect(self._on_reset_clicked)
         vl.addWidget(self._reset_btn)
 
+        # Support handle: writes the frames auto-calibration is working from
+        # to a small file the diagnostics bundle picks up (no images).
+        self._dump_btn = PushButton("Dump calibration buffer", icon=mdi('database-export'))
+        self._dump_btn.setToolTip(
+            "Save the star detections collected for automatic calibration to a "
+            "file for a bug report. No images are saved.")
+        self._dump_btn.clicked.connect(self._on_dump_clicked)
+        vl.addWidget(self._dump_btn)
+
         self._layout.addWidget(card)
 
     def _build_master_toggle(self):
@@ -579,6 +588,10 @@ class AllSkySettingsPanel(QScrollArea):
         box.cancelButton.setText("Cancel")
         if box.exec():
             self.settings_changed.emit({'_action': 'reset_calibration'})
+
+    def _on_dump_clicked(self):
+        """Signal main_window to dump the calibration buffer."""
+        self.settings_changed.emit({'_action': 'dump_buffer'})
 
     def _on_setting_changed(self, *_):
         self.settings_changed.emit(self.get_config())

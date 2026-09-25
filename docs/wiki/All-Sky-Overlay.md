@@ -74,13 +74,14 @@ The calibration is saved to `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.json`
 
 ### Lens Calibration card
 
-The **Lens Calibration** card shows a coloured quality badge (hover it for a description), a status line such as "Calibrated: 142 stars, RMS=6.20px (good)", and three buttons:
+The **Lens Calibration** card shows a coloured quality badge (hover it for a description), a status line such as "Calibrated: 142 stars, RMS=6.20px (good)", and four buttons:
 
 | Button | What it does |
 |--------|--------------|
 | **Calibrate Now** | Runs an immediate single-frame calibration on the most recent clean frame. The button reads **Calibrating…** while it works. Needs a frame, so start capture first. |
 | **Guided Calibration…** | Opens a dialog where you identify bright stars by hand. The dependable option for obstructed, tilted, or hazy views where automatic calibration cannot work out the orientation. See [Guided Calibration](#guided-calibration). |
 | **Reset Calibration…** | Deletes the saved calibration after a confirmation prompt. See [Reset Calibration](#reset-calibration). |
+| **Dump calibration buffer** | Saves the star positions automatic calibration has collected to a small file for a bug report. See [Dump calibration buffer](#dump-calibration-buffer). |
 
 When **Calibrate Now** or **Guided Calibration** succeeds, a notification is posted if **Post Calibration** is enabled in your [Hermes Notifications](Hermes-Notifications) settings. Improvements made by automatic calibration do not send a notification.
 
@@ -221,6 +222,14 @@ If the full set of stars does not fit well and you identified more than five, th
 **Reset Calibration…** asks "Reset calibration?" and, if you click **Reset**, deletes the saved calibration. Use it when the overlay is badly misaligned and refuses to improve — a bad saved calibration can hold back every automatic refinement.
 
 After a reset the badge returns to **None** and the overlay stops drawing. Automatic calibration starts over using the frames already collected, or you can run Guided Calibration straight away. A reset cannot run while a calibration is in progress.
+
+---
+
+## Dump calibration buffer
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+Automatic calibration works from a rolling collection of star positions measured on recent frames (up to 60 frames, no images). **Dump calibration buffer** writes that collection to a small file so it can be replayed by the developers when calibration keeps failing on your sky. The status line shows where the file was saved, or "Calibration buffer is empty" if no frames have been collected yet — frames are gathered only while capture is running with the overlay enabled and the sky is dark enough for stars. The file also gets written on its own when automatic re-calibration gives up after four rejected attempts (development builds write one at every basin-escape attempt). The five newest dumps are kept in `%LOCALAPPDATA%\PFRSentinel\allsky\`, and [Export Diagnostics](Diagnostics-Export) adds the newest one to the bundle, so leave capture running for a clear night and then export the bundle. The file holds star positions, frame times and your site coordinates rounded to about a kilometre; it never contains images.
 
 ---
 

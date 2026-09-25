@@ -36,6 +36,7 @@ from PySide6.QtCore import QObject, Signal
 from services.logger import app_logger as log
 
 from .fisheye import FisheyeModel
+from .buffer_dump import BufferDumpTrigger
 from .calibration_attention import calibration_attention
 from .calibration_quality import CalibrationQuality, model_quality  # re-exported for existing callers
 from .calibration_store import save_with_backup
@@ -169,6 +170,9 @@ class CalibrationService(QObject):
         self._attention = ('', '')
         self._lat = 0.0
         self._lon = 0.0
+        # Replay dumps (buffer_dump): the snapshot runs under _lock.
+        self._dump_trigger = BufferDumpTrigger(
+            self._lock, lambda: (self._frames, self._model, self._lat, self._lon))
         self._check_refine.connect(self._maybe_refine)
 
     # ------------------------------------------------------------------
@@ -279,6 +283,10 @@ class CalibrationService(QObject):
                 self._pending_initial = (image.copy(), dt, lat, lon)
 
         self._check_refine.emit()
+
+    def dump_now(self):
+        """Write the buffer to a replay dump (UI button); path, or None if empty."""
+        return self._dump_trigger.dump_now()
 
     def shutdown(self) -> None:
         """Stop any running workers cleanly."""
@@ -434,6 +442,7 @@ class CalibrationService(QObject):
                 "a wrong-basin fit poisoning the seed. Attempting a seedless "
                 "re-calibration (basin escape)."
             )
+            self._dump_trigger.escape_started()
         mode = ("basin escape" if escape
                 else "cold-start bootstrap" if cold_start else "refinement")
         log.info(f"CalibrationService: triggering {mode} "
@@ -493,6 +502,7 @@ class CalibrationService(QObject):
         log_msg, status = self._escape_backoff.exhaustion_messages()
         log.warning(log_msg)
         self.status_changed.emit(status)
+        self._dump_trigger.exhaustion_reached()
 
     def _publish_attention(self) -> None:
         """Re-judge the badge caution; emit only when it changes."""

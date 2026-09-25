@@ -6,8 +6,8 @@ for existing callers). Two pieces, both run on the image-processor worker
 thread that feeds the service, never on the GUI thread:
 
   * detect_calibration_frame — measure the sky circle, detect stars inside
-    it, and project the bright catalogue to AltAz for the frame's time and
-    site. The result is the frame dict every calibration consumer reads
+    it, and attach the catalogue stars above the horizon at the frame's time
+    and site (frame_catalog). The result is the frame dict every calibration consumer reads
     (refine_from_detections, find_pole, incumbent_evidence,
     incumbent_chance); only detections are stored, never the image.
   * SkippedFrameSummary — the accounting behind the "frames skipped" warning
@@ -20,8 +20,7 @@ from typing import Optional
 
 from services.logger import app_logger as log
 
-from .catalogs import get_bright_stars
-from .coords import radec_to_altaz
+from .frame_catalog import above_horizon_stars
 from .star_centroid import detect_stars, measure_sky_circle
 
 
@@ -44,15 +43,7 @@ def detect_calibration_frame(image, dt: datetime, lat: float, lon: float
                       "too few, skipping frame")
             return None
 
-        catalog = get_bright_stars(max_mag=6.5)
-        above_horizon = []
-        for s in catalog:
-            alt, az = radec_to_altaz(
-                s['ra_deg'], s['dec_deg'], lat, lon, dt,
-            )
-            if float(alt) > 3.0:
-                above_horizon.append((s, float(alt), float(az)))
-        above_horizon.sort(key=lambda x: x[0]['vmag'])
+        above_horizon = above_horizon_stars(dt, lat, lon)
 
         img_w = image.width if hasattr(image, 'width') else 0
         img_h = image.height if hasattr(image, 'height') else 0

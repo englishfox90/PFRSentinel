@@ -112,7 +112,7 @@ Phase 1–3 complete; Phase 4 future:
 - **Phase 2**: Sky conditions (85.3%), stars (91.2%), moon (100%)
 - **Phase 3**: Dev-mode integration that saves calibration JSON + FITS per frame
 - **Phase 4** (future): Stretch recipe prediction
-- All inference is local via ONNX. Production interface: `ui/controllers/ml_prediction.py`.
+- All inference is local via ONNX. Production interface: `services/ml_service.py` (`MLService.analyze_image`, `get_ml_service()` singleton), on whenever `ml_models.enabled` is set, in every build. `ui/controllers/ml_prediction.py` is a separate dev-only loader for the calibration JSON export, gated by `is_dev_mode_available()` along with `dev_mode_utils.py` and the Dev Mode card.
 
 ## Working on this codebase
 
@@ -290,12 +290,12 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_output_crop.py` | 59 | `output_crop` — box normalisation/clamping/evenness, centring, fit-to-circle, proportional rescale across frame sizes, PIL crop, metadata round-trip, DEFAULT_CONFIG integration |
 | `test_settings.py` | 11 | `config` — JSON save/load, merge, defaults |
 | `test_webserver.py` | 13 | `web_output` — HTTP server, ETag, status JSON (`requires_network`) |
-| `test_ml_classifiers.py` | 6 | `ml.roof_classifier` / `ml.sky_classifier` + production `ui/controllers/ml_prediction.py` — ONNX load + inference smoke tests (`requires_ml_models`) |
+| `test_ml_classifiers.py` | 6 | `ml.roof_classifier` / `ml.sky_classifier` + the dev-only `ui/controllers/ml_prediction.py` loader — ONNX load + inference smoke tests (`requires_ml_models`) |
 | `test_api_auth.py` | 43 | `api_auth` — bearer compare, Host allow-list, token minting, redaction |
 | `test_api_control.py` | 51 | `api_control` — command validation, idempotency, `wait` semantics, OpenAPI catalog |
 | `test_web_control.py` | 33 | `web_control` — control routes, auth matrix, no-CORS regression guard |
 | `test_capture_command_bridge.py` | 11 | `CaptureCommandBridge` + headless handler — GUI-thread marshalling |
-| `test_diagnostics_bundle.py` | 9 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary |
+| `test_diagnostics_bundle.py` | 12 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary, newest calibration buffer dump under `allsky/` (absent one listed as missing) |
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
@@ -341,6 +341,8 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_star_pick_canvas.py` | 13 | `StarPickCanvas` — clicks in original image pixels at any zoom, wheel zoom about the cursor, clamped pan, drag never picks, picking can be switched off, view cached at the display pixel ratio (offscreen Qt) |
 | `test_time_context.py` | 22 | `time_context` — `is_astronomical_night` from sun elevation at absolute instants: flips at astronomical dusk/dawn, never night in the afternoon at a western site (the date-clamp bug), same flag from any host zone, high-latitude summer and polar day never raise, no-location clock fallback, per-day sun-times cache, `ui/controllers` shim re-exports |
 | `test_allsky_quality_badge.py` | 18 | `QualityBadge` amber "unconfirmed" / "check alignment" state, panel caution text, controller status line and badge level after a guided save; the tooltip note for a capped chance fit reaches the badge from the controller's `quality_note_changed` before the level; a live verdict (`badge_quality_changed`) shows the capped level, the measurement and the saved rating (offscreen Qt) |
+| `test_frame_catalog.py` | 3 | `frame_catalog` — `above_horizon_stars` against the scalar per-star loop it replaced: same star objects, exact alt/az, same order and tuple shape at a mid-latitude, a southern and a polar site |
+| `test_allsky_buffer_dump.py` | 33 | `buffer_dump` + `frame_catalog` — dump/load round trip keeps aware datetimes, float detections and the recomputed catalogue list, site rounded to 0.01°, extras on the model survive, image arrays on a frame never reach the file, newest 5 kept (files only), exhaustion dumps once, basin escape dumps in a dev build only, `dump_now` on an empty buffer is None, controller status line and panel button (offscreen Qt); `library_to_buffer.py` on a synthetic two-frame library (closed roof skipped, file-name times without a db, `--ignore-rect`) |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
@@ -369,6 +371,7 @@ Standalone (not in pytest suite):
 - [`docs/METEOR_DETECTION_PLAN.md`](docs/METEOR_DETECTION_PLAN.md) — meteor detection rework for the long-exposure regime; read before touching `services/meteor/`
 - [`docs/FEATURE_HARDENING_PLAN.md`](docs/FEATURE_HARDENING_PLAN.md) — prioritized hardening backlog (web server, ASCOM roof safety file, timelapse) from the 2026-06-28 deep review; P0/P1/P2 + sizing + file:line pointers
 - [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
+- [`docs/ALLSKY_HOSTING_SITE_PLAN.md`](docs/ALLSKY_HOSTING_SITE_PLAN.md) — issue #93: persisted equipment map, observable-sky gate (roof verdict + star evidence), chance-aware quality, pole from the rotating field with Polaris hidden, pole-constrained solve; six independently mergeable packages with agent briefs
 - [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
 
 Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).
