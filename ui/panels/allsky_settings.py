@@ -192,6 +192,7 @@ class QualityBadge(QFrame):
         self.setFixedHeight(26)
         self._level = 'none'
         self._attention = ''
+        self._note = ''
         self.set_quality('none')
 
     # Amber, whatever the rating: a green pill over a calibration the app
@@ -204,6 +205,13 @@ class QualityBadge(QFrame):
         self._attention = attention if attention in self._ATTENTION_SUFFIX else ''
         self.set_quality(self._level)
 
+    def set_note(self, note: str) -> None:
+        """Why the rating is what it is (a capped chance fit); '' for none.
+        Shown in the tooltip, where the level's stock description would
+        otherwise call a 60-frame chance fit a "single image"."""
+        self._note = note or ''
+        self.set_quality(self._level)
+
     def set_quality(self, level: str) -> None:
         from services.allsky.calibration_service import CalibrationQuality
         self._level = level
@@ -213,6 +221,11 @@ class QualityBadge(QFrame):
         if self._attention and level != 'none':
             bg, text = self._ATTENTION_COLOURS
             label = f"{label} — {self._ATTENTION_SUFFIX[self._attention]}"
+        # The note is the specific reason and names the saved rating itself;
+        # the generic suffix is for a caution with no measurement behind it.
+        if self._note and level != 'none':
+            desc = f"{desc}. {self._note}"
+        elif self._attention and level != 'none':
             desc = f"{desc} (rating from when it was saved)"
 
         self._label.setText(label)
@@ -445,6 +458,15 @@ class AllSkySettingsPanel(QScrollArea):
 
     def set_quality(self, level: str) -> None:
         """Update the calibration quality badge."""
+        self._quality_badge.set_quality(level)
+
+    def set_quality_note(self, note: str) -> None:
+        """Badge tooltip detail: why a rating is capped ('' clears it)."""
+        self._quality_badge.set_note(note)
+
+    def set_badge_quality(self, level: str, note: str) -> None:
+        """Level and reason together (a live verdict on the saved model)."""
+        self._quality_badge.set_note(note)
         self._quality_badge.set_quality(level)
 
     def set_attention(self, level: str, message: str) -> None:

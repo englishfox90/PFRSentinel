@@ -104,7 +104,7 @@ class TestRoundTrip:
         path = dump_buffer([_frame(0)], model, LAT, LON, tmp_path, now=T0)
         _, model_dict, *_ = load_buffer(path)
         back = model_from_dict(model_dict)
-        assert back == _model()
+        assert back == _model(final_tol_px=15.5)   # a field since package 3
         assert back.provenance == 'guided'
         assert back.final_tol_px == 15.5 and back.chance_expected == 549.2
         assert model_from_dict(None) is None
@@ -292,6 +292,7 @@ class TestServiceWiring:
 
         class _FakeWorker:
             result_ready = failed = incumbent_corroborated = finished = _Sig()
+            incumbent_scored = _Sig()
 
             def __init__(self, *a, **k):
                 pass

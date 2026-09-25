@@ -35,17 +35,19 @@ from PySide6.QtCore import QObject, Signal
 
 from services.logger import app_logger as log
 
-from .star_centroid import detect_stars, measure_sky_circle
 from .fisheye import FisheyeModel
-from .frame_catalog import above_horizon_stars
 from .buffer_dump import BufferDumpTrigger
 from .calibration_attention import calibration_attention
+from .calibration_fit_merit import credibility_note
 from .calibration_quality import CalibrationQuality, model_quality  # re-exported for existing callers
 from .calibration_store import save_with_backup
 from .calibration_validate import median_frame_resolution
 from .calibration_workers import (  # re-exported for existing callers
     MAX_RESIDUAL_PX, _InitialCalWorker, _RefineWorker)
 from .escape_policy import ESCAPE_COOLDOWN_BASE_S, EscapeBackoff
+from .frame_detection import (  # detect_calibration_frame re-exported (was _detect_frame)
+    SkippedFrameSummary, detect_calibration_frame)
+from .incumbent_chance import IncumbentChanceStreak, calibrated_status
 from .incumbent_evidence import incumbent_anchor_health
 from .label_stability import reset_label_stability
 from .model_admission import admit_manual
@@ -113,11 +115,14 @@ class CalibrationService(QObject):
         status_changed(str): human-readable status for the UI.
         attention_changed(str, str): (level, message) caution shown beside
             the quality badge; ('', '') clears it. See calibration_attention.
+        badge_quality_changed(str, str): (level, note) for the badge after a
+            live verdict on the model on disk (incumbent_chance); display only.
     """
 
     quality_upgraded = Signal(str, object)
     status_changed = Signal(str)
     attention_changed = Signal(str, str)
+    badge_quality_changed = Signal(str, str)
 
     # Internal signal: queued to main thread for safe QThread creation.
     _check_refine = Signal()
@@ -140,11 +145,7 @@ class CalibrationService(QObject):
         self._pending_initial = None   # (image, dt, lat, lon) awaiting cal
         self._refine_gen = -1          # generation when last refine was launched
         self._initial_gen = -1         # generation when last initial cal launched
-        # F9: per-frame skips stay at DEBUG (log spam on cloudy nights); a
-        # WARNING summary is emitted at most once per cooldown so the user can
-        # see "calibration is running but skipping frames" without the noise.
-        self._skipped_frames = 0
-        self._last_skip_summary_t = 0.0
+        self._skip_summary = SkippedFrameSummary(REFINE_COOLDOWN_S)   # F9
         # Basin escape (see BASIN_ESCAPE_FAILURES). _escape_attempt marks the
         # in-flight refinement as a seedless bootstrap whose result may
         # replace the current model without the RMS-regression guard — but
@@ -166,6 +167,8 @@ class CalibrationService(QObject):
         # Cross-run pole consensus (pole_consensus.py). Survives set_model /
         # clear_model: it describes the field, not the model.
         self._pole_history = PoleHistory()
+        # Chance-level runs on the model on disk (incumbent_chance): UI + rule 3 only.
+        self._chance_streak = IncumbentChanceStreak()
         self._attention = ('', '')
         self._lat = 0.0
         self._lon = 0.0
@@ -183,6 +186,7 @@ class CalibrationService(QObject):
         model = FisheyeModel.try_load(path)
         if model and model.is_valid():
             self._model = model
+            self._chance_streak.reset()
             self._quality = model_quality(
                 model, model.n_images, model.span_minutes,
             )
@@ -208,6 +212,7 @@ class CalibrationService(QObject):
         self._refine_backoff_failures = 0
         self._clear_escape_state()
         self._escape_backoff.reset()
+        self._chance_streak.reset()
         reset_label_stability()
         self._publish_attention()
         if self._quality != CalibrationQuality.NONE:
@@ -226,6 +231,7 @@ class CalibrationService(QObject):
         self._refine_backoff_failures = 0
         self._clear_escape_state()
         self._escape_backoff.reset()
+        self._chance_streak.reset()
         reset_label_stability()
         new_q = model_quality(model, model.n_images, model.span_minutes)
         with self._lock:
@@ -260,19 +266,7 @@ class CalibrationService(QObject):
         # across the rotating sky gives the joint fit enough cross-sky coverage.
         frame = self._detect_frame(image, dt, lat, lon)
         if frame is None:
-            self._skipped_frames += 1
-            now = time.monotonic()
-            if self._last_skip_summary_t == 0.0:
-                # Start the summary window on the first skip (stay quiet for now).
-                self._last_skip_summary_t = now
-            elif now - self._last_skip_summary_t >= REFINE_COOLDOWN_S:
-                log.warning(
-                    f"Calibration skipped {self._skipped_frames} frame(s) in the "
-                    "last cycle (too few stars / detection failed) — sky may be "
-                    "cloudy or the lens obstructed."
-                )
-                self._skipped_frames = 0
-                self._last_skip_summary_t = now
+            self._skip_summary.note_skip(time.monotonic())
             return
 
         with self._lock:
@@ -362,46 +356,8 @@ class CalibrationService(QObject):
         with self._lock:
             return len(self._frames)
 
-    # ------------------------------------------------------------------
-    # Frame detection (runs on caller's thread — image-processor worker)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _detect_frame(image, dt, lat, lon) -> Optional[dict]:
-        """Detect stars and compute catalog AltAz for one frame."""
-        try:
-            circle = measure_sky_circle(image)
-            if circle is None:
-                log.debug("CalibrationService: no measurable sky circle "
-                          "(no illuminated disc) — skipping frame")
-                return None
-            sky_cx, sky_cy, sky_r = circle
-            detected = detect_stars(
-                image, max_stars=200,
-                sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
-            )
-            if len(detected) < 5:
-                log.debug(f"CalibrationService: {len(detected)} stars — "
-                          "too few, skipping frame")
-                return None
-
-            above_horizon = above_horizon_stars(dt, lat, lon)
-
-            img_w = image.width if hasattr(image, 'width') else 0
-            img_h = image.height if hasattr(image, 'height') else 0
-            return {
-                'dt': dt,
-                'detected': detected,
-                'above_horizon': above_horizon,
-                'sky_cx': sky_cx,
-                'sky_cy': sky_cy,
-                'sky_r': sky_r,
-                'image_width': img_w,
-                'image_height': img_h,
-            }
-        except Exception as e:
-            log.warning(f"CalibrationService frame detection failed: {e}")
-            return None
+    # Runs on the image-processor worker thread (frame_detection); old name kept.
+    _detect_frame = staticmethod(detect_calibration_frame)
 
     # ------------------------------------------------------------------
     # Refinement triggering (runs on main thread via _check_refine)
@@ -509,6 +465,7 @@ class CalibrationService(QObject):
         self._refine_worker.failed.connect(self._on_refine_failed)
         self._refine_worker.incumbent_corroborated.connect(
             self._on_incumbent_corroborated)
+        self._refine_worker.incumbent_scored.connect(self._on_incumbent_scored)
         self._refine_worker.finished.connect(
             functools.partial(self._retire_worker, self._refine_worker))
         self._refine_worker.start()
@@ -523,6 +480,20 @@ class CalibrationService(QObject):
         log.info(f"CalibrationService: {why} — model now locks mirror/scale/"
                  "basin against automatic replacements")
         self._save_model(self._model, stamp_time=False)
+
+    def _on_incumbent_scored(self, score) -> None:
+        """A changed chance verdict re-publishes badge and caution; the file keeps
+        its rating, and a cleared streak hands the tooltip back to the file's own
+        verdict. The status line follows with the run's result (always emitted)."""
+        if self._refine_gen != self._model_generation or self._model is None:
+            return
+        if self._chance_streak.record(score, self._model):
+            note = self._chance_streak.note(self._quality) or credibility_note(self._model)
+            self.badge_quality_changed.emit(self._chance_streak.cap(self._quality), note)
+            self._publish_attention()
+
+    def _restored_status(self) -> str:
+        return calibrated_status(self._model, self._quality, self._chance_streak.discredited)
 
     def _refine_cooldown(self) -> float:
         """Seconds to wait after the last refinement before trying again."""
@@ -544,7 +515,8 @@ class CalibrationService(QObject):
             frames = list(self._frames)
         attention = calibration_attention(
             self._model, self._consecutive_refine_failures, frames,
-            self._escape_backoff.exhausted(time.monotonic()))
+            self._escape_backoff.exhausted(time.monotonic()),
+            incumbent_chance_level=self._chance_streak.discredited)
         if attention != self._attention:
             self._attention = attention
             self.attention_changed.emit(*attention)
@@ -621,10 +593,7 @@ class CalibrationService(QObject):
 
         log.info(f"Initial calibration succeeded: {model}, "
                  f"quality={self._quality}")
-        self.status_changed.emit(
-            f"Calibrated: {model.n_matches} stars, "
-            f"RMS={model.rms_residual:.1f}px ({self._quality})"
-        )
+        self.status_changed.emit(self._restored_status())
         self.quality_upgraded.emit(self._quality, model)
 
     def _on_initial_failed(self, error: str) -> None:
@@ -662,7 +631,8 @@ class CalibrationService(QObject):
         improved, why = should_replace(
             self._model, self._quality, model, new_q,
             escape=self._escape_attempt, evidence=evidence,
-            incumbent_failed_anchors=self._escape_incumbent_failed_anchors)
+            incumbent_failed_anchors=self._escape_incumbent_failed_anchors,
+            incumbent_chance_level_twice=self._chance_streak.discredited)
         if self._escape_attempt:
             (log.warning if improved else log.info)(f"Basin escape result: {why}")
 
@@ -676,6 +646,7 @@ class CalibrationService(QObject):
             self._consecutive_refine_failures = 0
             self._model = model
             self._quality = new_q
+            self._chance_streak.reset()
             self._save_model(model)
 
             log.info(f"Calibration refined: {model}, quality={new_q}")
@@ -693,10 +664,7 @@ class CalibrationService(QObject):
                 f"(RMS={model.rms_residual:.2f}px vs "
                 f"{self._model.rms_residual:.2f}px)"
             )
-            self.status_changed.emit(
-                f"Calibrated: {self._model.n_matches} stars, "
-                f"RMS={self._model.rms_residual:.1f}px ({self._quality})"
-            )
+            self.status_changed.emit(self._restored_status())
             # After the status restore, or the pause line is overwritten.
             self._warn_if_escape_exhausted()
         self._publish_attention()
@@ -718,10 +686,7 @@ class CalibrationService(QObject):
                 f"({self._consecutive_refine_failures} consecutive): {error}. "
                 f"Next attempt in {self._refine_cooldown() / 60.0:.0f} min.")
             # Restore previous status text
-            self.status_changed.emit(
-                f"Calibrated: {self._model.n_matches} stars, "
-                f"RMS={self._model.rms_residual:.1f}px ({self._quality})"
-            )
+            self.status_changed.emit(self._restored_status())
         else:
             # Cold-start bootstrap not yet successful — keep accumulating.
             log.info(f"Cold-start calibration not yet successful: {error}")
