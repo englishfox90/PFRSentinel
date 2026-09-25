@@ -32,7 +32,7 @@ anchor check read None on that obstructed rig — so it is flagged
 from typing import List, Optional, Tuple
 
 from .incumbent_evidence import RECENT_FRAMES, incumbent_anchor_health
-from .model_admission import is_guided
+from .model_admission import is_user_anchored
 
 # Same count that makes the service suspect its seed (BASIN_ESCAPE_FAILURES).
 ATTENTION_MIN_FAILURES = 3
@@ -58,15 +58,16 @@ def calibration_attention(
 
     `incumbent_chance_level`: the model on disk matched the live buffer no
     better than chance in consecutive runs (IncumbentChanceStreak.discredited);
-    ignored for a guided model.
+    ignored for the guided solve itself (model_admission.is_user_anchored).
     """
     if model is None:
         return LEVEL_NONE, ''
     paused = (" Automatic re-calibration has paused itself for now."
               if escape_paused else "")
-    # Never for a guided model: its anchors are the user's, and the joint
-    # fit's chance yardstick does not apply to a handful of them.
-    if incumbent_chance_level and not is_guided(model):
+    # Never for the guided solve itself: its anchors are the user's, and the
+    # joint fit's chance yardstick does not apply to a handful of them. A
+    # joint fit that inherited the stamp is judged like any other.
+    if incumbent_chance_level and not is_user_anchored(model):
         return LEVEL_MISALIGNED, (
             "The saved calibration matched the stars in recent frames no "
             "better than chance would, in two automatic runs in a row, so it "

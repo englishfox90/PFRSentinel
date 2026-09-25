@@ -103,9 +103,20 @@ class TestFitIsCredible:
         a match tolerance chance can imitate; the guided limit can sit at
         the RMS itself and the fit still be right."""
         m = _reporter_model(provenance='guided', n_matches=7, rms_residual=12.0,
-                            final_tol_px=13.0, chance_ratio=0.0)
+                            n_images=1, final_tol_px=13.0, chance_ratio=0.0)
         ok, why = fm.fit_is_credible(m)
         assert ok and 'guided' in why
+
+    def test_a_joint_fit_descended_from_a_guided_solve_is_judged(self):
+        """admit_candidate stamps every same-basin refinement 'guided' and
+        the joint fit carries the stamp through dataclasses.replace, so the
+        provenance alone must not exempt a 600-star chance fit — those are
+        the fits this module exists to judge."""
+        m = _reporter_model(provenance='guided')   # n_images 60, ratio 1.04
+        ok, why = fm.fit_is_credible(m)
+        assert not ok and 'chance' in why
+        m = _reporter_model(provenance='guided', chance_ratio=1.0, n_images=40)
+        assert not fm.fit_is_credible(m)[0]
 
     def test_no_model(self):
         assert fm.fit_is_credible(None) == (False, "no model")
@@ -139,10 +150,14 @@ class TestModelQualityCap:
         m = _reporter_model(n_matches=5)
         assert model_quality(m, 60, 62.6) == CalibrationQuality.NONE
 
-    def test_guided_model_is_not_capped(self):
+    def test_guided_solve_is_not_capped(self):
         m = _reporter_model(provenance='guided', n_matches=7, rms_residual=12.0,
-                            final_tol_px=13.0, chance_ratio=0.0)
+                            n_images=1, final_tol_px=13.0, chance_ratio=0.0)
         assert model_quality(m, 1, 0.0) == CalibrationQuality.PRELIMINARY
+
+    def test_guided_provenance_joint_fit_is_capped(self):
+        m = _reporter_model(provenance='guided', chance_ratio=1.0, n_images=40)
+        assert model_quality(m, 40, 62.6) == CalibrationQuality.PRELIMINARY
 
 
 class TestPersistedFields:

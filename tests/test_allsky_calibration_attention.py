@@ -167,12 +167,21 @@ class TestIncumbentChanceLevel:
         health['value'] = None
         assert ca.calibration_attention(_model(), 0, []) == ('', '')
 
-    def test_guided_model_is_never_misaligned_from_chance(self, health):
+    def test_guided_solve_is_never_misaligned_from_chance(self, health):
         health['value'] = None
         guided = _model()
         guided.provenance = 'guided'
+        guided.n_images = 1
         assert ca.calibration_attention(guided, 0, [],
                                         incumbent_chance_level=True) == ('', '')
+        # A joint fit that inherited the stamp (n_images 20, ratio 1.0) is not
+        # the solve itself and is flagged like any automatic fit.
+        descended = _model()
+        descended.provenance = 'guided'
+        descended.chance_ratio = 1.0
+        level, _ = ca.calibration_attention(descended, 0, [],
+                                            incumbent_chance_level=True)
+        assert level == ca.LEVEL_MISALIGNED
         # The anchor-health caution still applies to it.
         health['value'] = False
         level, _ = ca.calibration_attention(guided, 4, [],

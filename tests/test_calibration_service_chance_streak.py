@@ -117,6 +117,20 @@ class TestGuidedIncumbentIsNeverScored:
         _run_one_refinement(svc)
         assert seen == [] and scored['calls'] == []
 
+    def test_a_joint_fit_with_the_guided_stamp_is_scored(
+            self, qapp, fast_refine, scored):
+        """admit_candidate stamps same-basin refinements 'guided'; a 20-image
+        fit carrying it is not the user's solve and is judged."""
+        scored['score'] = _chance_score(1.0)
+        descended = _model()
+        descended.provenance = 'guided'
+        descended.chance_ratio = 1.0
+        svc = _service(model=descended)
+        seen = []
+        svc._on_incumbent_scored = seen.append
+        _run_one_refinement(svc)
+        assert len(seen) == 1 and len(scored['calls']) == 1
+
     def test_automatic_incumbent_is_still_scored(
             self, qapp, fast_refine, scored):
         scored['score'] = _chance_score(1.0)
@@ -203,6 +217,22 @@ class TestServiceChanceStreak:
         assert seen['note'] == [seen['note'][0], '']
         assert seen['attention'] == ['misaligned', '']
         assert seen['saved'] == []
+
+    def test_a_file_capped_model_keeps_its_reason_after_the_streak_clears(
+            self, service):
+        """The streak's note is the live verdict; when it clears, the tooltip
+        goes back to the file's own reason, not to nothing."""
+        svc, seen = service
+        svc._model.final_tol_px = 16.5
+        svc._model.chance_ratio = 1.04
+        svc._quality = 'preliminary'
+        for _ in range(2):
+            svc._on_incumbent_scored(_chance_score(1.0))
+        assert seen['note'][-1].startswith("Matched")
+        svc._on_incumbent_scored(_chance_score(3.0))
+        assert seen['quality'][-1] == 'preliminary'
+        assert seen['note'][-1].startswith("Matches no better than chance")
+        assert '16.5 px' in seen['note'][-1]
 
     def test_an_unscored_run_is_not_a_strike(self, service):
         svc, seen = service

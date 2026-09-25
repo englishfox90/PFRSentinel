@@ -38,6 +38,7 @@ from services.logger import app_logger as log
 from .fisheye import FisheyeModel
 from .buffer_dump import BufferDumpTrigger
 from .calibration_attention import calibration_attention
+from .calibration_fit_merit import credibility_note
 from .calibration_quality import CalibrationQuality, model_quality  # re-exported for existing callers
 from .calibration_store import save_with_backup
 from .calibration_validate import median_frame_resolution
@@ -482,12 +483,13 @@ class CalibrationService(QObject):
 
     def _on_incumbent_scored(self, score) -> None:
         """A changed chance verdict re-publishes badge and caution; the file keeps
-        its rating. The status line follows with the run's result (always emitted)."""
+        its rating, and a cleared streak hands the tooltip back to the file's own
+        verdict. The status line follows with the run's result (always emitted)."""
         if self._refine_gen != self._model_generation or self._model is None:
             return
         if self._chance_streak.record(score, self._model):
-            self.badge_quality_changed.emit(self._chance_streak.cap(self._quality),
-                                            self._chance_streak.note(self._quality))
+            note = self._chance_streak.note(self._quality) or credibility_note(self._model)
+            self.badge_quality_changed.emit(self._chance_streak.cap(self._quality), note)
             self._publish_attention()
 
     def _restored_status(self) -> str:

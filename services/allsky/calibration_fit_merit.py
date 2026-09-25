@@ -20,16 +20,19 @@ Two numbers the fit already knows, now persisted on the model
 Either one failing makes the fit non-credible, and model_quality then caps it
 at PRELIMINARY however many frames it spans. Unknown fields (0.0 — a file
 written by an earlier version) never fail a model: a legacy file keeps its
-rating until it is re-fitted, and a guided solve is exempt outright because
-its residual is over a handful of anchors a person identified, not a match
-process that chance can imitate.
+rating until it is re-fitted, and the guided solve itself is exempt outright
+because its residual is over a handful of anchors a person identified, not a
+match process that chance can imitate. A joint fit descended from it carries
+the guided provenance too (a basin claim, model_admission.is_user_anchored)
+and is judged like any other automatic fit — those are the fits this module
+exists to judge.
 
 Pure: no I/O, no Qt.
 """
 from typing import Tuple
 
 from .chance_matches import CHANCE_MARGIN, chance_median_residual
-from .model_admission import is_guided
+from .model_admission import is_user_anchored
 
 # RMS / final match tolerance above which a fit is describing its tolerance
 # rather than the sky. Measured on every log to hand (ALLSKY_HOSTING_SITE_PLAN
@@ -67,7 +70,7 @@ def fit_is_credible(model) -> Tuple[bool, str]:
     """
     if model is None:
         return False, "no model"
-    if is_guided(model):
+    if is_user_anchored(model):
         return True, "guided solve — anchors identified by the user"
     tol = float(getattr(model, 'final_tol_px', 0.0) or 0.0)
     ratio = float(getattr(model, 'chance_ratio', 0.0) or 0.0)
