@@ -31,7 +31,7 @@ An unparsable exposure yields `received_at` unchanged. Never raises.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from services.sky_evidence import parse_exposure_seconds
+from .sky_evidence import parse_exposure_seconds
 
 
 def exposure_seconds(metadata: Optional[dict]) -> Optional[float]:
