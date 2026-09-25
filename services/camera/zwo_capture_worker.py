@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -206,6 +206,7 @@ def capture_single_frame(camera: "ZWOCamera"):
         metadata = {
             'CAMERA': camera_info['Name'],
             'EXPOSURE': f"{camera.exposure_seconds}s",
+            'EXPOSURE_START_UTC': datetime.fromtimestamp(start_time, timezone.utc).isoformat(),
             'GAIN': str(camera.gain),
             'TEMP': temp_info['display'],
             'TEMPERATURE': temp_info['display'],

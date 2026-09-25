@@ -250,3 +250,136 @@ class TestPredictedArc:
     def test_scales_with_resolution(self):
         assert predicted_polaris_arc_px(780.0, 60.0) == pytest.approx(
             predicted_polaris_arc_px(1560.0, 60.0) / 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Issue #93: time coherence, the separable-arc floor, the two-path orchestrator
+# ---------------------------------------------------------------------------
+
+from tests.allsky_synth import (  # noqa: E402
+    REFERENCE, REPORTER, StaticLight, instants, synth_frames, true_pole)
+from services.allsky.pole_finder import MIN_SEPARABLE_ARC_PX  # noqa: E402
+
+
+def _polaris_only(frames, lat):
+    """The Polaris path alone (what the GUI-thread manual paths run)."""
+    return find_pole(frames, lat, rotation=False)
+
+
+def _capture_log(monkeypatch):
+    """Messages pole_finder logs, synchronously (app_logger is queue-fed,
+    so caplog sees its records late or not at all)."""
+    from services.allsky import pole_finder as pf
+    msgs = []
+
+    class Stub:
+        def info(self, m, *a, **k):
+            msgs.append(str(m))
+        warning = debug = error = info
+    monkeypatch.setattr(pf, 'log', Stub())
+    return msgs
+
+
+class TestCoherence:
+    def test_reference_rig_polaris_is_still_found(self):
+        frames = synth_frames(REFERENCE, instants(60, 60), seed=1)
+        est = _polaris_only(frames, REFERENCE.lat)
+        pole = true_pole(REFERENCE)
+        assert est is not None
+        assert np.hypot(est.x - pole[0], est.y - pole[1]) < 20.0   # Polaris's orbit
+        assert est.east_left is True and est.source == 'polaris'
+
+    def test_reporter_rig_jittering_light_by_a_hidden_pole_is_none(self):
+        """The issue #93 negative control: the light at 100 px from a hidden
+        pole read 3–4 px of drift extent and passed the band on 3 of 5 seeds
+        before the coherence test; now none."""
+        pole = true_pole(REPORTER)
+        for seed in range(5):
+            frames = synth_frames(REPORTER, instants(60, 60), seed=seed, hide_pole_px=60,
+                                  static_lights=[StaticLight(pole[0] + 100, pole[1], 1.2)])
+            assert _polaris_only(frames, REPORTER.lat) is None
+
+    def test_coherence_rejection_is_logged_once(self, monkeypatch):
+        # seed 1: the light's jitter extent lands inside the drift band, so
+        # the coherence test is what rejects it (seed 0 fails the band first).
+        pole = true_pole(REPORTER)
+        frames = synth_frames(REPORTER, instants(60, 60), seed=1, hide_pole_px=60,
+                              static_lights=[StaticLight(pole[0] + 100, pole[1], 1.2)])
+        msgs = _capture_log(monkeypatch)
+        _polaris_only(frames, REPORTER.lat)
+        hits = [m for m in msgs if 'progresses with time' in m]
+        assert len(hits) == 1 and 'static lights, not Polaris' in hits[0]
+
+
+class TestSeparableArc:
+    def test_short_window_on_a_small_plate_scale_withholds_with_a_reason(self, monkeypatch):
+        assert predicted_polaris_arc_px(REPORTER.sky_r, 45.0) < MIN_SEPARABLE_ARC_PX
+        frames = synth_frames(REPORTER, instants(30, 45), seed=2)
+        msgs = _capture_log(monkeypatch)
+        assert _polaris_only(frames, REPORTER.lat) is None
+        hits = [m for m in msgs if 'Polaris path withheld' in m]
+        assert len(hits) == 1
+        assert 'static floor' in hits[0] and 'min is needed' in hits[0]
+
+    def test_long_enough_window_proceeds(self):
+        assert predicted_polaris_arc_px(REPORTER.sky_r, 60.0) >= MIN_SEPARABLE_ARC_PX
+        frames = synth_frames(REPORTER, instants(30, 60), seed=2)
+        assert _polaris_only(frames, REPORTER.lat) is not None
+
+
+class TestOrchestrator:
+    def test_both_paths_agree_when_polaris_is_visible(self):
+        frames = synth_frames(REPORTER, instants(12, 60), seed=3)
+        est = find_pole(frames, REPORTER.lat)
+        pole = true_pole(REPORTER)
+        assert est is not None and est.source == 'rotation'
+        assert np.hypot(est.x - pole[0], est.y - pole[1]) < 10.0
+
+    def test_hidden_polaris_yields_the_rotation_pole(self):
+        pole = true_pole(REPORTER)
+        frames = synth_frames(REPORTER, instants(12, 60), seed=4, hide_pole_px=60,
+                              static_lights=[StaticLight(pole[0] + 100, pole[1], 1.2)])
+        est = find_pole(frames, REPORTER.lat)
+        assert est is not None and est.source == 'rotation'
+        assert np.hypot(est.x - pole[0], est.y - pole[1]) < 25.0
+
+    def test_disagreement_withholds_with_a_warning(self, monkeypatch):
+        from dataclasses import replace as replace_
+        from services.allsky import pole_finder as pf
+        frames = synth_frames(REPORTER, instants(12, 60), seed=5)
+        real = pf.pole_from_rotation
+
+        def far_pole(*a, **k):
+            est = real(*a, **k)
+            return None if est is None else replace_(est, x=est.x + 400.0)
+        monkeypatch.setattr(pf, 'pole_from_rotation', far_pole)
+        msgs = _capture_log(monkeypatch)
+        assert find_pole(frames, REPORTER.lat) is None
+        assert any('disagree' in m for m in msgs)
+
+    def test_rotation_false_never_runs_the_fit(self, monkeypatch):
+        from services.allsky import pole_finder as pf
+        calls = []
+        monkeypatch.setattr(pf, 'pole_from_rotation', lambda *a, **k: calls.append(1))
+        frames = synth_frames(REPORTER, instants(12, 60), seed=6)
+        find_pole(frames, REPORTER.lat, rotation=False)
+        assert calls == []
+
+    def test_ring_is_preferred_when_it_qualifies(self, monkeypatch):
+        from services.allsky import pole_finder as pf
+        seen = []
+        monkeypatch.setattr(pf, 'pole_from_rotation',
+                            lambda pool, *a, **k: seen.append(len(pool)) or None)
+        frames = synth_frames(REPORTER, instants(12, 60), seed=7)
+        ring = synth_frames(REPORTER, instants(20, 190), seed=7)
+        find_pole(frames, REPORTER.lat, ring=ring)
+        find_pole(frames, REPORTER.lat, ring=ring[:3])   # too short: the buffer
+        assert seen == [20, 12]
+
+    def test_southern_site_gets_a_rotation_pole(self):
+        from tests.allsky_synth import SOUTHERN
+        frames = synth_frames(SOUTHERN, instants(12, 60), seed=8)
+        est = find_pole(frames, SOUTHERN.lat)
+        pole = true_pole(SOUTHERN)
+        assert est is not None and est.source == 'rotation'
+        assert np.hypot(est.x - pole[0], est.y - pole[1]) < 25.0

@@ -19,6 +19,10 @@ from typing import List, Tuple, Optional
 
 from services.logger import app_logger as log
 
+from .detection_filters import (
+    STREAK_MIN_LONG_PX, DetectionFilters, dark_neighbourhood_map, dark_threshold,
+    has_dark_neighbour, in_ignore_rect, is_streak)
+
 try:
     import cv2
     _CV2_AVAILABLE = True
@@ -265,6 +269,7 @@ def detect_stars(
     sky_cy: Optional[float] = None,
     sky_radius: Optional[float] = None,
     sky_trim_fraction: float = 0.15,
+    filters: Optional[DetectionFilters] = None,
 ) -> List[Tuple[float, float, float]]:
     """
     Detect star centroids in an all-sky camera image.
@@ -283,6 +288,8 @@ def detect_stars(
         sky_radius: Sky circle radius.  Auto-detected if None.
         sky_trim_fraction: Inward trim applied when auto-detecting the sky circle
                            (ignored if sky_radius is supplied).  0.15 = 15% inward.
+        filters: detection_filters.DetectionFilters — streak, dark-neighbourhood
+                 and ignore-box rejection. None keeps the area window alone.
 
     Returns:
         List of (x, y, flux) tuples sorted by decreasing flux.
@@ -335,11 +342,17 @@ def detect_stars(
     bkg_k = max(31, int(sky_radius // 6)) | 1
     background = cv2.GaussianBlur(gray, (bkg_k, bkg_k), 0).astype(np.float32)
     gray_float = gray.astype(np.float32) - background
-    gray_float = np.clip(gray_float, 0, None)
 
-    # Noise sigma from the residual within the sky circle
+    # Noise sigma from the SIGNED residual within the sky circle, before the
+    # clip below. Clipping first zeroed the negative half of pure noise, so
+    # its median and MAD read ~0, sigma sat on the 1.5 floor and a 6-level
+    # threshold turned every grain of a stretched sky into a "star": the
+    # reference-rig replay hit the 200-detection cap on every frame, and a
+    # dark closed roof at 750 px produced ~950 detections against 20–80 with
+    # the signed estimate (issue #93, package 2's independent count).
     sky_resid = gray_float[mask > 0]
     sigma_val = max(1.5, 1.4826 * float(np.median(np.abs(sky_resid - np.median(sky_resid)))))
+    gray_float = np.clip(gray_float, 0, None)
 
     # Threshold on the background-subtracted image
     threshold = max(1, int(threshold_sigma * sigma_val))
@@ -360,6 +373,14 @@ def detect_stars(
 
     results: List[Tuple[float, float, float]] = []
 
+    # detection_filters: the min-filtered frame and its threshold are built
+    # once; the dark test on the ORIGINAL gray, not the background-subtracted
+    # residual, because equipment is dark in absolute terms.
+    dark_map = dark_thr = None
+    if filters is not None and filters.reject_dark_neighbourhood:
+        dark_map = dark_neighbourhood_map(gray, linear_scale)
+        dark_thr = dark_threshold(gray, mask)
+
     for i in range(1, num_labels):
         area = stats[i, cv2.CC_STAT_AREA]
         if area < min_area_eff or area > max_area_eff:
@@ -371,6 +392,21 @@ def detect_stars(
         dist_from_centre = np.hypot(cx - sky_cx, cy - sky_cy)
         if dist_from_centre > sky_radius - border_px:
             continue
+
+        if filters is not None:
+            if filters.reject_streaks:
+                bw, bh = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+                bx, by = stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP]
+                # The mask crop is only cut for components long enough to
+                # be a trail (is_streak returns early on the rest).
+                long_enough = max(bw, bh) > STREAK_MIN_LONG_PX * linear_scale
+                if is_streak(bw, bh, linear_scale,
+                             labels[by:by + bh, bx:bx + bw] == i if long_enough else None):
+                    continue
+            if dark_map is not None and has_dark_neighbour(dark_map, cx, cy, dark_thr):
+                continue
+            if filters.ignore_rects and in_ignore_rect(cx, cy, filters.ignore_rects):
+                continue
 
         # Sub-pixel centroid via weighted moments
         cx_sub, cy_sub, flux = _weighted_centroid(

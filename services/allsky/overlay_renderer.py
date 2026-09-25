@@ -32,6 +32,7 @@ from .render_grid import render_grid
 from .render_constellations import render_constellations
 from .render_objects import render_messier, render_ngc, render_planets, _is_sky_visible
 from .render_stars import render_bright_stars, star_uid, star_display_name
+from .detection_filters import DetectionFilters
 from .star_centroid import detect_stars, estimate_sky_circle
 
 # One-shot guard so the model-scaling INFO log fires once per scale factor
@@ -65,6 +66,7 @@ def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
         detections = detect_stars(
             img, max_stars=200,
             sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
+            filters=DetectionFilters(),
         )
     except Exception:
         return None
