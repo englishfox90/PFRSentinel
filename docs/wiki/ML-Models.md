@@ -103,9 +103,13 @@ This is a warning only. The roof reading, the overlay tokens, roof change notifi
 
 ### Skipping Sky Features While the Roof Is Closed
 
-With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. From the next release the roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — no longer blanks the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
+> **New in the next release** — not available in version 3.7.7 or earlier.
 
-The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details.
+With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. The roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — does not blank the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
+
+The roof reading is now corroborated by the frame itself. A frame flagged as sensor noise only, a frame exposed for less than the **Minimum exposure** floor, or a roof that reads Open while no stars are detected on three frames in a row also pauses those features — a misread Open on a lit roof, or an overcast sky, no longer gets constellation labels. The floors are on the All-Sky page; see [When the overlay is drawn](All-Sky-Overlay#when-the-overlay-is-drawn). A Closed reading is never overridden by detected stars.
+
+The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting or the star check. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details. The roof change notifications, the timelapse roof mode and the ASCOM safety file likewise follow the roof classifier alone.
 
 ### Roof Change Notifications
 
