@@ -78,11 +78,18 @@ class WatchControllerQt(QObject):
         """Called by FileWatcher after a file has been processed and saved"""
         self.file_detected.emit(output_path)
         allsky_cfg = self.config.get('allsky_overlay', {})
-        # The output crop (issue #12) rides on the image's info dict; the
-        # renderer needs it to translate the calibration model into output px.
-        metadata = {}
+        extras = dict(extras or {})
+        # The renderer gets the processor's own metadata (issue #93): the
+        # roof verdict, exposure and star evidence the observable-sky gate
+        # already judged for this frame, with that verdict cached on it, so
+        # the overlay follows the same decision instead of asking again from
+        # a blind dict. The output crop (issue #12) rides on the image's info
+        # dict; the renderer needs it to translate the calibration model into
+        # output px.
+        metadata = extras.get('metadata')
+        metadata = metadata if isinstance(metadata, dict) else {}
         crop = processed_img.info.get(CROP_METADATA_KEY) if processed_img is not None else None
         if crop:
             metadata[CROP_METADATA_KEY] = crop
         preview_img = render_allsky_for_preview(processed_img, allsky_cfg, self.config, metadata)
-        self.image_processed.emit(preview_img, processed_img, output_path, dict(extras or {}))
+        self.image_processed.emit(preview_img, processed_img, output_path, extras)

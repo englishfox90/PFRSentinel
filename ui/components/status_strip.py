@@ -12,9 +12,18 @@ fetches anything itself.
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 from PySide6.QtCore import Qt, QSize
 
+from services.observing_window import REASON_KEY as GATE_REASON_KEY
+
 from ..theme.tokens import Colors, Typography
 from ..theme.icons import mdi, qicon
 from ..theme.styles import paint_border_lines
+
+# Sky tile text per observable-sky gate reason. 'roof' and 'static' are
+# shown from the ML results above them; 'twilight' is daylight, not news.
+_GATE_REASON_TEXT = {
+    'no_stars': "No stars detected",
+    'exposure': "Exposure too short",
+}
 
 
 # tone -> colour. 'stale' is a dimmed value kept in place when data goes cold.
@@ -361,6 +370,15 @@ class StatusStrip(QFrame):
         if roof == 'Closed':
             self.set_sky("Roof closed", 'muted')
             self.set_seeing("Roof closed", 'muted')
+            return
+
+        # The observable-sky gate judged the frame to show no sky worth
+        # reading (issue #93): the reason takes the Sky tile the way "Roof
+        # closed" does, and star detection was skipped, so Seeing has nothing.
+        gate_text = _GATE_REASON_TEXT.get(metadata.get(GATE_REASON_KEY))
+        if gate_text:
+            self.set_sky(gate_text, 'muted')
+            self.set_seeing("—", 'muted')
             return
 
         sky = ml.get('sky_condition')

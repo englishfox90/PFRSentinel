@@ -21,6 +21,7 @@ from services.preview_scaling import downscale_for_preview
 from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from services.processor import add_overlays, auto_stretch_image
 from services.sharpening import apply_unsharp_mask
+from services.sky_evidence import compute_sky_evidence
 from services.ml_service import get_ml_service, analyze_image_for_tokens
 from services.allsky.overlay_renderer import render_allsky_for_preview as _render_allsky_for_preview
 from .dev_mode_utils import dev_mode_saver, collect_ml_contribution_sample
@@ -388,6 +389,16 @@ class ImageProcessorWorker(QThread):
                     self._safety_fsm.update(verdict, ascom_config)
                 except Exception as e:
                     app_logger.debug(f"ASCOM safety update skipped: {e}")
+
+            # Star evidence for the observable-sky gate (issue #93), measured on
+            # the same frozen pre-enhancement copy the calibration feed sees,
+            # after ML (the static verdict spares it the scan) and before the
+            # gate is first consulted below. The copy is post-resize; the
+            # evidence resamples every input to one fixed plane, so a 60 %
+            # resize counts the same as the full frame (test_sky_evidence),
+            # and no pre-resize stretched frame exists to copy without a
+            # second full-frame stretch.
+            compute_sky_evidence(stretched_for_preview, metadata, config)
 
             # Feed clean (pre-enhancement) frame to the background calibration
             # service. Runs AFTER ML so the is_observing_window roof gate sees

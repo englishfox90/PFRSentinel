@@ -6,7 +6,10 @@ Provides:
   - Layer toggles: Grid, Constellations, Messier, NGC, Planets
   - Per-layer color, opacity, line width controls
   - Enabled/disabled master toggle
+  - Observable-sky gate floors (exposure, star detections)
 """
+import copy
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QFrame, QGridLayout, QSizePolicy, QProgressBar, QPushButton,
@@ -18,7 +21,8 @@ from qfluentwidgets import (
     CardWidget, CaptionLabel, BodyLabel, SubtitleLabel,
     MessageBox,
 )
-from ..components.scroll_safe_spinbox import SpinBox
+from services.config_defaults import DEFAULT_CONFIG
+from ..components.scroll_safe_spinbox import DoubleSpinBox, SpinBox
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
@@ -36,6 +40,16 @@ def _section_card(title: str) -> tuple:
     lbl = SubtitleLabel(title)
     vl.addWidget(lbl)
     return card, vl
+
+
+def _merge(base: dict, over: dict) -> dict:
+    """Recursively lay ``over`` onto ``base`` (in place) and return it."""
+    for key, value in (over or {}).items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
 
 
 class LayerToggleRow(QWidget):
@@ -262,9 +276,16 @@ class AllSkySettingsPanel(QScrollArea):
         self._layout.setContentsMargins(Spacing.base, Spacing.base, Spacing.base, Spacing.base)
         self._layout.setSpacing(Spacing.sm)
 
+        # The allsky_overlay dict last loaded; get_config merges the panel's
+        # controls over it so keys the panel has no control for
+        # (utc_offset_hours, planets.colors, constellations.edge_fade_px,
+        # anything added later) survive an edit on this page.
+        self._loaded = {}
+
         self._build_header()
         self._build_calibration_card()
         self._build_master_toggle()
+        self._build_gate_card()
         self._build_burn_in_card()
         self._build_constellations_card()
         self._build_bright_stars_card()
@@ -350,6 +371,29 @@ class AllSkySettingsPanel(QScrollArea):
         self._master_toggle.toggled.connect(self._on_setting_changed)
         vl.addWidget(self._master_toggle)
         self._top_n = self._spin_row(vl, "Max objects visible", 5, 50, 15, 5)
+        self._layout.addWidget(card)
+
+    def _build_gate_card(self):
+        card, vl = _section_card("When the overlay is drawn")
+        desc = CaptionLabel(
+            "The overlay, automatic calibration and star detection pause on frames "
+            "that cannot show a night sky: exposures shorter than the floor, and a "
+            "roof that reads Open while no stars are detected (a lit roof or an "
+            "overcast sky). Set the exposure floor to 0 to turn that check off."
+        )
+        desc.setWordWrap(True)
+        vl.addWidget(desc)
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel("Minimum exposure (seconds)"))
+        self._min_exposure = DoubleSpinBox()
+        self._min_exposure.setRange(0.0, 60.0)
+        self._min_exposure.setDecimals(2)
+        self._min_exposure.setSingleStep(0.1)
+        self._min_exposure.setValue(0.5)
+        self._min_exposure.valueChanged.connect(self._on_setting_changed)
+        row.addWidget(self._min_exposure)
+        vl.addLayout(row)
+        self._min_stars = self._spin_row(vl, "Minimum stars detected", 0, 500, 100, 10)
         self._layout.addWidget(card)
 
     def _build_burn_in_card(self):
@@ -482,8 +526,11 @@ class AllSkySettingsPanel(QScrollArea):
     def load_from_config(self, config: dict) -> None:
         """Populate all controls from the given allsky_overlay config dict."""
         c = config
+        self._loaded = copy.deepcopy(c) if isinstance(c, dict) else {}
         self._master_toggle.set_checked(c.get('enabled', False))
         self._top_n.setValue(int(c.get('top_n', 15)))
+        self._min_exposure.setValue(float(c.get('min_exposure_s', 0.5)))
+        self._min_stars.setValue(int(c.get('min_star_detections', 100)))
 
         burn = c.get('burn_into_output', {})
         self._burn_saved_file.set_checked(burn.get('saved_file', False))
@@ -516,54 +563,48 @@ class AllSkySettingsPanel(QScrollArea):
         self._planets_color.set_color(planets.get('color', '#FFFFCC'))
 
     def get_config(self) -> dict:
-        """Collect current UI state into allsky_overlay config dict."""
-        return {
-            'enabled': self._master_toggle.is_checked(),
-            'calibration_file': '',  # Preserved by controller from actual config
-            'top_n': self._top_n.value(),
-            'burn_into_output': {
-                'saved_file': self._burn_saved_file.is_checked(),
-                'web': self._burn_web.is_checked(),
-                'timelapse': self._burn_timelapse.is_checked(),
-            },
-            'grid': {
-                'enabled': False, 'horizon': False,
-                'altitude_rings': False, 'cardinal_labels': False,
-                'altitude_step': 30, 'azimuth_lines': False,
-                'color': '#336633', 'line_width': 1,
-                'label_size': 14, 'opacity': 120,
-            },
-            'constellations': {
-                'enabled': self._con_enabled.is_checked(),
-                'lines': self._con_lines.is_checked(),
-                'labels': self._con_labels.is_checked(),
-                'color': self._con_color.selected_color(),
-                'line_width': 2, 'label_size': 12, 'opacity': 180,
-            },
-            'bright_stars': {
-                'enabled': self._stars_enabled.is_checked(),
-                'max_magnitude': float(self._stars_max_mag.value()),
-                'bayer_fallback': self._stars_bayer.is_checked(),
-                'color': self._stars_color.selected_color(),
-                'label_size': 11, 'opacity': 220,
-            },
-            'messier': {
-                'enabled': self._messier_enabled.is_checked(),
-                'color': self._messier_color.selected_color(),
-                'marker_size': 8, 'label_size': 10, 'opacity': 200,
-            },
-            'ngc': {
-                'enabled': self._ngc_enabled.is_checked(),
-                'min_magnitude': float(self._ngc_max_mag.value()),
-                'color': self._ngc_color.selected_color(),
-                'marker_size': 6, 'label_size': 9, 'opacity': 150,
-            },
-            'planets': {
-                'enabled': self._planets_enabled.is_checked(),
-                'color': self._planets_color.selected_color(),
-                'label_size': 14, 'marker_size': 10, 'opacity': 255,
-            },
-        }
+        """Current UI state merged over the last loaded allsky_overlay dict.
+
+        Defaults underneath, the loaded dict over them, the panel's own
+        controls on top — so a key without a control here is carried through
+        unchanged rather than dropped on the first edit (H11, issue #93).
+        """
+        cfg = _merge(copy.deepcopy(DEFAULT_CONFIG['allsky_overlay']), self._loaded)
+        cfg['enabled'] = self._master_toggle.is_checked()
+        cfg['top_n'] = self._top_n.value()
+        cfg['min_exposure_s'] = float(self._min_exposure.value())
+        cfg['min_star_detections'] = int(self._min_stars.value())
+        cfg['burn_into_output'].update({
+            'saved_file': self._burn_saved_file.is_checked(),
+            'web': self._burn_web.is_checked(),
+            'timelapse': self._burn_timelapse.is_checked(),
+        })
+        cfg['constellations'].update({
+            'enabled': self._con_enabled.is_checked(),
+            'lines': self._con_lines.is_checked(),
+            'labels': self._con_labels.is_checked(),
+            'color': self._con_color.selected_color(),
+        })
+        cfg['bright_stars'].update({
+            'enabled': self._stars_enabled.is_checked(),
+            'max_magnitude': float(self._stars_max_mag.value()),
+            'bayer_fallback': self._stars_bayer.is_checked(),
+            'color': self._stars_color.selected_color(),
+        })
+        cfg['messier'].update({
+            'enabled': self._messier_enabled.is_checked(),
+            'color': self._messier_color.selected_color(),
+        })
+        cfg['ngc'].update({
+            'enabled': self._ngc_enabled.is_checked(),
+            'min_magnitude': float(self._ngc_max_mag.value()),
+            'color': self._ngc_color.selected_color(),
+        })
+        cfg['planets'].update({
+            'enabled': self._planets_enabled.is_checked(),
+            'color': self._planets_color.selected_color(),
+        })
+        return cfg
 
     # ------------------------------------------------------------------
     # Internal
