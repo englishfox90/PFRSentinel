@@ -412,8 +412,8 @@ live buffer, and the escape bypass demands merit from the candidate.
 **Quality** (`calibration_quality.py`, new `calibration_fit_merit.py` for the rule):
 
 - `fit_is_credible(model) -> (bool, reason)`: false when `final_tol_px > 0 and
-  rms_residual > CREDIBLE_RMS_FRACTION × final_tol_px` (**0.6**; chance sits at 0.707,
-  the #10 rig's real fits at 7.6–7.9 px on ~16 px = 0.48) or when `chance_ratio` is known
+  rms_residual > CREDIBLE_RMS_FRACTION × final_tol_px` (**0.55**, decision 5; chance sits
+  at 0.707, the #10 rig's real fits at 7.6–7.9 px on ~16 px = 0.48) or when `chance_ratio` is known
   and `< CHANCE_MARGIN` (2.0). Unknown (0.0) fields never fail a model — legacy files keep
   their rating until re-fitted.
 - `model_quality` caps a non-credible model at **PRELIMINARY** regardless of n / n_images.
@@ -440,10 +440,13 @@ live buffer, and the escape bypass demands merit from the candidate.
 - Extend rule 3 in `model_replacement.py`: `incumbent_discredited = failed_anchors or
   chance_level_twice` (guided incumbents still exempt).
 
-**Tighten rule 2** (`model_replacement.py:137-142`): the evidence bypass also requires
-`fit_is_credible(candidate)` — i.e. the candidate's *own* RMS/tolerance ratio and chance
-ratio, not only that a pole or authority existed. A candidate that fails it goes through
-the normal RMS guard. Update the docstring table at the top of the module.
+**Tighten rules 2 and 3** (`model_replacement.py:137-151`): both RMS-guard bypasses
+require `fit_is_credible(candidate)` — the candidate's *own* RMS/tolerance ratio and
+chance ratio, not only that a pole or authority existed (rule 2) or that the incumbent is
+discredited (rule 3). A discredited incumbent loses its veto, but the replacement must
+itself be sky-worthy, or the next chance-level fit that slips the per-run gate walks in
+the way the reporter's did on Sep 19. A candidate that fails it goes through the normal
+RMS guard. Update the docstring table at the top of the module.
 
 **Status string** (`calibration_service.py:620-623,692-695,717-720`): when the incumbent
 is chance-level, the restored status reads "Calibrated: 606 stars, RMS=10.9px
@@ -731,8 +734,8 @@ not less); package 2's exposure floor and no-stars rule are.
 
    No automatic fit has been admitted on any rig since Sep 5. 0.6 leaves 0.04 to the
    lowest chance fit; **0.55** sits midway between the last genuine fit and the first
-   chance fit, and a false "credible" is the expensive error. Proposed 0.55, awaiting the
-   maintainer's confirmation; the constant carries this table in its comment.
+   chance fit, and a false "credible" is the expensive error. **0.55 confirmed by the
+   maintainer**; the constant carries this table in its comment.
 6. **Both hemispheres**, hemisphere from the latitude sign, southern path validated on
    synthetic data only until real southern data exists.
 
