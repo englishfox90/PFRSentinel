@@ -76,9 +76,21 @@ class TestSigma:
         assert pole_sigma_px(5.0, 1.0, 300.0) == pytest.approx(
             math.hypot(5.0, POLE_TOL_RADIAL_FRACTION * 300.0))
 
-    def test_unknown_sigma_is_the_flat_tolerance_over_the_multiple(self):
+    def test_unknown_sigma_is_the_flat_tolerance_over_the_multiple_plus_the_radial_term(self):
         assert pole_sigma_px(0.0, 1.0, 300.0) == pytest.approx(
-            POLE_TOL_REF_PX / POLE_SIGMA_MULTIPLE)
+            math.hypot(POLE_TOL_REF_PX / POLE_SIGMA_MULTIPLE, POLE_TOL_RADIAL_FRACTION * 300.0))
+        assert pole_sigma_px(None, 1.0, 0.0) == pytest.approx(POLE_TOL_REF_PX / POLE_SIGMA_MULTIPLE)
+
+    def test_no_sigma_never_pulls_harder_than_a_measured_sigma(self):
+        """PR #100 review: at the reference rig's pole radius (~1250 px full
+        res) a Polaris-path or legacy estimate must not out-pull the
+        validated no-harm case, and a good model's 50–70 px regional
+        error must sit under 1σ."""
+        r_p = 1250.0
+        unknown = pole_sigma_px(0.0, 1.0, r_p)
+        assert unknown >= 70.0
+        for sigma in (0.5, 3.0, 5.0, 10.0, 15.0):
+            assert unknown >= pole_sigma_px(sigma, 1.0, r_p)
 
 
 class TestPoleConstraint:

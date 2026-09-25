@@ -106,13 +106,18 @@ def pole_sigma_px(sigma_px: Optional[float], scale: float,
     — the fit should not be dragged across the lens's own error at the
     pole by a 3 px sigma (measured: forcing the reference night's fit onto
     the rotation pole cost it 80 % of its matches and every anchor frame,
-    plan §0.7). With no sigma the flat tolerance is treated as the
-    POLE_SIGMA_MULTIPLE bound, so the pull is consistent with the gate.
+    plan §0.7). With no sigma the unknown scatter is taken as the flat
+    tolerance over POLE_SIGMA_MULTIPLE (47 px at reference scale) and the
+    radial allowance is still added in quadrature, so an estimate with no
+    sigma never pulls harder than one with a measured sigma does: at the
+    reference rig's pole radius it is ~135 px against ~110–125 px for any
+    measured sigma up to 15, and a good model's 50–70 px of regional error
+    sits under 1σ either way. (The first cut returned the 47 px alone —
+    2.3× tighter than the validated no-harm case, PR #100 review.)
     """
-    if not _known(sigma_px):
-        return POLE_TOL_REF_PX * scale / POLE_SIGMA_MULTIPLE
-    return float(np.hypot(float(sigma_px),
-                          POLE_TOL_RADIAL_FRACTION * float(pole_radius_px)))
+    scatter = (float(sigma_px) if _known(sigma_px)
+               else POLE_TOL_REF_PX * scale / POLE_SIGMA_MULTIPLE)
+    return float(np.hypot(scatter, POLE_TOL_RADIAL_FRACTION * float(pole_radius_px)))
 
 
 @dataclass(frozen=True)
