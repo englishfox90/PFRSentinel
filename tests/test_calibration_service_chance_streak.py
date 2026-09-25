@@ -98,6 +98,51 @@ class TestWorkerScoresTheIncumbent:
         assert seen and seen[0].ratio == 1.1
 
 
+class TestGuidedIncumbentIsNeverScored:
+    """A guided model's authority is the user's; a 7-anchor solve is not
+    expected to meet the joint fit's final tolerance across the whole sky,
+    and the anchor-health caution already covers a moved camera."""
+
+    def _guided(self):
+        m = _model(rms=4.1, n_matches=7, n_images=1, span_minutes=0.0)
+        m.provenance = 'guided'
+        return m
+
+    def test_worker_emits_no_score_for_a_guided_incumbent(
+            self, qapp, fast_refine, scored):
+        scored['score'] = _chance_score(1.0)
+        svc = _service(model=self._guided())
+        seen = []
+        svc._on_incumbent_scored = seen.append
+        _run_one_refinement(svc)
+        assert seen == [] and scored['calls'] == []
+
+    def test_automatic_incumbent_is_still_scored(
+            self, qapp, fast_refine, scored):
+        scored['score'] = _chance_score(1.0)
+        svc = _service()
+        seen = []
+        svc._on_incumbent_scored = seen.append
+        _run_one_refinement(svc)
+        assert len(seen) == 1 and len(scored['calls']) == 1
+
+    def test_service_streak_ignores_scores_for_a_guided_model(
+            self, qapp, monkeypatch):
+        monkeypatch.setattr(cs, 'incumbent_anchor_health', lambda m, f: None)
+        svc = _service(model=self._guided())
+        svc._quality = 'preliminary'
+        svc._refine_gen = svc._model_generation
+        badge, attention = [], []
+        svc.badge_quality_changed.connect(lambda q, n: badge.append((q, n)))
+        svc.attention_changed.connect(lambda lvl, msg: attention.append(lvl))
+        for _ in range(3):
+            svc._on_incumbent_scored(_chance_score(1.0))
+        assert svc._chance_streak.strikes == 0
+        assert not svc._chance_streak.discredited
+        assert badge == [] and attention == []
+        svc.deleteLater()
+
+
 class TestServiceChanceStreak:
 
     @pytest.fixture

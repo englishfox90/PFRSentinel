@@ -229,6 +229,18 @@ class TestIncumbentChanceStreak:
         s.record(_score(CHANCE_MARGIN - 0.01))
         assert s.strikes == 1
 
+    def test_guided_model_is_never_discredited(self):
+        s = ic.IncumbentChanceStreak()
+        guided = _model(provenance='guided', n_matches=7, rms_residual=4.1)
+        for _ in range(3):
+            assert s.record(_score(1.0), guided) is False
+        assert s.strikes == 0 and not s.discredited
+        assert s.note('preliminary') == ''
+        # The same scores against an automatic model do count.
+        s.record(_score(1.0), _model())
+        s.record(_score(1.0), _model())
+        assert s.discredited
+
     def test_reset_for_a_new_model(self):
         s = ic.IncumbentChanceStreak()
         s.record(_score(1.0))

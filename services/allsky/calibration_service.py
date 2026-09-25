@@ -482,7 +482,7 @@ class CalibrationService(QObject):
         its rating. The status line follows with the run's result (always emitted)."""
         if self._refine_gen != self._model_generation or self._model is None:
             return
-        if self._chance_streak.record(score):
+        if self._chance_streak.record(score, self._model):
             self.badge_quality_changed.emit(self._chance_streak.cap(self._quality),
                                             self._chance_streak.note(self._quality))
             self._publish_attention()

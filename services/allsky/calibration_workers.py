@@ -22,7 +22,8 @@ from .calibration import calibrate, CalibrationError
 from .calibration_validate import median_frame_resolution
 from .incumbent_chance import score_incumbent, score_tolerance_px
 from .incumbent_evidence import corroborate_incumbent
-from .model_admission import admission_evidence, admit_candidate, east_left_hint
+from .model_admission import (
+    admission_evidence, admit_candidate, east_left_hint, is_guided)
 from .multi_calibrate import median_sky_r, refine_from_detections
 from .pole_consensus import PoleHistory
 from .pole_finder import find_pole
@@ -95,8 +96,13 @@ class _RefineWorker(QThread):
                 pole_image_width=pole_w, pole_image_height=pole_h)
             if stamped:
                 self.incumbent_corroborated.emit(why)
-            self.incumbent_scored.emit(score_incumbent(
-                self._incumbent, self._frames, score_tolerance_px(sky_r)))
+            # A guided incumbent is never scored: a 7-anchor solve is not
+            # expected to meet the joint fit's final tolerance across the
+            # whole sky, its authority is the user's, and the anchor-health
+            # caution already covers a moved camera.
+            if not is_guided(self._incumbent):
+                self.incumbent_scored.emit(score_incumbent(
+                    self._incumbent, self._frames, score_tolerance_px(sky_r)))
 
             model = refine_from_detections(
                 self._frames,

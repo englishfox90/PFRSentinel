@@ -166,3 +166,15 @@ class TestIncumbentChanceLevel:
     def test_default_is_off(self, health):
         health['value'] = None
         assert ca.calibration_attention(_model(), 0, []) == ('', '')
+
+    def test_guided_model_is_never_misaligned_from_chance(self, health):
+        health['value'] = None
+        guided = _model()
+        guided.provenance = 'guided'
+        assert ca.calibration_attention(guided, 0, [],
+                                        incumbent_chance_level=True) == ('', '')
+        # The anchor-health caution still applies to it.
+        health['value'] = False
+        level, _ = ca.calibration_attention(guided, 4, [],
+                                            incumbent_chance_level=True)
+        assert level == ca.LEVEL_MISALIGNED

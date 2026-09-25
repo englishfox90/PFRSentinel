@@ -17,7 +17,10 @@ scores into a verdict the service can act on: two consecutive chance-level
 runs discredit the model (the "two strikes" of the independent all-sky
 solver's nightly self-check, ALLSKY_HOSTING_SITE_PLAN section 6), one
 credible run clears it, and a buffer too thin to judge by (cloud, a
-moon-washed sky) is skipped rather than counted either way.
+moon-washed sky) is skipped rather than counted either way. A guided model
+is exempt throughout: a solve over a handful of user-named anchors is not
+expected to meet the joint fit's final tolerance across the whole sky, and
+its basin outranks every automatic measurement (.claude/rules/allsky.md).
 
 The verdict changes what the UI shows and what model_replacement may do; it
 never rewrites the calibration file. The file's rating is "from when it was
@@ -36,6 +39,7 @@ from .calibration_quality import CalibrationQuality
 from .calibration_validate import (
     median_frame_resolution, model_in_frame, tol_scale)
 from .chance_matches import CHANCE_MARGIN, estimate_chance
+from .model_admission import is_guided
 from .multi_calibrate import _build_all_matches, _joint_rms
 
 # The joint fit's final re-match tolerance at reference resolution
@@ -152,8 +156,11 @@ class IncumbentChanceStreak:
     def strikes(self) -> int:
         return self._strikes
 
-    def record(self, score: Optional[IncumbentScore]) -> bool:
-        if score is None:
+    def record(self, score: Optional[IncumbentScore], model=None) -> bool:
+        """`model` is the incumbent the score describes; a guided one is
+        never discredited by chance (second guard behind _RefineWorker's
+        skip — its authority is the user's, not the joint fit's)."""
+        if score is None or (model is not None and is_guided(model)):
             return False
         self._last = score
         before = self._discredited
