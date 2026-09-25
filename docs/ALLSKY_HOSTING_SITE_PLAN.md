@@ -181,7 +181,7 @@ Ships first in a dev build; the reporter runs one clear night and sends a diagno
 bundle.
 
 - New `services/allsky/buffer_dump.py`: `dump_buffer(frames, path)` writes the
-  `CalibrationService` buffer (`dt`, `detected`, `sky_cx/cy/r`, `image_width/height`,
+  `CalibrationService` buffer (and, once package 4 adds it, the long-baseline ring) (`dt`, `detected`, `sky_cx/cy/r`, `image_width/height`,
   `above_horizon` names only — no images) as JSON to
   `<app-data>/allsky/buffer_<stamp>.json`; keeps the newest 5 files. Path via a new
   `app_config.get_allsky_buffer_dir()`.
@@ -382,6 +382,9 @@ live buffer, and the escape bypass demands merit from the candidate.
   `chance_matches.estimate_chance`. Runs in `_RefineWorker.run` next to
   `corroborate_incumbent` (off the GUI thread, same frames the candidate sees). Emit on
   `result_ready` / a new `incumbent_scored` signal.
+- Skip the score (report `None`, not a strike) when the buffer's median detection count
+  is below `SCORE_MIN_DETECTIONS` (40): a cloudy or moon-washed buffer says nothing about
+  the model.
 - `CalibrationService` keeps a two-run streak; two consecutive chance-level scores
   (`ratio < CHANCE_MARGIN`) → `calibration_attention` level **`misaligned`** and the
   quality badge drops to Preliminary in the UI *without rewriting the file* (the file's
@@ -436,7 +439,8 @@ user's observation in §0.1.
   sampled across the full span). Log the reason once per run.
 - A withheld estimate is a `None` from `find_pole` — callers already treat that as normal.
 
-**4b — Static-light pool** (new `services/allsky/static_lights.py`):
+**4b — Pool hygiene: static lights, obstruction, detector filters, frame ring**
+(new `services/allsky/static_lights.py` and the modules named below):
 
 - `find_static_lights(frames, sky_r) -> list[(x, y)]`: detections present at the same
   pixel (± `CLUSTER_TOL`) in ≥ 3 frames spanning ≥ 45 min whose track fails the coherence
@@ -453,8 +457,23 @@ user's observation in §0.1.
   where the map says equipment, applied at the same point. Takes `None` and returns the
   frames unchanged, so this package builds without package 1; lights on parked scopes
   then never reach the pole finder, the fit, or the chance estimate.
-- Buffer age (H14): `feed_frame` also drops frames older than `MAX_BUFFER_AGE_MIN`
-  (suggest 240) so a day gap does not join two nights in one fit.
+- Buffer hygiene (H14): `feed_frame` keeps two sets — the 60-frame rolling buffer as
+  today, plus a **long-baseline ring** (new `services/allsky/frame_ring.py`): one frame
+  per `LONG_RING_SPACING_MIN` (10), up to `LONG_RING_LEN` (36, i.e. six hours), same night
+  only — a frame more than `NIGHT_GAP_HOURS` (6) after the previous entry starts a new
+  ring. The rotation-pole fit (4c) and the bootstrap search (package 5) take the ring;
+  refinement keeps the rolling buffer. Package 0's dump grows to include the ring.
+- Detector filters (new `services/allsky/detection_filters.py`, applied in
+  `_detect_frame` and `_detect_sky_mask` after `detect_stars`): drop components whose
+  bounding box aspect exceeds 3.2 with the long side over 6 px × scale (streaks, edges);
+  drop components whose local background minimum within `EDGE_R` (10 px × scale) falls
+  below `DARK_FLOOR` (35/255 on the stretched frame) — glints on silhouette rims and
+  cables. Both rules are measured on the reporter's frame stills (§0.3) and the reference
+  frames before the constants are fixed.
+- Exposure-midpoint timestamps (reliability plan F7): the capture worker records the
+  exposure start; `feed_frame` receives `start + exposure/2` instead of `datetime.now()`.
+  Watch mode uses the FITS `DATE-OBS` when present, else the file's mtime minus half the
+  sidecar exposure.
 
 **4c — Pole from rotation** (new `services/allsky/pole_from_rotation.py`):
 
@@ -536,15 +555,30 @@ only. Depends on package 3 (`final_tol_px`, `chance_ratio` fields) and package 4
 `services/allsky/joint_fit.py`. `multi_calibrate.py` drops to ~350 lines and can take
 the wiring below. Run the full all-sky test set before and after; identical results.
 
-**5b — Pole-seeded orientation search** (`orientation_search.py`):
+**5b — Orientation search by roll vote** (`orientation_search.py`; see §6):
 
-- With a trusted pole (consensus not `None`), the axis direction in camera coordinates
-  is known: invert the radial function at the pole pixel to get the pole's θ, φ; the
-  model's `(axis_alt, axis_az)` follow from requiring `altaz_to_pixel(|lat|, 0|180)` to
-  land there. The search is then **roll × mirror** (24 × 2 cells, or 24 × 1 with the
-  consensus `east_left`) instead of 2016 × 2, and each cell can afford the full 60-frame
-  scoring instead of 8 sampled frames. Keep the old full grid as the no-pole path.
-- Seed `a1` from the rotation fit's plate scale when `source == 'rotation'`.
+- For each (axis_alt, axis_az, a1, mirror) cell, catalogue stars and detections at the
+  same radius from the centre (± `tol_r` ≈ 0.017·w) pair up; each pair implies one roll
+  (`φ_catalogue − φ_detection`); a 360-bin histogram (3-bin window) picks the roll. Cell
+  score is `(peak − pairs·3/360) / √max(1, pairs·3/360)` — excess over chance in σ, so a
+  small scale that crowds the sky cannot win on random pairings (issue #33's failure at
+  its source). Roll is never gridded.
+- Frames: the long-baseline ring's first, middle and last (package 4), so a wrong
+  orientation cannot line up with stars that have moved; fall back to the rolling
+  buffer's sampled frames when no ring exists.
+- Scale: scan `a1` over 0.7–1.5× the seed in ×1.05 steps (the seed is the rotation fit's
+  plate scale when `source == 'rotation'`, else `a1_from_sky_radius`). The reporter's rig
+  needs this: §0.3 shows the sky-circle seed is not a measurement there.
+- With a trusted pole the axis is known: invert the radial function at the pole pixel to
+  get θ, φ, and `(axis_alt, axis_az)` follow from requiring `altaz_to_pixel(|lat|, 0|180)`
+  to land there. The search is then scale × mirror with roll voted — a few dozen cells
+  instead of 2016 × 2 — and each cell can afford every ring frame. Without a pole the
+  full axis grid (alt 0–90° in 3°, az step widened by 1/cos(alt) near the zenith) runs
+  with the same vote; that is the unseeded path and it must stand on its own.
+- Verify the top candidates (≈ 40) as today through `_fit_and_validate`, preceded by a
+  **centre offset vote**: every catalogue star brighter than mag 3 votes for its (dx, dy)
+  to each detection within reach in a 4 px-binned 2-D histogram; the peak corrects
+  `cx, cy` before the first match. Then the tolerance schedule.
 
 **5c — Pole pseudo-observation in the joint fit** (`joint_fit.py`, `residuals(p)` at
 today's `multi_calibrate.py:633-660`): append
@@ -566,15 +600,20 @@ wants to sit 100 px off a 5 px pole pays for it.
 - The model-vs-model basin veto in `model_admission._basin_veto` keeps 140 px; it compares
   two models, not a measurement.
 
+**5d′ — Catalogue epoch** (`coords.py`): precess J2000 to the frame date (IAU 1976 is
+enough; ≈ 0.36° in 2026, ≈ 7 px at a1 = 1097 and not a rigid rotation the fit can
+absorb). Test against a known star's published apparent position. This is part of the
+residual floor every fit has been paying and belongs before the tolerance is tightened.
+
 **5e — Rival test on escape** (`bootstrap_selection.py`): after `select_bootstrap_winner`,
 if a second survivor whose matched star set (`matched_stars` names) overlaps the winner's
 by < 50 % has `chance_excess ≥ 0.5 ×` the winner's, the escape yields **no** candidate
 ("two incompatible solutions explain the frames"). Logged with both orientations.
 
-**Not in this package** (listed in the issue as options; each is its own follow-up if the
-field results say the solver still fails): roll voting by radius pairs, bootstrapping from
-three frames hours apart, resolution-scaled RMS tiers, nightly self-check, detector
-rejection of edge-adjacent/elongated components, other lens families.
+**Consider, after the field results** (not committed): one more tightening step to
+≈ 0.003·w when the fit supports it; resolution-scaled RMS tiers (≈ 2 px per 1080 px).
+**Not in this package**: other lens projection families — the a3/a5 polynomial covers
+them to first order and a3/a5 pinning already flags a lens the polynomial cannot fit.
 
 **Tests:** `test_allsky_multi_calibrate.py` (extraction neutrality: same outputs on the
 existing fixtures), new `test_orientation_search.py` (pole-seeded path finds the true
@@ -640,3 +679,36 @@ not less); package 2's exposure floor and no-stars rule are.
    the #10 rig's genuine fits 0.48.
 6. **Both hemispheres**, hemisphere from the latitude sign, southern path validated on
    synthetic data only until real southern data exists.
+
+## 6. Cross-check against an independent all-sky solver (2026-09-25)
+
+A self-calibrating pier-camera solver that aligns a fixed camera to the sky from star
+detections and frame times alone was read end to end and compared with this plan. It never
+uses the pole, Polaris, or a sky-circle estimate; it succeeds on its rigs because of a
+handful of choices, listed here with what each one means for us. Adopted items are folded
+into the packages above.
+
+| Technique | What it does | Ours today | Verdict |
+|---|---|---|---|
+| **Roll by vote, not by grid** | For each (axis, scale, parity) a catalogue star at radius *r* pairs with every detection at the same radius ± tol; each pair implies one roll; a 360-bin histogram picks it. Search cost is axis × scale, not axis × scale × roll. | `_coarse_orientation_candidates` grids roll in 15° steps (24 cells) at one fixed scale. | **Adopt** in package 5 `orientation_search.py`. With a known pole the axis is fixed and the vote alone finds roll. |
+| **Score = excess over chance in σ** | Cell score is `(peak − pairs·3/360) / √chance`, not the raw count, so a small scale that crowds the sky into a small circle cannot win on random pairings. | Raw match count in the coarse grid; `chance_matches` bolted on after the fit (issue #33). | **Adopt** in package 5. This is the fix for #33's class of failure at its source. |
+| **Scale searched, not assumed** | Focal length scanned geometrically (×1.03 steps over a 10× range) and five projection families. | `a1 = a1_from_sky_radius(sky_r)` — an estimate that §0.3 shows is unreliable on an obstructed rig; no scale search. | **Adopt the scale scan** (0.7–1.5× the seed, ×1.05 steps) in package 5. Projection families stay out: our a3/a5 polynomial covers them to first order. |
+| **Frames hours apart** | The search uses the first, middle and last dark frames of the night; verification nine spread across it. A wrong orientation cannot line up with stars that have moved 45°. | 60 consecutive frames over ~50 min. | **Adopt** as a long-baseline ring in package 4 (below). Also improves the rotation-pole fit: longer arcs, sharper axis. |
+| **Centre by offset vote** | Before matching, every bright catalogue star votes for its (dx, dy) to every nearby detection in a 2-D histogram; the peak is the centre error. Robust where nearest-neighbour matching fails at loose tolerance. | LM with cx/cy bounded ±100 px of the seed. | **Adopt** as the first verify step in package 5 `joint_fit.py`. Cheap. |
+| **Rival test** | A second candidate explaining the frames with a mostly different star set at ≥ half the winner's count fails the run. | None. | Already in package 5e (from the issue). Keep. |
+| **Static-light drop** | Detections at the same pixel ± 2.5 px in ≥ 2 frames ≥ 45 min apart are removed. | None. | Package 4b already; ours uses the track-coherence test so Polaris (2–3 px real motion here) survives. Keep ours. |
+| **Detector rejects glints and streaks** | Components adjacent to dark regions (silhouette edges, cables) are skipped via a min-filter of the local background; elongated components (aspect > 3.2 and > 6 px) are skipped; area caps scale with resolution. | Local background and area caps only. | **Adopt** in package 4 as `detection_filters.py`. The dark-neighbourhood rule complements the equipment map: the map covers the interior of equipment, this covers its rim. |
+| **Exposure-midpoint timestamps** | Every frame carries its mid-exposure UTC; a wrong clock is named as the one failure the solver cannot detect. | `feed_frame(..., datetime.now(utc))` at feed time (`image_processor.py:408`); reliability plan F7, deferred since June. 30 s exposure + processing ≈ 20–30 s late ≈ 0.12° of rotation ≈ 2 px at 1000 px from the pole. | **Adopt** in package 4: stamp the capture midpoint from the capture worker. |
+| **Precession to date** | Catalogue J2000 positions precessed to the frame epoch. | Refraction yes (`coords.py`, Bennett), precession **no**: 26 years ≈ 0.36° ≈ 7 px at a1 = 1097, not a rigid rotation the fit can absorb. | **Adopt** in package 5 (`coords.py`, IAU 1976 or equivalent, tested against a known star). Part of the residual floor every fit here has been paying. |
+| **Tight final tolerance and resolution-scaled RMS** | Final match at ≈ 0.0026·w; accept only RMS ≤ 2 px per 1080 px of frame (≈ 5.3 px at 2840, ≈ 6.6 at 3552). | Final tolerance 18 px × `tol_scale` ≈ 0.005·w; tiers accept 12–15 px. | **Consider** in package 5: one more tightening step to ≈ 0.003·w when the fit supports it. Do not change the tiers until package 3's credibility rule has run on real fits. |
+| **Nightly self-check, two strikes** | Match the saved model against one frame per night; fail if < 25 % of the count it predicts; two consecutive failures → recalibrate; skip the check on a frame with too few detections ("cloudy: nothing to judge by"). | Package 3's incumbent chance score with two consecutive chance-level runs. | Equivalent; **adopt the cloudy guard** (skip scoring when the buffer's median detection count is under the floor) in package 3. |
+| **Second-night confirmation** | A new calibration is checked against frames from a different night before it is trusted. | Provenance rungs within a night. | Optional later: a `'confirmed'` stamp when a model passes the incumbent score on a later night. Not in these packages. |
+| **Detection at reduced resolution** | Frames reduced to ~2.5 MP before detection. | Full frame, area thresholds scaled. | Not adopted; our cost is acceptable and full-resolution centroids are worth keeping for a 16 px → 10 px tolerance. |
+
+One structural observation: that solver needs no pole because its search is global,
+chance-scored and multi-hour. Our plan reaches the same robustness by two routes that
+reinforce each other — the rotation-derived pole (package 4) is the same information as
+multi-hour frames voting together, and the pole-seeded roll vote (package 5) is the
+global search with two of its three orientation angles already known. If package 4's pole
+is withheld on a rig, package 5's search must still work unseeded, which is exactly the
+roll-vote-plus-scale-scan path.
