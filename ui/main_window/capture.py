@@ -95,6 +95,11 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
         try:
             self._ensure_output_servers_started()
 
+            # Label memory (sky vote, sticky picks, slots) belongs to one
+            # session; the previous session's is stale by definition.
+            from services.allsky.label_stability import reset_label_stability
+            reset_label_stability()
+
             if mode == 'camera':
                 self._start_camera_capture()
                 if (self.camera_controller
@@ -155,6 +160,9 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
 
             if self.meteor_controller:
                 self.meteor_controller.on_capture_stopped()
+
+            if getattr(self, 'allsky_controller', None):
+                self.allsky_controller.on_capture_stopped()
 
             # Slower status updates when idle
             self.status_timer.setInterval(1000)
