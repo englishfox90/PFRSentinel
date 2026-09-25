@@ -11,7 +11,7 @@
 > This is a **plan**, not a change log. It is written so that each work package can be
 > handed to a coding agent as a self-contained brief and merged on its own.
 
-## 0. Two facts that change the issue's proposals
+## 0. What changes the issue's proposals
 
 ### 0.1 Polaris is not visible on this rig
 
@@ -95,6 +95,33 @@ From the issue and confirmed in code:
   orders of magnitude away. The 1.0 s floor in package 1 has a wide margin on both sides
   for this rig.
 
+### 0.4 What `sentinel.log.2026-09-23` shows
+
+- **Every refinement that day was at chance**: 62 consecutive rejections at 1.0–1.5×
+  (e.g. "644 matches vs 618 expected by chance at tol=16.5px over 60 frames"), and all 24
+  bootstrap candidates across four escapes likewise (0.93–1.49×). The joint fit converges
+  on *anything* to RMS ≈ 11.5 px at 16 px tolerance — chance's `tol/√2`. The incumbent,
+  with the same arithmetic, was never scored.
+- **The pole was "found" only in the pre-dawn window.** Withheld at 00:07–03:14 (best
+  support 1.3–1.9× at scattered positions), found at 03:46, 04:17, 04:50 and 05:21 at
+  (1409, 2699) ± 1 px with support 2.7–3.9×, withheld again at 05:52 at the same pixel at
+  2.49× (just under the 2.5 floor), withheld all evening. Same pixel as Sep 17–19. The
+  candidate is stationary and bright enough to be in-band at every hour; it clears the
+  support floor only when the 30 s max-exposure frames give it the most votes. That is a
+  light near the hidden pole, not Polaris, and the floor is doing what it can.
+- **The roof classifier read Open all night** (0–6 h and 18–24 h, 729 + 127 predictions),
+  Closed once at 06:39 at 99 %. There is no closed-roof night in this log; video 2 (Sep 21)
+  is not covered. The evening ramp shows what a closed lit roof looks like to the exposure
+  loop: 0.21 ms at 18:38, 8 ms at 19:00, then 12–17 s once dark.
+- **The 60-frame buffer spanned 13.7 h across the day gap.** The 19:08 and 19:43 escapes
+  fitted "60 frames, 824.9 min span": frames from 05:xx–06:xx (dawn, 847 ms) survived the
+  daytime suppression and were fitted together with the evening's. The buffer is FIFO by
+  count only (`calibration_service.py:273-275`). Not the cause of anything here, but a
+  pool that mixes two nights' conditions makes every chance estimate and the rotation fit
+  noisier than it need be.
+- **Meteor hot mask sits at ~40 % of the frame** — an independent measure of how much of
+  the disc is equipment and glare on this rig.
+
 ## 1. Findings
 
 | # | Finding | Where | Package |
@@ -106,11 +133,13 @@ From the issue and confirmed in code:
 | H5 | `model_quality` cannot distinguish a chance fit; `final_tol_px` / `chance_expected` are not persisted | `calibration_quality.py:71-94`, `fisheye.py:56-72` | 3 |
 | H6 | The incumbent is never scored against chance on the live buffer | `calibration_workers.py:82-91` | 3 |
 | H7 | Rule 2 bypass needs no candidate merit beyond the per-run gates it already passed | `model_replacement.py:137-142` | 3 |
-| H8 | Only the ML roof classifier can say Closed; no external roof state can be read | `observing_window.py:115-137`, `ascom_safety.py` | 2 |
+| H8 | The roof verdict is the only content signal that can suppress the overlay; a frame with no stars at all (lit roof, overcast) still gets labels when the classifier says Open. Star analysis (`analyze_stars`) runs only *after* the gate, so it cannot inform it | `observing_window.py:115-137`, `star_detection.py:154-156` | 2 |
 | H9 | `SkyMaskHistory` wipes itself after 15 misses and the renderer falls back to a raw grayscale `> 40` test that passes everything on a moonlit frame or nothing on a dark stretch | `label_stability.py:82-87`, `overlay_renderer.py:211-213` | 1 |
+| H9b | No equipment map is persisted: the 15-frame vote is the only obstruction knowledge, it starts from nothing every session, and calibration's detection pool (`_detect_frame`) never uses it — glints and lights on the equipment feed the fit and the pole finder | `label_stability.py:180`, `calibration_service.py:359-402` | 1, 4 |
 | H10 | No frame-content sanity gate: a 0.06 s exposure of a lit roof ceiling gets sky labels if the roof classifier says Open | `overlay_renderer.py:268-297` | 1 |
 | H11 | `ui/panels/allsky_settings.py::get_config` rebuilds the `allsky_overlay` dict from scratch, so any new config key is wiped on the first panel edit | `allsky_settings.py:481-534`, `ui/main_window/settings.py:152-166` | 1 (fix), 2 (avoid) |
 | H12 | The label stabilizer is a process-wide singleton never reset in production, shared by watch mode, camera mode and reprocesses | `label_stability.py:180-188` | 1 |
+| H14 | The calibration buffer is FIFO by count with no age limit; after a day gap it fits dawn frames with evening frames | `calibration_service.py:273-275` | 4 |
 | H13 | `sample_images/` (the 130 real reference frames + `multi_calibration.json`) is gitignored and absent from CI containers; real-frame validation only runs on a developer machine | `.gitignore:75` | 4, 5 |
 
 Also noted, out of scope for these packages: `.claude/rules/ml.md` says the inference path
@@ -125,14 +154,16 @@ order below is the recommended merge order but only package 5 has a hard depende
 
 | PR | Package | Size | Depends on |
 |---|---|---|---|
-| 1 | Overlay gate and sky-mask persistence (issue D + E) | S | — |
-| 2 | External roof-state source (issue C) | M | — |
+| 1 | Equipment map and label persistence (issue D, user's "healing mask") | M | — |
+| 2 | Observable-sky gate: roof verdict corroborated by star evidence (issue C + E) | M | — |
 | 3 | Chance-aware quality and incumbent re-judging (issue B) | M | — |
 | 4 | Pole from the rotating field, static-light rejection (issue A, measurement half) | L | — |
 | 5 | Pole-constrained solve and admission (issue A, solver half) | L | 3, 4 |
 
 Packages 3 and 4 both touch `calibration_workers.py` in a few lines; whichever merges
-second rebases. Everything else is disjoint at the file level.
+second rebases. Package 4 reads the equipment map from package 1 through one function
+that accepts `None`, so it builds and tests without it. Everything else is disjoint at
+the file level.
 
 Every package: new logic goes in **new modules** (`.claude/rules/python-general.md`,
 "Module design"). `multi_calibrate.py` (733) and `calibration_service.py` (736) are at the
@@ -142,146 +173,156 @@ a new file. Each package updates the CLAUDE.md test table and the matching `docs
 page with a `> **New in the next release** — not available in version 3.7.7 or earlier.`
 note (the reporter is on 3.7.7; check `version.py` at PR time).
 
-### Package 1 — Overlay gate and sky-mask persistence
+### Package 1 — Equipment map and label persistence
 
-**Goal.** Labels never appear on a frame that is not plausibly a night sky, and never
-vanish wholesale because the sky mask died on a moonlit night.
+**Goal.** Sentinel learns where the equipment is, keeps that knowledge across sessions and
+nights, heals it slowly as scopes move, and uses it for two things: labels are never placed
+on equipment, and (package 4) detections on equipment never enter the calibration pool.
+Labels never vanish wholesale because one night's sky mask died.
 
-**E — sanity gate** (new `services/allsky/overlay_gate.py`, pure):
+**Equipment map** (new `services/allsky/obstruction_map.py`, pure numpy + JSON/NPZ I/O):
 
-- `frame_is_plausible_sky(metadata, config) -> (bool, reason)` evaluated in
-  `render_allsky_for_preview` after the observing-window check, independent of the ML
-  roof verdict.
-- Rule 1, exposure floor: parse `metadata['EXPOSURE']` (camera mode writes `"30.0s"`,
-  `zwo_capture_worker.py:206-240`; watch mode carries the sidecar's value, format varies —
-  parse `s` / `ms` / bare seconds, mirror `ui/components/telemetry_bar.py:92-106` and move
-  that parser into the new module so both use one). Exposure below
-  `allsky_overlay.min_exposure_s` (default **1.0**, `0` disables) → no overlay. Video 2 was
-  0.06 s; the reporter's clear nights were 10–30 s. Unparseable or absent exposure never
-  blocks.
-- Rule 2, static frame: `metadata['_ML_RESULTS']['frame_is_static']` true → no overlay
-  (the frame is sensor noise; `frame_static_score` already computed it).
-- Do **not** change the twilight threshold in `observing_window.py` (−6°). Astronomical
-  night (−18°) would blank the overlay through the whole of nautical twilight and all
-  summer at high latitudes; the −6° gate plus the exposure floor covers video 2.
-- Log at INFO on each transition (gated → not gated and back), never per frame.
-- Watch mode: `WatchControllerQt` (`watch_controller.py:77-88`) passes only `OUTPUT_CROP`
-  to the renderer; forward `extras['metadata']` (already produced at `processor.py:246`)
-  so the exposure is visible. `tests/test_watch_controller_crop.py` asserts the current
-  shape — update it.
+- `ObstructionMap`: a float32 "sky probability" plane at reduced resolution (longest edge
+  `MASK_VOTE_MAX_EDGE` = 512, as the vote already is), stamped with the frame size and
+  `OUTPUT_CROP` it was built for. Values: 0 = equipment, 1 = sky, 0.5 = unknown (initial).
+- `update(sky_mask, frame_is_observable)`: an exponential moving average per pixel with
+  time constant `HEAL_FRAMES` (suggest 600 frames ≈ 5 h of 30 s frames, i.e. a moved
+  scope is forgotten over about two nights). Update **only** on frames the observable-sky
+  gate (package 2) passed and whose per-frame mask had ≥ 10 detections — a cloudy or
+  moonlit frame with no detections must not teach the map that the sky is equipment.
+  Positive evidence (a detection disc) pulls toward 1; a pixel inside the sky circle with
+  no detection within `2 × disc radius` on a frame that had ≥ 40 detections elsewhere
+  pulls toward 0. The Moon's glare disc (radius from the saturated blob, default
+  0.15·sky_r; see §0.3) is excluded from the negative update.
+- `sky(threshold=0.5) -> bool mask` and `is_sky(x, y)` at full resolution (nearest
+  neighbour upsample), used by the renderer and by package 4.
+- Persistence: `<app-data>/allsky_obstruction.npz` via a `save()` no more than once per
+  10 min and on capture stop; `load()` on `CalibrationService` start; discarded (not
+  rescaled) when the stored frame size or crop differs, and cleared by **Reset
+  Calibration** and by a new `Reset equipment map` button next to it. Resolve the path
+  through `services.app_config` (add `get_obstruction_map_path()`), never a literal path.
+- The map is a *prior*, the per-night vote is the *evidence*: in the renderer the
+  visibility plane is `vote if the vote is fresh else map`; when both exist, a pixel must
+  be sky in both.
 
-**D — mask persistence** (`label_stability.py`, `overlay_renderer.py`, new
-`services/allsky/sky_region.py`):
+**Label persistence** (`label_stability.py`, `overlay_renderer.py`):
 
 - `SkyMaskHistory.update(None)` must **never reset to `None`** while it holds a vote. After
-  `MASK_HOLD_FRAMES` misses the vote becomes *stale*: still returned, flagged
-  (`is_stale` property), refreshed by the next real mask. A stale vote is discarded only on
-  a shape change or after `MASK_STALE_MAX_FRAMES` (suggest 240 ≈ 2 h at 30 s) — the
-  equipment silhouette is physical and does not move between frames.
-- Remove the raw-grayscale fallback (`overlay_renderer.py:211-213`). With no vote at all,
-  the visibility region is the model's own sky circle: `sky_region.model_sky_disc(model,
-  w, h)` built from `a1 · (π/2) · (1 − SKY_TRIM_FRACTION)` (the inverse of
-  `calibration_validate.a1_from_sky_radius`, see pole-anchor plan P7), translated for
-  `OUTPUT_CROP` the same way the model is. Labels may then land on equipment for the first
-  frames of a session; that is better than none.
-- Sparse frames vote positively only: a frame with 3–9 detections (below the current
-  `< 10 → None` floor at `overlay_renderer.py:72-73`) adds sky evidence where it has
-  detections and abstains elsewhere, instead of counting as a miss. Implement as a separate
-  `add_partial(mask)` on the history that increments the sky count without incrementing
-  the frame count for uncovered pixels (the vote is already a running sum,
-  `label_stability.py:95-113`). A frame with < 3 detections is a miss.
-- Moon: exclude a disc around the Moon's projected pixel (`planets.get_all_positions`)
-  from the *frame count* denominator, so glare that blanks detections near the Moon does
-  not vote "not sky" there. Radius: the saturated blob's extent at that pixel when one is
-  found, else 0.15·sky_r (§0.3).
-- H12: call `reset_label_stability()` from `CalibrationService.set_model` /
-  `clear_model` and on capture start (`ui/main_window/capture.py`), so a new model or
-  session starts clean. Reprocesses (`SAME_CAPTURE_KEY`) must not advance the vote twice.
-- H11: `allsky_settings.get_config` must merge over the loaded dict instead of rebuilding
-  it (it currently drops `utc_offset_hours`, `planets.colors`,
-  `constellations.edge_fade_px`, and would drop `min_exposure_s`).
+  `MASK_HOLD_FRAMES` misses the vote becomes *stale* (`is_stale` property) and the map
+  takes over; a fresh mask replaces it. Shape change still resets.
+- Remove the raw-grayscale fallback (`overlay_renderer.py:211-213`). With neither a vote
+  nor a map, the visibility region is the model's own sky disc: `a1 · (π/2) · (1 −
+  SKY_TRIM_FRACTION)` (the inverse of `calibration_validate.a1_from_sky_radius`, pole-anchor
+  plan P7), translated for `OUTPUT_CROP` like the model. Labels may then sit on equipment
+  for the first frames of a first session; better than none, and the map fixes it within
+  the hour.
+- Sparse frames vote positively only: 3–9 detections (below today's `< 10 → None` floor at
+  `overlay_renderer.py:72-73`) add sky evidence where they have detections and abstain
+  elsewhere, via a new `add_partial(mask)` that increments the sky count without the frame
+  count for uncovered pixels (the vote is a running sum, `label_stability.py:95-113`).
+  Under 3 detections is a miss.
+- Moon: exclude the glare disc from the frame-count denominator (same radius rule as
+  above) so glare that blanks detections near the Moon does not vote "not sky" there.
+- H12: `reset_label_stability()` on `CalibrationService.set_model` / `clear_model` and on
+  capture start (`ui/main_window/capture.py`); reprocesses (`SAME_CAPTURE_KEY`) must not
+  advance the vote twice.
+- H11: `allsky_settings.get_config` merges over the loaded dict instead of rebuilding it
+  (it drops `utc_offset_hours`, `planets.colors`, `constellations.edge_fade_px` today and
+  would drop any new key).
 - Bright-star magnitude: leave the default (`bright_stars.max_magnitude` 3.0). Add a wiki
-  line that mag 2.0 leaves about ten stars in the whole sky and is too few for
-  `top_n` 15 on a moonlit night.
+  line that mag 2.0 leaves about ten stars in the whole sky and is too few for `top_n` 15
+  on a moonlit night.
 
-**Tests** (`tests/test_allsky_overlay_gate.py`, extend `test_allsky_label_stability.py`,
-`test_allsky_rendering.py`): exposure parsing for every format; 0.06 s blocks, 10 s
-passes, absent passes, `0` disables; static frame blocks; a 40-frame run of `None` masks
-keeps the last vote and marks it stale; a real mask after a stale run replaces it; sparse
-frames only add; Moon disc excluded from the denominator; no vote → model disc, not
-grayscale; `get_config` round-trips every key in `DEFAULT_CONFIG['allsky_overlay']`;
-watch-mode metadata forwarded. Existing `TestRendererStability` (`@pytest.mark.slow`)
-must still pass.
+**Tests** (new `tests/test_obstruction_map.py`; extend `test_allsky_label_stability.py`,
+`test_allsky_rendering.py`, `test_allsky_settings_config.py`): map converges to the
+synthetic equipment silhouette within `HEAL_FRAMES` and forgets a moved scope in ~2×; a
+run of no-detection frames leaves the map untouched; Moon disc excluded; round-trip
+through `save`/`load` with size/crop stamps, mismatch discards; 40 `None` masks keep the
+vote and mark it stale; a real mask after a stale run replaces it; sparse frames only add;
+no vote and no map → model disc, never grayscale; labels never placed where the map says
+equipment; `get_config` round-trips every key in `DEFAULT_CONFIG['allsky_overlay']`.
+`TestRendererStability` (`@pytest.mark.slow`) stays green.
 
-**Wiki:** `All-Sky-Overlay.md` "When the overlay is drawn", "Stable labels from frame to
-frame", Troubleshooting table; `docs/dev/ALLSKY_OVERLAY.md:117`.
+**Wiki:** `All-Sky-Overlay.md` "Equipment avoidance" (new: the map, what heals it, the
+reset button), "Stable labels from frame to frame", Troubleshooting;
+`docs/dev/ALLSKY_OVERLAY.md:117`.
 
-### Package 2 — External roof-state source
+### Package 2 — Observable-sky gate: roof verdict corroborated by star evidence
 
-**Goal.** A rig whose roof state is known to something else (NINA's safety monitor, the
-observatory's own status file) can feed that state to Sentinel, overriding or replacing
-the ML roof classifier, so every roof consumer follows the truth.
+**Goal.** Sky features (overlay, calibration feed, star analysis) run only when the frame
+is plausibly a night sky with stars in it. The ML roof classifier stays the roof source —
+no external file — but its verdict is corroborated by what the frame contains, so a
+misread Open on a lit roof, or an overcast sky, no longer draws labels. This absorbs the
+issue's E (exposure floor) and replaces its C.
 
-**Config** (`config_defaults.py`, `ml_models.roof_source`):
+**Frame evidence** (new `services/sky_evidence.py`, pure; computed once per frame in
+`image_processor._process_task` *before* the gate, on the same stretched frame the
+calibration feed uses, and stored as `metadata['_SKY_EVIDENCE']`):
 
-```
-"roof_source": {
-    "source": "ml",            # "ml" | "file"
-    "file_path": "",
-    "format": "auto",          # "auto" | "text" | "json"
-    "json_key": "roof",        # dotted path for JSON, e.g. "observatory.roof.state"
-    "open_values": ["OPEN", "open", "true", "1"],
-    "closed_values": ["CLOSED", "closed", "false", "0"],
-    "max_age_s": 600            # older file → state unknown (never "Open")
-}
-```
+- `star_count`: `star_centroid.detect_stars` inside the sky circle (the same call
+  `_detect_frame` and `_detect_sky_mask` make today — share the result through the
+  metadata so the frame is scanned once, not three times), with the equipment map from
+  package 1 applied when present (detections on equipment are not stars).
+- `exposure_s`: parsed from `metadata['EXPOSURE']` (camera mode `"30.0s"`; watch mode
+  the sidecar's string — parse `s` / `ms` / bare seconds; move
+  `ui/components/telemetry_bar._fmt_exposure`'s parser into the new module so both use
+  one). Absent or unparseable → `None`, never blocks.
+- From ML when present: `roof_status`, `roof_confidence`, `stars_visible`,
+  `frame_is_static` (`ml_service.py:222-232`).
 
-`"file"` works with `ml_models.enabled` **off** — that is the reporter's case if they
-stop trusting the classifier. Every `ml_models.enabled` check that gates a roof consumer
-(`observing_window.py:116`, `image_processor.py:349`, `window.py:682`) needs
-"or roof_source is file" — put that in one helper, `roof_source.is_configured(config)`.
+**Decision** (`observing_window._evaluate`, after the −6° twilight gate, which stays):
 
-**Reader** (new `services/roof_state_source.py`, pure, no Qt):
+1. `frame_is_static` → not observable ("sensor noise only"). Covers a dark closed roof.
+2. `exposure_s < allsky_overlay.min_exposure_s` (default **1.0**; `0` disables) → not
+   observable. Covers the lit roof at 0.06 s (video 2) and dusk (8 ms at 19:00 in the log).
+   The clear nights ran 10–30 s.
+3. ML roof `Closed` on two consecutive frames → not observable (unchanged).
+4. ML roof `Open` (or ML off) but **no star evidence** on `NO_STARS_CONFIRM_FRAMES`
+   consecutive frames (suggest 3): `star_count < min_star_detections` (default 15; the
+   ceiling texture reached ≥ 10 on video 2, real skies here give 40–200) and
+   `stars_visible` is not `True` → not observable ("roof reads Open but no stars are
+   detected"). Covers the lit roof *and* overcast — labels on cloud are as wrong as labels
+   on a ceiling, and the calibration feed should not see either.
+5. Recovery: `star_count ≥ 2 × min_star_detections` on two consecutive frames → observable
+   again. Hysteresis avoids flicker on the threshold.
 
-- `read_roof_state(cfg, now) -> RoofReading(open: Optional[bool], confidence, source,
-  age_s, error)`; `None` = unknown. Cache on `(path, mtime_ns, size)` like
-  `overlay_renderer._load_model` / `watcher.py:121-126`; a read costs nothing when the
-  file has not changed.
-- Text format: the ASCOM writer's own output (`ascom_safety.py:129-145`,
-  `Roof Status: OPEN|CLOSED`), and NINA's GenericFile safety-monitor conventions. Match
-  the configured trigger strings case-insensitively on any line; first match wins.
-- JSON format: `json_key` dotted path; value compared against `open_values` /
-  `closed_values` after `str().strip()`; booleans and numbers accepted.
-- Staleness: `mtime` older than `max_age_s` → unknown, with `error = "stale"`. Unknown
-  never maps to Open.
-- Loop guard: refuse (log WARNING once, state unknown) when `file_path` resolves to the
-  same file as `ml_models.ascom_safety_file.file_path` while that writer is enabled —
-  Sentinel would read its own verdict back (`docs/NINA_INTEGRATION_PLAN.md:144`).
+Rule 4 is deliberately model-free. The bright-anchor check (`validate_bright_anchors`,
+"the function that finds the bright stars") would be the sharper test, but it needs a
+credible model, and on this rig the model is at chance (§0.2); until package 3 marks the
+model credible it would suppress the overlay on every open night. When
+`fit_is_credible(model)` is true, a later step can add anchor hits as a third corroborant.
 
-**Injection.** The verdict must reach all three carriers the survey found
-(`image_processor.py:349-377`): `metadata['ROOF_STATUS']` as `"Open (100%)"` /
-`"Closed (100%)"` / `"N/A"`, `metadata['_ML_RESULTS']['roof_status'|'roof_confidence']`,
-and `main_window.last_ml_results`. Confidence is **1.0** for a file reading — the ASCOM
-FSM only writes SAFE above `min_confidence`. External state wins over ML when configured;
-when the file is unknown/stale, fall back to ML if enabled, else `N/A`. Same injection in
-`services/processor.py:197-211` for watch mode. Add `roof_source` to the results dict so
-the status strip can show "Roof: Closed (file)".
+What the gate governs is unchanged: overlay, calibration feed, star analysis. The meteor
+gate, Discord roof alerts, timelapse roof mode and the ASCOM safety file keep following
+the roof verdict alone — "no stars" is not "roof closed", and the safety file's meaning
+must not drift.
 
-**UI.** In `ui/panels/image_processing_ml.py` (the ML card, which owns its config I/O
-today — keep to that pattern, do not add a controller for three widgets): source combo,
-path + Browse, format combo, JSON key field, shown only when source = file. Tooltip warns
-about pointing it at Sentinel's own safety file.
+**Reporting.** `metadata['_observing_window_reason']` carries the rule that fired; the
+status strip's Sky tile shows "No stars detected" / "Exposure too short" the way it shows
+"Roof closed" today (`ui/components/status_strip.py:324-364`); one INFO line per
+transition, never per frame.
 
-**Tests** (`tests/test_roof_state_source.py`, extend `test_observing_window.py`,
-`test_image_processor.py`, `test_ascom_safety.py`): text and JSON parsing; unknown on
-missing/garbled/stale; mtime cache; loop guard; file Closed suppresses sky features with
-ML off; file Open with ML saying Closed → Open; stale file with ML on → ML verdict; ASCOM
-FSM writes SAFE from a file Open; watch mode injection.
+**Watch mode.** `WatchControllerQt` (`watch_controller.py:77-88`) passes only
+`OUTPUT_CROP` to the renderer; forward `extras['metadata']` (built at `processor.py:246`)
+so exposure and star count reach the gate. `tests/test_watch_controller_crop.py` asserts
+the current shape — update it.
 
-**Wiki:** `ML-Models.md` new section "Roof state from a file" under "Using the Results",
-cross-linked from `NINA-Integration.md` and `All-Sky-Overlay.md` ("The roof must not be
-reported closed"). Ask the reporter for a sample of the DVO JSON before finalising
-`json_key` defaults (open question §5).
+**Config** (`config_defaults.py`, `allsky_overlay`): `min_exposure_s: 1.0`,
+`min_star_detections: 15`. Exposed on the All-Sky settings card (two spin boxes under
+"When the overlay is drawn"); package 1's `get_config` fix must land first or these keys
+are wiped on the first panel edit (H11) — if package 2 merges first, include the fix here.
+
+**Tests** (new `tests/test_sky_evidence.py`; extend `test_observing_window.py`,
+`test_status_strip_static.py`, `test_image_processor.py`): exposure parsing for every
+format; 0.06 s blocks, 10 s passes, absent passes, `0` disables; static blocks; Open + 3
+no-star frames blocks, 2 does not; recovery needs 2 frames at 2×; a `Closed` streak
+still blocks with plenty of detections (the classifier's Closed is not overridden — see
+open question 3); ML off with no stars blocks; reason string and Sky tile text; the frame
+is scanned once (spy on `detect_stars`); meteor and ASCOM paths unaffected by rule 4.
+
+**Wiki:** `All-Sky-Overlay.md` "When the overlay is drawn" (rewrite: sun, roof, static,
+exposure, stars), `ML-Models.md` "Skipping Sky Features While the Roof Is Closed",
+`Live-Monitoring.md` Sky tile texts.
 
 ### Package 3 — Chance-aware quality and incumbent re-judging
 
@@ -383,6 +424,12 @@ user's observation in §0.1.
   the chance expectation honestly.
 - Persist nothing; the list is recomputed per run (cheap: it is the same clustering
   `_stationary_candidates` already does).
+- Equipment map (package 1): `strip_obstructed(frames, obstruction_map)` drops detections
+  where the map says equipment, applied at the same point. Takes `None` and returns the
+  frames unchanged, so this package builds without package 1; lights on parked scopes
+  then never reach the pole finder, the fit, or the chance estimate.
+- Buffer age (H14): `feed_frame` also drops frames older than `MAX_BUFFER_AGE_MIN`
+  (suggest 240) so a day gap does not join two nights in one fit.
 
 **4c — Pole from rotation** (new `services/allsky/pole_from_rotation.py`):
 
@@ -549,9 +596,9 @@ updated, `requires_windows` / `slow` markers where appropriate.
 Unchanged from the issue: install the dev build and run **Guided Calibration**, which
 stamps `provenance = 'guided'` and locks the basin against automatic replacement. Add,
 once package 4d ships in a dev build: leave capture running for a clear night so the
-buffer dump exists, then send a diagnostics bundle. Until package 2 ships, turn off
-**Skip Sky Features When Roof Closed** is *not* the answer (it would draw on the closed
-roof more, not less); the exposure floor in package 1 is.
+buffer dump exists, then send a diagnostics bundle. Turning off **Skip Sky
+Features When Roof Closed** is *not* the answer (it would draw on the closed roof more,
+not less); package 2's exposure floor and no-stars rule are.
 
 ## 5. Open questions for the maintainer
 
@@ -559,11 +606,15 @@ roof more, not less); the exposure floor in package 1 is.
    and buffer dump (4d)? 4d is small and unblocks field validation early; it could also
    ride in package 3.
 2. `min_exposure_s` default 1.0 s: is there a supported rig that shows stars below 1 s at
-   its normal gain? If so, lower the default and rely on the static-frame rule.
-3. Package 2: a sample of the DVO roof JSON from the reporter, to fix the default
-   `json_key` and value lists. And whether NINA on that rig writes its safety-monitor
-   state to a file at all (the GenericFile monitor reads, it does not write), which
-   decides whether the wiki should describe a NINA-side writer.
+   its normal gain? If so, lower the default and rely on the no-stars rule.
+3. Package 2, the other direction: should plenty of detected stars *override* an ML
+   `Closed`? The wiki today tells no-roof rigs to switch the roof gate off instead. The
+   plan keeps Closed authoritative (a lit ceiling gave ≥ 10 "stars" on video 2); an
+   override would need the model-based anchor test, i.e. package 3 first.
+3b. Package 1 healing rate: `HEAL_FRAMES` ≈ 600 means a scope parked in a new spot is
+   masked within one night and a removed one is freed within two. Faster heals fight the
+   per-night vote; slower ones leave ghosts. Confirm against how often mounts move on a
+   hosting field.
 4. Package 3 `CREDIBLE_RMS_FRACTION = 0.6`: confirm against the last month of refinement
    logs on the reference rig that no admitted model sits above 0.6 (the #10 rig's were
    0.48).
