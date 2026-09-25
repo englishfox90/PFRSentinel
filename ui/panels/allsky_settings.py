@@ -344,6 +344,12 @@ class AllSkySettingsPanel(QScrollArea):
         self._dump_btn.clicked.connect(self._on_dump_clicked)
         vl.addWidget(self._dump_btn)
 
+        # The learned equipment map outlives the calibration on purpose; this
+        # is the way to forget it after the rig is rearranged.
+        self._reset_map_btn = PushButton("Reset Equipment Map…", icon=mdi('delete'))
+        self._reset_map_btn.clicked.connect(self._on_reset_map_clicked)
+        vl.addWidget(self._reset_map_btn)
+
         self._layout.addWidget(card)
 
     def _build_master_toggle(self):
@@ -611,6 +617,22 @@ class AllSkySettingsPanel(QScrollArea):
     def _on_dump_clicked(self):
         """Signal main_window to dump the calibration buffer."""
         self.settings_changed.emit({'_action': 'dump_buffer'})
+
+    def _on_reset_map_clicked(self):
+        """Confirm, then signal main_window to forget the equipment map."""
+        box = MessageBox(
+            "Reset equipment map?",
+            "This forgets where Sentinel has learned that telescopes, mounts "
+            "and other equipment sit in the frame. Labels may land on "
+            "equipment for a while; the map relearns it over the next "
+            "clear nights."
+            "\n\nUse this after moving the camera or rearranging the rig.",
+            self.window(),
+        )
+        box.yesButton.setText("Reset")
+        box.cancelButton.setText("Cancel")
+        if box.exec():
+            self.settings_changed.emit({'_action': 'reset_equipment_map'})
 
     def _on_setting_changed(self, *_):
         self.settings_changed.emit(self.get_config())

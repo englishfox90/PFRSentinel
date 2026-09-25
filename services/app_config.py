@@ -81,3 +81,10 @@ def get_allsky_buffer_dir(create: bool = True) -> str:
     if create:
         os.makedirs(path, exist_ok=True)
     return path
+
+
+def get_obstruction_map_path() -> str:
+    """Where the all-sky equipment map (services/allsky/obstruction_map.py)
+    persists between sessions. Per-installation like the calibration: it
+    records where THIS rig's scopes and pier sit in the frame."""
+    return os.path.join(get_app_data_dir(), 'allsky_obstruction.npz')

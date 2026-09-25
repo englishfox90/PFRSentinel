@@ -135,6 +135,14 @@ class AllSkyController(QObject):
         # Load existing model into both controller and service
         self._update_status()
 
+        # The equipment map is loaded here, on the GUI thread at startup:
+        # no capture is running yet, so nothing races the renderer thread
+        # that will read and update it. It is saved by the renderer every
+        # ten minutes, at capture stop and at shutdown.
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        get_obstruction_map().load(get_obstruction_map_path())
+
     # ------------------------------------------------------------------
     # Public API (called by panel)
     # ------------------------------------------------------------------
@@ -321,6 +329,7 @@ class AllSkyController(QObject):
 
         self._model = None
         self._cal_service.clear_model()
+        self._forget_equipment_map()
 
         # Clear the config pointer so the overlay renderer stops immediately;
         # the next successful calibration re-sets it.
@@ -362,6 +371,23 @@ class AllSkyController(QObject):
         else:
             self.status_changed.emit(f"Calibration buffer saved: {path}")
 
+    def reset_equipment_map(self) -> None:
+        """Forget the learned equipment map (Reset Equipment Map button).
+
+        For a rearranged rig: the map heals on its own over about two
+        nights, but a scope parked where sky used to be keeps its labels
+        off until then, and nothing else clears it.
+        """
+        ok = self._forget_equipment_map()
+        self.status_changed.emit(
+            "Equipment map reset — it relearns where the equipment is over "
+            "the next clear nights." if ok else
+            "Reset failed — could not delete the equipment map file. (See logs)")
+
+    def on_capture_stopped(self) -> None:
+        """Persist what the map learned this session."""
+        self._save_equipment_map()
+
     @property
     def calibration_service(self):
         """The background calibration accumulation service."""
@@ -386,6 +412,28 @@ class AllSkyController(QObject):
             self._worker.quit()
             self._worker.wait(3000)
         self._cal_service.shutdown()
+        self._save_equipment_map()
+
+    def _save_equipment_map(self) -> None:
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        try:
+            get_obstruction_map().save_if_dirty(get_obstruction_map_path())
+        except Exception as e:
+            log.warning(f"Equipment map save failed: {e}")
+
+    def _forget_equipment_map(self) -> bool:
+        """Clear the in-memory map and its file; True when the file is gone.
+        Saving an empty map is how the file is removed — the file I/O stays
+        in the service module."""
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        obs_map = get_obstruction_map()
+        obs_map.reset()
+        ok = obs_map.save(get_obstruction_map_path())
+        if ok:
+            log.info("All-sky equipment map reset by user")
+        return ok
 
     # ------------------------------------------------------------------
     # Internal
