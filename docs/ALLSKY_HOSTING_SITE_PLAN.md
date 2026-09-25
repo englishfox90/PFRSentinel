@@ -869,3 +869,25 @@ set straddles two orientations.
 
 This folder is not subject to library pruning, but it is the only copy: keep it with the
 other test data.
+
+## 8. Resource budget (maintainer requirement, 2026-09-25)
+
+Calibration runs on a 24/7 observatory PC beside the capture loop, the stretch pipeline,
+ML inference and the timelapse encoder. Nothing in these packages may make that box
+noticeably busier. Concrete limits, checked in review and reported by each package with
+the measurement behind it:
+
+| Path | Budget | How |
+|---|---|---|
+| Threads | **No new threads, pools or processes.** All calibration work runs on the existing single `_RefineWorker` thread at its existing cadence (120 s cooldown, doubling to 30 min; escapes on their own back-off). The GUI thread gets signals only. | Review: grep for `Thread`, `Pool`, `multiprocessing`, `QThread` in the diff. |
+| Per-frame work on the capture path (packages 1, 2) | ≤ 30 ms per frame at 3552 px on this container's CPU, single core; detection on a plane downscaled to ≤ 1500 px longest edge; the map update at ≤ 512 px. No new full-frame copies retained beyond the call. | `time.perf_counter()` around the call in a test; report p50/p95 over 50 frames. |
+| Incumbent score (package 3) | ≤ 1 s per refinement run; one match pass at the final tolerance, no re-fit. | Measured in the test on a 60-frame synthetic buffer. |
+| Rotation pole fit (package 4) | ≤ 10 s per run on 36 ring frames × 200 detections; coarse grid iterates and keeps top-K, never materialises the full score tensor; one KD-tree per frame pair, built once; float32. | Timed test; peak RSS delta ≤ 50 MB (`resource.getrusage`). |
+| Orientation search (package 5) | Pole-seeded path ≤ 5 s; unseeded roll-vote grid ≤ 30 s and only on cold start / escape, never on a routine refinement. | Timed tests for both paths. |
+| Memory | Buffers hold detection lists, never images: 60 rolling + 36 ring frames × ≤ 200 detections is under 1 MB. The equipment map is one 512² float32 plane (1 MB). Dumps and the map are written at most once per 10 min. | Review + `tracemalloc` in the heaviest test. |
+| Allocation churn | Prefer in-place numpy on preallocated arrays inside the hot loops; the refine worker's allocation rate is what tripped the cyclic collector in issue #31 (`services/gc_scheduler.py`). | Review. |
+| Cadence | No new timers. Package 1 saves on the existing 10-min throttle and on capture stop; package 0 dumps on exhaustion / escape / button only. | Review. |
+
+A package that cannot meet its line says so in its report with the number, and the
+reviewer decides between a cheaper algorithm and a raised budget — never a silent
+overrun.
