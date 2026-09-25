@@ -14,6 +14,7 @@ Developer-facing technical reference. End-user content lives on the project wiki
 | [PER_CAMERA_SETTINGS.md](PER_CAMERA_SETTINGS.md) | `camera_profiles[clean_name]` design (referenced from `.claude/rules/services-camera.md`) |
 | [posthog.md](posthog.md) | Analytics event names + helpers (referenced from `.claude/rules/python-general.md`) |
 | [CAMERA_USB_RESET.md](CAMERA_USB_RESET.md) | Windows `CM_Reenumerate_DevNode` USB reset implementation |
+| [ZWO_SDK_PLATFORMS.md](ZWO_SDK_PLATFORMS.md) | Finding and loading the ZWO SDK library on Windows, macOS and Linux; Linux udev rule + `usbfs_memory_mb`; why the non-Windows libraries are not in git |
 | [CAMERA_LOGGING_REFERENCE.md](CAMERA_LOGGING_REFERENCE.md) | Log-search cheat sheet for diagnosing camera issues |
 | [DIAGNOSTICS_BUNDLE.md](DIAGNOSTICS_BUNDLE.md) | Logs → Export Diagnostics: bundle contents, redaction, fresh raw-frame capture |
 

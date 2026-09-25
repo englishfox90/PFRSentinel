@@ -4,7 +4,6 @@ Split out of `capture.py` (which was over the size cap). Owns the blocking-SDK
 timeout wrappers and the full detect -> restore-saved-camera flow; the capture
 lifecycle itself stays in `capture.py`.
 """
-import os
 import re
 import threading
 import time
@@ -12,6 +11,7 @@ import time
 from PySide6.QtCore import QTimer
 
 from services.logger import app_logger
+from services.zwo_sdk_library import library_name, missing_library_help, resolve_library_path
 
 
 def _sdk_call_with_timeout(fn, timeout_sec=10.0, hint=""):
@@ -59,8 +59,7 @@ class _CameraDetectMixin:
     """Camera enumeration and saved-camera restoration."""
 
     def _auto_detect_cameras(self):
-        sdk_path = self.config.get('zwo_sdk_path', '')
-        if sdk_path and os.path.exists(sdk_path):
+        if resolve_library_path(self.config.get('zwo_sdk_path', '')):
             app_logger.info("Auto-detecting cameras on startup...")
             self._startup_detect_retries = 3
             self._on_detect_cameras()
@@ -79,14 +78,12 @@ class _CameraDetectMixin:
 
         app_logger.info("=== Camera Detection Initiated ===")
 
-        sdk_path = self.config.get('zwo_sdk_path', '')
+        sdk_path = resolve_library_path(self.config.get('zwo_sdk_path', ''))
 
         if not sdk_path:
-            self.capture_panel.set_detection_error("SDK path not specified")
-            return
-
-        if not os.path.exists(sdk_path):
-            self.capture_panel.set_detection_error(f"SDK not found: {sdk_path}")
+            self.capture_panel.set_detection_error(f"ZWO SDK not found ({library_name()})")
+            for line in missing_library_help():
+                app_logger.error(line)
             return
 
         self._detection_in_progress = True
