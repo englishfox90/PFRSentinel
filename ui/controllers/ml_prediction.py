@@ -4,7 +4,10 @@ ML Prediction integration for Dev Mode
 Provides roof state and sky condition predictions from trained ML models 
 to include in calibration JSON files for validation and monitoring.
 
-PRODUCTION BUILD: ML features disabled if DEV_MODE_AVAILABLE=False
+This loader is dev-only: it feeds the calibration JSON export and is off when
+DEV_MODE_AVAILABLE=False. It is NOT the per-frame ML path. Production inference
+lives in services/ml_service.py and runs in every build when ml_models.enabled
+is on. Only training is dev-only.
 
 Usage:
     from ui.controllers.ml_prediction import predict_roof_state, predict_sky_condition
@@ -36,9 +39,9 @@ def _init_roof_classifier():
     """Initialize the roof classifier singleton on first use."""
     global ROOF_ML_AVAILABLE, _roof_classifier, _roof_classifier_error
     
-    # PRODUCTION BUILD: Disable ML features if not in dev mode
+    # Dev-only loader (calibration JSON export); production ML is services/ml_service.py
     if not is_dev_mode_available():
-        _roof_classifier_error = "ML features disabled in production build (DEV_MODE_AVAILABLE=False)"
+        _roof_classifier_error = "Dev-mode ML export loader disabled (DEV_MODE_AVAILABLE=False)"
         return False
     
     if _roof_classifier is not None:
@@ -94,9 +97,9 @@ def _init_sky_classifier():
     """Initialize the sky classifier singleton on first use."""
     global SKY_ML_AVAILABLE, _sky_classifier, _sky_classifier_error
     
-    # PRODUCTION BUILD: Disable ML features if not in dev mode
+    # Dev-only loader (calibration JSON export); production ML is services/ml_service.py
     if not is_dev_mode_available():
-        _sky_classifier_error = "ML features disabled in production build (DEV_MODE_AVAILABLE=False)"
+        _sky_classifier_error = "Dev-mode ML export loader disabled (DEV_MODE_AVAILABLE=False)"
         return False
     
     if _sky_classifier is not None:

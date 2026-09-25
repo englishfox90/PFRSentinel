@@ -120,9 +120,13 @@ This allows the model to make weather inferences even when it can't directly see
 - Stars Visible: 91.2% accuracy  
 - Moon Visible: 100% accuracy
 
-### Phase 3: Production Integration ✅ COMPLETE
+### Phase 3: Dev Mode Integration ✅ COMPLETE
 
-**Goal**: Integrate ML predictions into PFR Sentinel DEV MODE for validation.
+**Goal**: Write ML predictions into the Dev Mode calibration JSON export for validation.
+
+This is the dev-only path. Production per-frame inference is `services/ml_service.py`
+(`get_ml_service()`, `MLService.analyze_image`), enabled by `ml_models.enabled` and
+shipped in every build; it does not depend on Dev Mode.
 
 **Implementation**:
 - Roof classifier runs on every captured frame
@@ -130,7 +134,7 @@ This allows the model to make weather inferences even when it can't directly see
 - Predictions saved to `calibration_*.json` files for future validation
 - Configurable via `dev_mode.ml_predictions` settings
 
-**Usage in PFR Sentinel**:
+**Usage in the Dev Mode export**:
 ```python
 from ui.controllers.ml_prediction import predict_roof_state, predict_sky_condition, get_ml_status
 

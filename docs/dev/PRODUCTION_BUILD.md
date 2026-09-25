@@ -7,9 +7,11 @@
 Development Mode enables features useful for debugging and ML training:
 - **Raw debug file saving** - Saves FITS/TIFF files to `%LOCALAPPDATA%\PFRSentinel\raw_debug\`
 - **Calibration JSON exports** - Detailed image analysis metadata
-- **ML prediction integration** - Roof state prediction from trained models
+- **ML predictions in the calibration JSON export** - roof/sky results written into each `calibration_*.json`
 
 **RAW16 camera mode is NOT part of dev mode** - it's a user-facing feature that remains available regardless.
+
+**Per-frame ML inference is NOT part of dev mode either.** `services/ml_service.py` runs in every build when `ml_models.enabled` is on (the "ML Models (Beta)" setting), and the installer bundles both ONNX models. Only model *training* (`ml/train_*.py`, PyTorch) is dev-only.
 
 ### Production Build Process
 
@@ -38,7 +40,7 @@ Development Mode enables features useful for debugging and ML training:
 1. **Disk space** - Debug files can be 100+ MB per image
 2. **Performance** - Skips unnecessary file I/O and analysis
 3. **User confusion** - Most users don't need debug features
-4. **ML readiness** - ML models not ready for public release yet
+4. **Debug-only ML output** - the calibration JSON export duplicates ML work the production service already does
 
 ### Environment Variable Override
 
@@ -100,17 +102,15 @@ Both build scripts now show checklist reminders:
 
 ### ML Integration Notes
 
-ML prediction is gated by dev mode because:
-- Models are still in training/validation
-- Not tested with all allsky camera setups
-- Adds processing overhead
-- Requires external image sources
+Two ML code paths exist, and only one is gated by dev mode:
 
-When ML is production-ready:
-1. Move out of dev mode gate
-2. Add UI controls to ML settings page
-3. Update documentation
-4. Include models in installer
+| Path | Gate | Purpose |
+|------|------|---------|
+| `services/ml_service.py` (`get_ml_service()`, `MLService.analyze_image`) | `ml_models.enabled` config only | Production per-frame roof/sky inference, overlay tokens, status strip. Runs in every build. |
+| `ui/controllers/ml_prediction.py` | `DEV_MODE_AVAILABLE` | Second loader used by `dev_mode_utils.py` to write predictions into the calibration JSON export. |
+
+`PFRSentinel.spec` bundles both `.onnx` files and lists `ml.roof_classifier` / `ml.sky_classifier` in `hiddenimports`
+for the production path. Setting `DEV_MODE_AVAILABLE = False` does not turn ML off for users.
 
 ### File Locations
 
@@ -119,9 +119,10 @@ When ML is production-ready:
 
 **Dev Mode Features:**
 - `ui\controllers\dev_mode_utils.py` - FITS/JSON saving
-- `ui\controllers\ml_prediction.py` - ML integration
+- `ui\controllers\ml_prediction.py` - ML predictions for the calibration JSON export
 - `ui\panels\image_processing.py` - UI controls
 
 **Always Available:**
+- `services\ml_service.py` - per-frame ML inference (gated by `ml_models.enabled` only)
 - `services\zwo_camera.py` - RAW16 mode (line 72: `self.use_raw16`)
 - `ui\panels\capture_settings.py` - RAW16 toggle (line 618)

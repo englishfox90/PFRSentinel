@@ -39,7 +39,8 @@ class DevModeDataSaver:
         """
         Save raw data and calibration JSON when dev_mode is enabled.
         
-        PRODUCTION BUILD CHECK: Returns early if DEV_MODE_AVAILABLE=False in dev_mode_config.py
+        Returns early if DEV_MODE_AVAILABLE=False in dev_mode_config.py. Only this export
+        is gated; per-frame ML (services/ml_service.py) runs in every build.
         
         Creates:
         - raw_YYYYMMDD_HHMMSS.fits - Raw RGB FITS file
@@ -53,7 +54,7 @@ class DevModeDataSaver:
             metadata: Image metadata dict
             dev_config: Dev mode configuration dict
         """
-        # PRODUCTION BUILD: Skip all dev mode operations if not available
+        # Dev-only export; production ML is not affected by this gate
         if not is_dev_mode_available():
             return
         
