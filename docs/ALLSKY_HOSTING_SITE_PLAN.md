@@ -122,6 +122,42 @@ From the issue and confirmed in code:
 - **Meteor hot mask sits at ~40 % of the frame** — an independent measure of how much of
   the disc is equipment and glare on this rig.
 
+### 0.5 The maintainer's reference rig has the same solver failure, protected by a guided model
+
+Read from the reference rig's own logs (Sep 17, 18, 20; Sep 19 was gated out all night
+and Sep 22–24 had no capture). The saved model is the guided calibration of 2026-09-15
+(7 anchors, RMS 4.10 px, a1 = 1259, `provenance = 'guided'`), the labels are right, and
+the file has not been written since. Underneath that:
+
+- **35 automatic refinements, 35 rejections, none genuine.** Every fit seeded from the
+  good guided model walked away from it: final RMS 7.7–9.9 px on a 12–13 px tolerance
+  (0.64–0.83 of the tolerance — the chance band), with the bright anchors hundreds of
+  pixels off (Vega 524 px, Altair 347 px, Deneb 275 px). Sep 17–18 failed the anchor
+  gate (0/3 frames, 2–3 of 12 anchors within 26 px); Sep 20 failed the chance gate
+  outright (1.0–1.5×). Refinement from a correct seed cannot hold the basin on this rig,
+  so it is not only the reporter's rig where the joint fit fails — theirs is merely
+  unprotected.
+- **Every basin escape started at the wrong scale.** All six bootstrap candidates per
+  escape carried a1 = 783 (0.62× the true 1259): `a1_from_sky_radius` on this obstructed
+  aperture, exactly as pole-anchor plan P7 recorded in July. The guided lock caught the
+  one candidate that survived the other gates ("a1 = 787 is 0.84× the guided model's
+  plate scale"). Package 5's scale scan and package 4c's solved a1 are not optional.
+- **The escape buffer spanned 1069 minutes** across the day gap (H14, confirmed on a
+  second rig).
+- **The pole finder works here.** Polaris is visible: the estimate sits at
+  (1367–1376, 456–466), walking 12 px around the pole over six hours as Polaris does,
+  support 2.7–3.5×, `east_left = True`. This is what a genuine pole track looks like and
+  is the positive control for package 4a's coherence test.
+- The final tolerance on this rig is 12 px, not the 16 px of the reporter's, because the
+  measured sky circle is smaller (obstructed): the same `tol_scale` mechanism, the same
+  P7 finding.
+
+Consequence for validation: **the reference rig is the first place package 0 runs.** A
+buffer dump from it, judged against its guided model, is ground truth for packages 4 and
+5 — a solver that cannot re-find this rig's guided model from its own frames is not
+fixed. The July field test already showed `sample_images/` no longer describes this
+camera's orientation.
+
 ## 1. Findings
 
 | # | Finding | Where | Package |
@@ -139,7 +175,7 @@ From the issue and confirmed in code:
 | H10 | No frame-content sanity gate: a 0.06 s exposure of a lit roof ceiling gets sky labels if the roof classifier says Open | `overlay_renderer.py:268-297` | 1 |
 | H11 | `ui/panels/allsky_settings.py::get_config` rebuilds the `allsky_overlay` dict from scratch, so any new config key is wiped on the first panel edit | `allsky_settings.py:481-534`, `ui/main_window/settings.py:152-166` | 1 (fix), 2 (avoid) |
 | H12 | The label stabilizer is a process-wide singleton never reset in production, shared by watch mode, camera mode and reprocesses | `label_stability.py:180-188` | 1 |
-| H14 | The calibration buffer is FIFO by count with no age limit; after a day gap it fits dawn frames with evening frames | `calibration_service.py:273-275` | 4 |
+| H14 | The calibration buffer is FIFO by count with no age limit; after a day gap it fits dawn frames with evening frames (824 min span on the reporter's rig, 1069 min on the reference rig) | `calibration_service.py:273-275` | 4 |
 | H13 | `sample_images/` (the 130 real reference frames + `multi_calibration.json`) is gitignored and absent from CI containers; real-frame validation only runs on a developer machine | `.gitignore:75` | 4, 5 |
 
 Also noted, out of scope for these packages: `.claude/rules/ml.md` says the inference path
@@ -672,11 +708,20 @@ not less); package 2's exposure floor and no-stars rule are.
    marks credible) is a follow-up after package 3.
 4. **Equipment map `HEAL_FRAMES = 600`.** The map removes places, never features: labels
    and calibration keep running; only the observable-sky gate can suppress them.
-5. **`CREDIBLE_RMS_FRACTION = 0.6`** as the working value. The two logs to hand (the
-   reporter's Sep 23 log, and a third user's bundle with the overlay disabled) contain no
-   accepted refinements, so the maintainer checks a month of reference-rig logs for any
-   admitted model above 0.6 before package 3 merges. Known points: chance 0.65–0.72,
-   the #10 rig's genuine fits 0.48.
+5. **`CREDIBLE_RMS_FRACTION`**: measured on every log to hand (§0.5), RMS / final
+   tolerance is:
+
+   | Fit | RMS / final tol |
+   |---|---|
+   | Reference rig guided model, 7 anchors (13 px limit) | 0.32 |
+   | Last genuine automatic fit, #10 rig, 2026-09-05 (n = 4561, 3/3 anchors) | 0.48 |
+   | Chance-band fits, reference rig, Sep 17–20 (35 fits) | 0.64–0.83 |
+   | Chance-band fits, reporter's rig, Sep 23 (62 fits) | 0.65–0.72 |
+
+   No automatic fit has been admitted on any rig since Sep 5. 0.6 leaves 0.04 to the
+   lowest chance fit; **0.55** sits midway between the last genuine fit and the first
+   chance fit, and a false "credible" is the expensive error. Proposed 0.55, awaiting the
+   maintainer's confirmation; the constant carries this table in its comment.
 6. **Both hemispheres**, hemisphere from the latitude sign, southern path validated on
    synthetic data only until real southern data exists.
 
