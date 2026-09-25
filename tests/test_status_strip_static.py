@@ -133,3 +133,53 @@ def test_warning_icon_exists_in_the_bundled_font(qapp):
     # qicon swallows an unknown glyph and returns an empty QIcon, so a typo
     # would ship as a blank tile rather than an error.
     assert not qicon('alert-outline').isNull()
+
+
+# --- observable-sky gate reasons on the Sky tile (issue #93) ---------------
+
+def _gated(reason, roof='Open', sky='Clear', ml=True):
+    metadata = {'_observing_window_reason': reason, 'STAR_COUNT': 'N/A'}
+    if ml:
+        metadata['_ML_RESULTS'] = {'roof_status': roof, 'sky_condition': sky,
+                                   'frame_is_static': False}
+    return metadata
+
+
+def test_no_stars_takes_the_sky_tile(strip):
+    strip.update_from_metadata(_frame('Open', static=False))
+    strip.update_from_metadata(_gated('no_stars'))
+    assert strip.sky_tile.value.text() == "No stars detected"
+    assert strip.sky_tile._tone == 'muted'
+    assert strip.seeing_tile.value.text() == "—"
+    assert strip.roof_tile.value.text() == "Open"
+
+
+def test_exposure_too_short_takes_the_sky_tile(strip):
+    strip.update_from_metadata(_gated('exposure'))
+    assert strip.sky_tile.value.text() == "Exposure too short"
+    assert strip.seeing_tile.value.text() == "—"
+
+
+def test_the_reason_shows_in_watch_mode_without_ml_results(strip):
+    strip.update_from_metadata(_gated('no_stars', ml=False))
+    assert strip.sky_tile.value.text() == "No stars detected"
+
+
+def test_a_closed_roof_is_still_reported_as_the_roof(strip):
+    strip.update_from_metadata(_gated('roof', roof='Closed'))
+    assert strip.sky_tile.value.text() == "Roof closed"
+    assert strip.seeing_tile.value.text() == "Roof closed"
+
+
+def test_an_observable_frame_restores_the_sky_condition_and_stars(strip):
+    strip.update_from_metadata(_gated('no_stars'))
+    strip.update_from_metadata(_frame('Open', static=False))
+    assert strip.sky_tile.value.text() == "Clear"
+    assert strip.seeing_tile.value.text() == "41 stars"
+
+
+def test_static_still_wins_over_the_gate_reason(strip):
+    metadata = _gated('static')
+    metadata['_ML_RESULTS']['frame_is_static'] = True
+    strip.update_from_metadata(metadata)
+    assert strip.sky_tile.value.text() == "Too much static"

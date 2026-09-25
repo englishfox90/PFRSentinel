@@ -20,11 +20,20 @@ The overlay is drawn on a copy of the processed frame. Your clean image is never
 
 ### When the overlay is drawn
 
-The overlay and automatic calibration only run when it makes sense to look at the sky:
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+The overlay, automatic calibration and star detection only run on frames that can plausibly show a night sky. Each frame is checked, in this order, and the first check that fails switches them off for that frame:
 
 - **The sun must be below civil twilight** (6 degrees below the horizon). This check needs your latitude and longitude; without them it is skipped.
-- **The roof must not be reported closed.** If [ML Models](ML-Models) are enabled and the roof classifier reports **Closed** on two frames in a row, the overlay and calibration pause. A single Closed frame is ignored (from the next release; in 3.7.7 and earlier one frame was enough, which could blank the overlay for a frame when the exposure changed). The overlay follows the roof reading in Directory Watch mode as well; in 3.7.7 and earlier it ignored the roof there. Rigs with no roof (for example an open-air all-sky camera) can turn off **Skip Sky Features When Roof Closed** in the ML settings so a misread "Closed" does not suppress them.
+- **The frame must not be sensor noise only.** If [ML Models](ML-Models) are enabled and the frame is flagged as static (a dark, closed roof at high gain, for example), there is nothing in it to annotate.
+- **The exposure must be long enough.** Frames exposed for less than **Minimum exposure** (0.5 seconds by default) are never a night sky: a lit roof or a dusk sky at a few milliseconds still fools the roof classifier, but a real night runs many seconds. Set it to 0 to turn this check off.
+- **The roof must not be reported closed.** If ML Models are enabled and the roof classifier reports **Closed** on two frames in a row, the overlay and calibration pause. A single Closed frame is ignored. Rigs with no roof (for example an open-air all-sky camera) can turn off **Skip Sky Features When Roof Closed** in the ML settings so a misread "Closed" does not suppress them. Detected stars never override a Closed reading.
+- **Stars must be detected.** When the roof reads Open (or ML is off) but fewer than **Minimum stars detected** (100 by default) star-like points are found on three frames in a row, the frame is a lit roof or an overcast sky, and labels would be drawn on a ceiling or on cloud. The overlay pauses until two frames in a row show at least twice that many stars, so it does not flicker when the count hovers at the floor. The count is coarse — it is taken on a reduced copy of the frame, so only the brighter stars register — and the default is calibrated on a rig whose closed roof is dimly lit and itself carries 20–80 point-like sources (roof lights and their reflections), while its clear nights show 200–450. If the sky classifier says stars are visible, a low count on its own does not pause anything, which is what protects a moon-washed night on a rig with ML Models enabled; rigs without ML, or with a small sensor, may need to lower the floor. Raise it if a lit, closed roof still passes.
 - **A calibration must exist.**
+
+Both floors are on the **When the overlay is drawn** card of the All-Sky page, and in `config.json` as `allsky_overlay.min_exposure_s` and `allsky_overlay.min_star_detections`. The [Live Monitoring](Live-Monitoring#status-strip) Sky tile says which check paused the overlay ("Exposure too short", "No stars detected"). In 3.7.7 and earlier only the sun and the roof were checked, so a roof misread as Open, or an overcast night, still got labels.
+
+The stars check governs the overlay, calibration and star detection only. Meteor detection, roof change notifications, the timelapse roof mode and the ASCOM safety file keep following the roof classifier alone: "no stars" is not "roof closed".
 
 If you shrink images with **Resize**, the calibration is scaled to match automatically. If you crop your outputs with **Output Framing** on the [Image Processing](Image-Processing#output-framing) tab (new in the next release), the calibration is scaled and then shifted to match the cropped image, so a burned-in overlay still lines up with the sky; calibration itself keeps using the full frame. If the image has been cropped to a different shape some other way, the overlay is skipped rather than drawn in the wrong place.
 

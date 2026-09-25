@@ -378,6 +378,21 @@ DEFAULT_CONFIG = {
         # UTC offset of timestamps in image metadata/filenames — NINA and most
         # capture software write LOCAL time, so constellations misalign at 0.
         "utc_offset_hours": 0,
+        # Observable-sky gate (issue #93). Frames exposed for less than
+        # min_exposure_s seconds are never a night sky (a lit roof at 0.06 s,
+        # dusk at 8 ms; clear nights run 10-30 s); 0 disables. A roof that
+        # reads Open but shows fewer than min_star_detections star-like
+        # sources on three frames in a row is a lit roof or overcast, and
+        # sky features pause until two frames show twice that many. 100 is
+        # calibrated on the reference rig's frames at the evidence plane
+        # (services/sky_evidence.py): its dimly lit closed roof carries
+        # 20-80 point sources (lights, reflections, residual grain), a clear
+        # night 206-445, so the closed side is 1.25x under and the open side
+        # 2x over, with the 200 recovery reachable on every open frame. ML's
+        # "stars visible" verdict vetoes a false block on a moon-washed
+        # night; rigs without ML or with a small sensor may need it lower.
+        "min_exposure_s": 0.5,
+        "min_star_detections": 100,
         "constellations": {
             "enabled": True, "lines": True, "labels": True,
             "color": "#4488FF", "line_width": 2, "label_size": 12, "opacity": 180,
@@ -404,9 +419,11 @@ DEFAULT_CONFIG = {
                 "Uranus": "#88DDFF", "Neptune": "#4466FF", "Moon": "#FFFFEE",
             },
         },
-        # Off by default: the settings panel writes these all-False, so a
-        # True default only ever applied to fresh installs that had not yet
-        # saved the all-sky panel — which drew a full alt/az grid unasked.
+        # Off by default. There is no panel control for the grid; the panel
+        # used to write these all-False on every save, so a True default only
+        # ever reached fresh installs — which drew a full alt/az grid unasked.
+        # The panel now carries the loaded values through (issue #93, H11),
+        # so an edit here survives the All-Sky page.
         "grid": {
             "enabled": False, "horizon": False, "altitude_rings": False,
             "altitude_step": 30, "azimuth_lines": False, "cardinal_labels": False,

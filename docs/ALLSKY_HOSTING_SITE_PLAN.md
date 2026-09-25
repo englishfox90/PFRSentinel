@@ -442,8 +442,11 @@ calibration feed uses, and stored as `metadata['_SKY_EVIDENCE']`):
    The clear nights ran 10–30 s.
 3. ML roof `Closed` on two consecutive frames → not observable (unchanged).
 4. ML roof `Open` (or ML off) but **no star evidence** on `NO_STARS_CONFIRM_FRAMES`
-   consecutive frames (suggest 3): `star_count < min_star_detections` (default 15; the
-   ceiling texture reached ≥ 10 on video 2, real skies here give 40–200) and
+   consecutive frames (suggest 3): `star_count < min_star_detections` (default 100 —
+   measured on the reference rig at the 900 px evidence plane, 2026-09-25: its dimly
+   lit closed roof carries 20–80 point sources, its clear nights 206–445; the 15 first
+   suggested here came from the ceiling texture reaching ≥ 10 on video 2 and full-
+   resolution skies giving 40–200, and did not separate) and
    `stars_visible` is not `True` → not observable ("roof reads Open but no stars are
    detected"). Covers the lit roof *and* overcast — labels on cloud are as wrong as labels
    on a ceiling, and the calibration feed should not see either.
@@ -472,7 +475,8 @@ so exposure and star count reach the gate. `tests/test_watch_controller_crop.py`
 the current shape — update it.
 
 **Config** (`config_defaults.py`, `allsky_overlay`): `min_exposure_s: 0.5`,
-`min_star_detections: 15`. Exposed on the All-Sky settings card (two spin boxes under
+`min_star_detections: 100` (closed roof 20–80, open 206–445 on the 900 px plane,
+reference rig, 2026-09-25). Exposed on the All-Sky settings card (two spin boxes under
 "When the overlay is drawn"); package 1's `get_config` fix must land first or these keys
 are wiped on the first panel edit (H11) — if package 2 merges first, include the fix here.
 
@@ -838,6 +842,9 @@ not less); package 2's exposure floor and no-stars rule are.
    maintainer**; the constant carries this table in its comment.
 6. **Both hemispheres**, hemisphere from the latitude sign, southern path validated on
    synthetic data only until real southern data exists.
+7. `min_star_detections = 100`, measured on the reference rig's closed-roof and open
+   frames; the detector's clipped-residual sigma bug found during that run is fixed in
+   package 4.
 
 ## 6. Cross-check against an independent all-sky solver (2026-09-25)
 
