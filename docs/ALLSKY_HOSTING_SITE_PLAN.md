@@ -15,10 +15,11 @@
 
 ### 0.1 Polaris is not visible on this rig
 
-The reporter's videos show the pier covering the region where Polaris would be; the
-"Polaris" label sits beside the orange pier LED on every clear night. So the pole
-`pole_finder` reports at (1409, 2699) "on every run across Sep 17, 18 and 19" is **not
-Polaris**. It is the LED. The mechanism is the documented residual risk in
+The reporter's videos show the pier and mount covering the region where Polaris would
+be; the "Polaris" label sits beside the lights on that hardware on every clear night. So
+the pole `pole_finder` reports at (1409, 2699) "on every run across Sep 17, 18 and 19" is
+**not Polaris**. It is one of those lights (which one cannot be told from a still, since
+the crop offset is unknown; it does not matter). The mechanism is the documented residual risk in
 `ALLSKY_POLE_ANCHOR_PLAN.md` ("a bright in-band light within ~200 px of a *hidden* pole can
 still clear the floor; a stable single contaminant is unimodal by definition"), and the
 numbers on this sensor make it certain:
@@ -30,7 +31,7 @@ numbers on this sensor make it certain:
 | Accepted drift band `DRIFT_BAND × arc`, floored at `STATIC_NOISE_FLOOR_PX` | 1.5–5.5 px | **1.5–4.8 px** |
 | Logged drift of the accepted "pole" track | — | 3.6 px |
 
-A saturated orange blob's centroid jitter reads 3.6 px of extent over 12 frames, which sits
+A saturated light's centroid jitter reads 3.6 px of extent over 12 frames, which sits
 inside the band. The rotation-support test then passes it because the true pole is close:
 an equatorial pier's head is *on* the polar axis, so a light on it is within the ±200 px
 window where support cannot discriminate. The finder is structurally unable to tell a
@@ -66,6 +67,33 @@ From the issue and confirmed in code:
   only "a trusted pole existed this run or the incumbent had authority"
   (`model_admission.admission_evidence`) — nothing about the candidate's own merit. On Sep 19
   the trusted pole was the LED, so the bypass fired for a chance fit.
+
+### 0.3 What a frame from this rig shows (2026-09-22 23:30 local, 20.66 s, gain 180)
+
+- **Roughly half the sky disc is equipment.** A ring of telescopes and mounts occupies the
+  outer 30–45 % of the radius on every side, with gaps. Consequences: `measure_sky_circle`
+  scans to the equipment silhouettes, not the horizon, so `a1_from_sky_radius` and the
+  optical centre it seeds are unreliable here (the pole-anchor plan saw the same on a
+  less obstructed rig: r ≈ 1250 vs 1563 true). Package 4c must therefore solve centre and
+  scale jointly with the axis, seeded from the circle, not take them from it. The
+  bright-anchor gate also finds many of its top-12 stars behind scopes, which is why
+  anchor health reads `None` so often on this rig.
+- **The pole region is covered.** The model puts Polaris and Kochab at the bottom of the
+  crop, on the mount and pier hardware that carries several lights, one orange pair and
+  at least one white. No star near the pole is ever detected; the pole can only come from
+  the motion of stars far from it, where lens error matters most. That is the accuracy
+  limit for package 4c and the reason its `sigma_px` must be honest rather than
+  optimistic.
+- **Many static lights, not one.** White and orange lights on mounts around the whole
+  ring, plus a bright white rectangular object near the Alderamin label. Package 4b's
+  static-light stripping is a pool-wide operation on this rig, not a single-LED fix.
+- **The Moon's glare disc is large.** At 20 s the Moon is a saturated blob with a halo
+  about 0.12–0.15 of the sky radius across; the label beside it is washed out. Package 1's
+  Moon exclusion radius should be derived from the saturated region (or default to
+  0.15·sky_r), not the 0.08 first suggested below.
+- Exposure and gain on the clear nights are 10–30 s / 180; the 0.06 s of video 2 is two
+  orders of magnitude away. The 1.0 s floor in package 1 has a wide margin on both sides
+  for this rig.
 
 ## 1. Findings
 
@@ -162,9 +190,10 @@ vanish wholesale because the sky mask died on a moonlit night.
   `add_partial(mask)` on the history that increments the sky count without incrementing
   the frame count for uncovered pixels (the vote is already a running sum,
   `label_stability.py:95-113`). A frame with < 3 detections is a miss.
-- Moon: exclude a disc around the Moon's projected pixel (`planets.get_all_positions`,
-  radius ≈ 0.08·sky_r) from the *frame count* denominator, so glare that blanks detections
-  near the Moon does not vote "not sky" there.
+- Moon: exclude a disc around the Moon's projected pixel (`planets.get_all_positions`)
+  from the *frame count* denominator, so glare that blanks detections near the Moon does
+  not vote "not sky" there. Radius: the saturated blob's extent at that pixel when one is
+  found, else 0.15·sky_r (§0.3).
 - H12: call `reset_label_stability()` from `CalibrationService.set_model` /
   `clear_model` and on capture start (`ui/main_window/capture.py`), so a new model or
   session starts clean. Reprocesses (`SAME_CAPTURE_KEY`) must not advance the vote twice.
@@ -371,10 +400,12 @@ the way the pixel-space rigid fit did (the plan measured 100+ px of bias there).
 - Search: coarse grid over axis direction (alt 20–90° in 2°, az 0–360° in 2°, both
   mirrors) scoring each candidate by the number of frame-1 vectors that land within
   `tol` of a frame-2 vector after rotation (KD-tree, same pattern as
-  `_coarse_orientation_candidates`); refine the best with `scipy.optimize` on the
-  support-weighted residual; report the peak's width as `sigma_px`. Also scan a1 over
-  0.8–1.3× the sky-circle estimate — the correct scale gives a sharper peak, and the
-  peak's a1 is a free plate-scale measurement for package 5.
+  `_coarse_orientation_candidates`); refine the best with `scipy.optimize` over
+  (axis, a1, cx, cy) on the support-weighted residual, a1 bounded to 0.7–1.5× and the
+  centre to ±0.1·sky_r of the sky-circle seed; report the peak's width as `sigma_px`.
+  The sky circle is a **seed only** — on an obstructed rig it is not a measurement
+  (§0.3). The correct scale gives a sharper peak, and the refined a1 / centre are a free
+  plate-scale and optical-centre measurement for package 5.
 - Output: a `PoleEstimate` (add `sigma_px: float` and `source: 'polaris' | 'rotation'`
   fields; defaults keep existing constructors working) with `east_left` from the
   rotation sign, `n_frames`, `span_minutes`, window bounds.
