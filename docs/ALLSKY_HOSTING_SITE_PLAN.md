@@ -376,7 +376,9 @@ the current shape — update it.
 "When the overlay is drawn"); package 1's `get_config` fix must land first or these keys
 are wiped on the first panel edit (H11) — if package 2 merges first, include the fix here.
 
-A real fixture exists (§7.1): the reference rig's Sep 17 23:59 frame, roof Closed at
+Two real fixtures exist. §7.4's 500 frames carry the observatory's own roof state from
+NINA, exposure and cloud cover — the calibration set for `min_star_detections` and the
+confirm-frame counts. And §7.1's Sep 17 23:59 frame, roof Closed at
 100 % **at a 13 s exposure** — the exposure floor does not fire, the roof verdict and
 the no-stars rule must. Package 2 is not done until that frame is blanked by rule 4 with
 the roof verdict removed from its metadata.
@@ -833,3 +835,37 @@ full-resolution output on the reference rig (a few hundred frames at 3552 px) is
 dataset packages 4 and 5 should be tuned on. Package 0's buffer dump captures the
 detections without the images and is enough for the solver; the images are needed only
 for the detector filters (package 4) and the equipment map (package 1).
+
+### 7.4 Reference-rig ML contribution set: 500 labelled frames with the real roof state
+
+`PFRSentinel/ml_contribution/` on the reference rig (Drive-synced) holds the opt-in
+community-data collection: **500 samples**, 2026-06-26 to 2026-07-18, one every 30 min
+day and night, camera ASI676MC. Each sample is `samples/lum_<stamp>.fits` (256 × 256
+luminance, downscaled from the 3552 px frame) plus `calibration_<stamp>.json` with:
+
+- `roof_state` **from NINA's safety monitor** (`source: nina_api`, `roof_open`,
+  `is_safe`, device "Building 8") — the observatory's own roof truth, not a classifier;
+- `exposure`, `gain`, bit depths; `stretch.median_lum`, `is_dark_scene`, percentiles,
+  corner analysis; `moon_context` (illumination, up/down); `weather_context`
+  (cloud cover %, condition); `time_context`.
+
+**Good for — package 2 above all.** This is a labelled set for the observable-sky gate:
+run `detect_stars` on each 256 px FITS and tabulate detections against the NINA roof
+state, exposure and cloud cover. It answers, on real data, whether `min_star_detections`
+separates a closed roof from open sky and where cloud sits, and it measures the ML roof
+classifier's agreement with the observatory's roof (the number behind decision 3). At
+256 px only the bright stars survive, which is the regime the no-stars rule has to work
+in anyway. Package 2's tests should carry a small slice of it (a dozen FITS + sidecars,
+a few hundred KB) as a real fixture next to the synthetic ones.
+
+**Caveat:** `time_context` in these sidecars predates the western-site fix
+(`test_time_context.py`, "never night in the afternoon"): the sample at 13:56 UTC on
+July 18 says `is_astronomical_night: true` two hours after sunrise. Recompute night
+from `timestamp` with today's `compute_time_context`; do not trust the stored flag.
+
+**Not good for:** anything about calibration or the equipment map — 256 px is a
+fourteenth of the sensor. The camera also moved on 2026-07-02 (pole-anchor plan), so the
+set straddles two orientations.
+
+This folder is not subject to library pruning, but it is the only copy: keep it with the
+other test data.
