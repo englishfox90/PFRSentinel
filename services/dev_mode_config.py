@@ -9,8 +9,12 @@ import os
 # Set to False for production builds to disable:
 # - Raw debug file saving (FITS/TIFF files)
 # - Calibration JSON exports
-# - ML prediction integration
+# - ML predictions written into the calibration JSON export (ui/controllers/ml_prediction.py)
 # - Other experimental features
+#
+# NOT gated by this flag: per-frame ML inference (services/ml_service.py) runs in
+# every build when ml_models.enabled is on. Of the ML code, only the export loader
+# listed above and model training (ml/train_*.py) are dev-only.
 #
 # RAW16 camera mode remains available regardless of this flag (user-facing feature).
 DEV_MODE_AVAILABLE = False  # Set to False before building release
