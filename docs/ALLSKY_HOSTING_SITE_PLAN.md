@@ -92,7 +92,7 @@ From the issue and confirmed in code:
   Moon exclusion radius should be derived from the saturated region (or default to
   0.15·sky_r), not the 0.08 first suggested below.
 - Exposure and gain on the clear nights are 10–30 s / 180; the 0.06 s of video 2 is two
-  orders of magnitude away. The 1.0 s floor in package 1 has a wide margin on both sides
+  orders of magnitude away. The 0.5 s floor in package 2 has a wide margin on both sides
   for this rig.
 
 ### 0.4 What `sentinel.log.2026-09-23` shows
@@ -149,11 +149,12 @@ are wrong (`services/ml_service.py` runs in production whenever `ml_models.enabl
 
 ## 2. Work packages
 
-Five packages, each a separate PR that merges on its own. Dependencies are listed; the
+Six packages, each a separate PR that merges on its own. Dependencies are listed; the
 order below is the recommended merge order but only package 5 has a hard dependency.
 
 | PR | Package | Size | Depends on |
 |---|---|---|---|
+| 0 | Buffer dump for replay (ships first, in a dev build) | S | — |
 | 1 | Equipment map and label persistence (issue D, user's "healing mask") | M | — |
 | 2 | Observable-sky gate: roof verdict corroborated by star evidence (issue C + E) | M | — |
 | 3 | Chance-aware quality and incumbent re-judging (issue B) | M | — |
@@ -172,6 +173,29 @@ Every package: new logic goes in **new modules** (`.claude/rules/python-general.
 a new file. Each package updates the CLAUDE.md test table and the matching `docs/wiki/`
 page with a `> **New in the next release** — not available in version 3.7.7 or earlier.`
 note (the reporter is on 3.7.7; check `version.py` at PR time).
+
+### Package 0 — Buffer dump for replay
+
+**Goal.** Make the reporter's sky replayable here before packages 4 and 5 are written.
+Ships first in a dev build; the reporter runs one clear night and sends a diagnostics
+bundle.
+
+- New `services/allsky/buffer_dump.py`: `dump_buffer(frames, path)` writes the
+  `CalibrationService` buffer (`dt`, `detected`, `sky_cx/cy/r`, `image_width/height`,
+  `above_horizon` names only — no images) as JSON to
+  `<app-data>/allsky/buffer_<stamp>.json`; keeps the newest 5 files. Path via a new
+  `app_config.get_allsky_buffer_dir()`.
+- Triggers: escape exhaustion (`EscapeBackoff.record_fruitless` reaching the threshold),
+  every basin escape when dev mode is on, and a **Dump calibration buffer** button on the
+  All-Sky settings card (so the reporter can do it on demand without waiting for an
+  escape).
+- `services/diagnostics_bundle.py` includes the newest dump under `allsky/`.
+- `scripts/dev/allsky/replay_buffer.py`: loads a dump and runs `find_pole`,
+  `refine_from_detections` and `estimate_chance` against it, printing what the service
+  would have logged. This is the harness packages 4 and 5 validate on.
+- Tests: `tests/test_allsky_buffer_dump.py` — round-trip, cap of 5, no image data, bundle
+  inclusion (extend `test_diagnostics_bundle.py`).
+- Wiki: `Diagnostics-Export.md` (new file listed), `All-Sky-Overlay.md` (the button).
 
 ### Package 1 — Equipment map and label persistence
 
@@ -273,7 +297,8 @@ calibration feed uses, and stored as `metadata['_SKY_EVIDENCE']`):
 **Decision** (`observing_window._evaluate`, after the −6° twilight gate, which stays):
 
 1. `frame_is_static` → not observable ("sensor noise only"). Covers a dark closed roof.
-2. `exposure_s < allsky_overlay.min_exposure_s` (default **1.0**; `0` disables) → not
+2. `exposure_s < allsky_overlay.min_exposure_s` (default **0.5**; `0` disables; a plain
+   key in `config.json` so it can be edited there as well as on the card) → not
    observable. Covers the lit roof at 0.06 s (video 2) and dusk (8 ms at 19:00 in the log).
    The clear nights ran 10–30 s.
 3. ML roof `Closed` on two consecutive frames → not observable (unchanged).
@@ -307,7 +332,7 @@ transition, never per frame.
 so exposure and star count reach the gate. `tests/test_watch_controller_crop.py` asserts
 the current shape — update it.
 
-**Config** (`config_defaults.py`, `allsky_overlay`): `min_exposure_s: 1.0`,
+**Config** (`config_defaults.py`, `allsky_overlay`): `min_exposure_s: 0.5`,
 `min_star_detections: 15`. Exposed on the All-Sky settings card (two spin boxes under
 "When the overlay is drawn"); package 1's `get_config` fix must land first or these keys
 are wiped on the first panel edit (H11) — if package 2 merges first, include the fix here.
@@ -458,6 +483,10 @@ the way the pixel-space rigid fit did (the plan measured 100+ px of bias there).
   rotation sign, `n_frames`, `span_minutes`, window bounds.
 - Requirements: ≥ 8 frames spanning ≥ 45 min, ≥ 40 stripped detections per frame in the
   median; below that, `None`.
+- Hemisphere from the sign of the site latitude (already required for calibration); no
+  user setting. The rotation path has no `lat ≥ 20` restriction — the southern pole is
+  found the same way. Southern operation is validated on the synthetic fixture only until
+  a southern user sends a buffer dump; say so in the module docstring and the wiki.
 - `find_pole` becomes the orchestrator: Polaris path first (4a); if it withholds, the
   rotation path; if both give an estimate they must agree within `3·sigma_px + 20 px` or
   the result is `None` with a WARNING naming both pixels (a disagreeing Polaris is the
@@ -466,14 +495,7 @@ the way the pixel-space rigid fit did (the plan measured 100+ px of bias there).
   windows, floored at the per-run sigma) and a `mean` position instead of "latest". The
   75 % dominant-mode rule and the vote ledger stay.
 
-**4d — Buffer dump for replay** (new `services/allsky/buffer_dump.py`, small):
-
-- On escape exhaustion (`EscapeBackoff.record_fruitless` reaching the threshold) and on
-  every dev-mode escape, write the 60-frame buffer (`dt`, `detected`, sky circle, frame
-  size — no images) to `<app-data>/allsky/buffer_<stamp>.json`, and include the newest one
-  in the diagnostics bundle (`services/diagnostics_bundle.py`). This is what lets us
-  replay packages 4 and 5 against the reporter's actual sky without shipping a build.
-  Keep at most 5 files.
+**4d** — moved to package 0.
 
 **Validation** — two layers because of H13:
 
@@ -595,30 +617,26 @@ updated, `requires_windows` / `slow` markers where appropriate.
 
 Unchanged from the issue: install the dev build and run **Guided Calibration**, which
 stamps `provenance = 'guided'` and locks the basin against automatic replacement. Add,
-once package 4d ships in a dev build: leave capture running for a clear night so the
+once package 0 ships in a dev build: leave capture running for a clear night so the
 buffer dump exists, then send a diagnostics bundle. Turning off **Skip Sky
 Features When Roof Closed** is *not* the answer (it would draw on the closed roof more,
 not less); package 2's exposure floor and no-stars rule are.
 
-## 5. Open questions for the maintainer
+## 5. Decisions (maintainer, 2026-09-25)
 
-1. Package split: five PRs as above, or six with package 4 divided into measurement (4a–4c)
-   and buffer dump (4d)? 4d is small and unblocks field validation early; it could also
-   ride in package 3.
-2. `min_exposure_s` default 1.0 s: is there a supported rig that shows stars below 1 s at
-   its normal gain? If so, lower the default and rely on the no-stars rule.
-3. Package 2, the other direction: should plenty of detected stars *override* an ML
-   `Closed`? The wiki today tells no-roof rigs to switch the roof gate off instead. The
-   plan keeps Closed authoritative (a lit ceiling gave ≥ 10 "stars" on video 2); an
-   override would need the model-based anchor test, i.e. package 3 first.
-3b. Package 1 healing rate: `HEAL_FRAMES` ≈ 600 means a scope parked in a new spot is
-   masked within one night and a removed one is freed within two. Faster heals fight the
-   per-night vote; slower ones leave ghosts. Confirm against how often mounts move on a
-   hosting field.
-4. Package 3 `CREDIBLE_RMS_FRACTION = 0.6`: confirm against the last month of refinement
-   logs on the reference rig that no admitted model sits above 0.6 (the #10 rig's were
-   0.48).
-5. Package 4: the hemisphere the rotation fit is validated for. The synthetic fixture can
-   simulate a southern site; the only real data is northern. Ship for both with the
-   southern path marked as validated on synthetic data only, or gate it to `lat ≥ 20`
-   like today's finder until a southern user reports?
+1. **Six PRs.** The buffer dump is package 0 and ships first in a dev build so the
+   reporter's sky can be replayed before the pole work is written.
+2. **Exposure floor 0.5 s**, `allsky_overlay.min_exposure_s` in `config.json`, editable
+   there and on the All-Sky card; `0` disables.
+3. **A Closed roof verdict stays authoritative.** Detected stars never override it in
+   package 2. A model-based override (bright-anchor hits through a model that package 3
+   marks credible) is a follow-up after package 3.
+4. **Equipment map `HEAL_FRAMES = 600`.** The map removes places, never features: labels
+   and calibration keep running; only the observable-sky gate can suppress them.
+5. **`CREDIBLE_RMS_FRACTION = 0.6`** as the working value. The two logs to hand (the
+   reporter's Sep 23 log, and a third user's bundle with the overlay disabled) contain no
+   accepted refinements, so the maintainer checks a month of reference-rig logs for any
+   admitted model above 0.6 before package 3 merges. Known points: chance 0.65–0.72,
+   the #10 rig's genuine fits 0.48.
+6. **Both hemispheres**, hemisphere from the latitude sign, southern path validated on
+   synthetic data only until real southern data exists.
