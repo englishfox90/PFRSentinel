@@ -112,7 +112,7 @@ Phase 1–3 complete; Phase 4 future:
 - **Phase 2**: Sky conditions (85.3%), stars (91.2%), moon (100%)
 - **Phase 3**: Dev-mode integration that saves calibration JSON + FITS per frame
 - **Phase 4** (future): Stretch recipe prediction
-- All inference is local via ONNX. Production interface: `ui/controllers/ml_prediction.py`.
+- All inference is local via ONNX. Production interface: `services/ml_service.py` (`MLService.analyze_image`, `get_ml_service()` singleton), on whenever `ml_models.enabled` is set, in every build. `ui/controllers/ml_prediction.py` is a separate dev-only loader for the calibration JSON export, gated by `is_dev_mode_available()` along with `dev_mode_utils.py` and the Dev Mode card.
 
 ## Working on this codebase
 
@@ -290,7 +290,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_output_crop.py` | 59 | `output_crop` — box normalisation/clamping/evenness, centring, fit-to-circle, proportional rescale across frame sizes, PIL crop, metadata round-trip, DEFAULT_CONFIG integration |
 | `test_settings.py` | 11 | `config` — JSON save/load, merge, defaults |
 | `test_webserver.py` | 13 | `web_output` — HTTP server, ETag, status JSON (`requires_network`) |
-| `test_ml_classifiers.py` | 6 | `ml.roof_classifier` / `ml.sky_classifier` + production `ui/controllers/ml_prediction.py` — ONNX load + inference smoke tests (`requires_ml_models`) |
+| `test_ml_classifiers.py` | 6 | `ml.roof_classifier` / `ml.sky_classifier` + the dev-only `ui/controllers/ml_prediction.py` loader — ONNX load + inference smoke tests (`requires_ml_models`) |
 | `test_api_auth.py` | 43 | `api_auth` — bearer compare, Host allow-list, token minting, redaction |
 | `test_api_control.py` | 51 | `api_control` — command validation, idempotency, `wait` semantics, OpenAPI catalog |
 | `test_web_control.py` | 33 | `web_control` — control routes, auth matrix, no-CORS regression guard |
