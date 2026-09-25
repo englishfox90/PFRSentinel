@@ -56,6 +56,7 @@ If capture is not running, the most recent frame captured since the app was star
 | `allsky/allsky_calibration.json` | Your current all-sky lens calibration, if one exists. |
 | `allsky/allsky_calibration.previous.json` | The previous calibration kept as a backup, if one exists. |
 | `allsky/custom_...` | A custom calibration file, if your all-sky settings point to one outside the usual location. |
+| `allsky/buffer_....json` | The newest **calibration buffer dump**, if one exists: the star positions automatic calibration has been working from, with the time of each frame and the site coordinates rounded to about a kilometre. No images. Written when automatic re-calibration gives up, and by **Dump calibration buffer** on the All-Sky card (see [All-Sky Overlay](All-Sky-Overlay#dump-calibration-buffer)). *New in the next release — not available in version 3.7.7 or earlier.* |
 | `summary.json` | App version, Windows version, capture mode, whether capture or directory watching was running, the selected camera name, the live camera settings (exposure, gain, offset, auto-exposure, maximum exposure, target brightness, capture interval, RAW16, Bayer pattern, white balance), notes explaining anything that was skipped, and a list of included and missing files. |
 
 Items that don't exist on your system (for example, no all-sky calibration) are simply left out and listed as missing in `summary.json`.
@@ -85,6 +86,7 @@ Check the ZIP before sharing it publicly. The following are included as they are
 - **File and folder paths** in settings and logs. These often include your Windows user name (for example `C:\Users\YourName\...`).
 - **Camera name** and camera settings in `summary.json`.
 - **Images.** The raw frame and latest output show whatever the camera sees, including any text overlays such as the date, time, or weather.
+- **Approximate site coordinates** in the calibration buffer dump, rounded to two decimal places (about a kilometre). Replaying a calibration needs to know where the sky was seen from; the exact coordinates in your settings stay redacted.
 
 ---
 

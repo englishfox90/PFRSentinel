@@ -7,6 +7,7 @@ Manages:
   - Config save/load for allsky_overlay section
   - Signals to panel for status updates
 """
+import threading
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 
@@ -122,6 +123,7 @@ class AllSkyController(QObject):
         self._worker: Optional[CalibrationWorker] = None
         self._model = None
         self._aspect_note: Optional[str] = None  # non-square-frame warning
+        self._dump_in_flight = False  # one buffer-dump writer at a time
 
         # Background calibration accumulation service
         from services.allsky.calibration_service import CalibrationService
@@ -333,6 +335,32 @@ class AllSkyController(QObject):
             "accumulate, or use Guided Calibration.")
         self.quality_changed.emit('none')
         self.settings_changed.emit()
+
+    def dump_calibration_buffer(self) -> None:
+        """Write the service's frame buffer to a replay dump for a bug report.
+
+        Runs on a daemon thread: the write is a few milliseconds, but the
+        status line must not wait on disk either way. The result reaches the
+        panel through status_changed, which Qt queues onto the GUI thread.
+        """
+        if self._dump_in_flight:
+            return
+        self._dump_in_flight = True
+        self.status_changed.emit("Saving calibration buffer…")
+        threading.Thread(target=self._dump_calibration_buffer,
+                         name='allsky-buffer-dump-ui', daemon=True).start()
+
+    def _dump_calibration_buffer(self) -> None:
+        try:
+            path = self._cal_service.dump_now()
+        finally:
+            self._dump_in_flight = False
+        if path is None:
+            self.status_changed.emit(
+                "Calibration buffer is empty — nothing to save. Frames are "
+                "collected while capture runs with the overlay enabled.")
+        else:
+            self.status_changed.emit(f"Calibration buffer saved: {path}")
 
     @property
     def calibration_service(self):

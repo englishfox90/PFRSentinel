@@ -37,8 +37,8 @@ from services.logger import app_logger as log
 
 from .star_centroid import detect_stars, measure_sky_circle
 from .fisheye import FisheyeModel
-from .catalogs import get_bright_stars
-from .coords import radec_to_altaz
+from .frame_catalog import above_horizon_stars
+from .buffer_dump import BufferDumpTrigger
 from .calibration_attention import calibration_attention
 from .calibration_quality import CalibrationQuality, model_quality  # re-exported for existing callers
 from .calibration_store import save_with_backup
@@ -168,6 +168,9 @@ class CalibrationService(QObject):
         self._attention = ('', '')
         self._lat = 0.0
         self._lon = 0.0
+        # Replay dumps (buffer_dump): the snapshot runs under _lock.
+        self._dump_trigger = BufferDumpTrigger(
+            self._lock, lambda: (self._frames, self._model, self._lat, self._lon))
         self._check_refine.connect(self._maybe_refine)
 
     # ------------------------------------------------------------------
@@ -288,6 +291,10 @@ class CalibrationService(QObject):
 
         self._check_refine.emit()
 
+    def dump_now(self):
+        """Write the buffer to a replay dump (UI button); path, or None if empty."""
+        return self._dump_trigger.dump_now()
+
     def shutdown(self) -> None:
         """Stop any running workers cleanly."""
         for w in (self._refine_worker, self._initial_worker):
@@ -375,15 +382,7 @@ class CalibrationService(QObject):
                           "too few, skipping frame")
                 return None
 
-            catalog = get_bright_stars(max_mag=6.5)
-            above_horizon = []
-            for s in catalog:
-                alt, az = radec_to_altaz(
-                    s['ra_deg'], s['dec_deg'], lat, lon, dt,
-                )
-                if float(alt) > 3.0:
-                    above_horizon.append((s, float(alt), float(az)))
-            above_horizon.sort(key=lambda x: x[0]['vmag'])
+            above_horizon = above_horizon_stars(dt, lat, lon)
 
             img_w = image.width if hasattr(image, 'width') else 0
             img_h = image.height if hasattr(image, 'height') else 0
@@ -488,6 +487,7 @@ class CalibrationService(QObject):
                 "a wrong-basin fit poisoning the seed. Attempting a seedless "
                 "re-calibration (basin escape)."
             )
+            self._dump_trigger.escape_started()
         mode = ("basin escape" if escape
                 else "cold-start bootstrap" if cold_start else "refinement")
         log.info(f"CalibrationService: triggering {mode} "
@@ -533,6 +533,7 @@ class CalibrationService(QObject):
         log_msg, status = self._escape_backoff.exhaustion_messages()
         log.warning(log_msg)
         self.status_changed.emit(status)
+        self._dump_trigger.exhaustion_reached()
 
     def _publish_attention(self) -> None:
         """Re-judge the badge caution; emit only when it changes."""
