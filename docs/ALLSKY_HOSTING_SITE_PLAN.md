@@ -229,8 +229,11 @@ bundle.
 - `scripts/dev/allsky/replay_buffer.py`: loads a dump and runs `find_pole`,
   `refine_from_detections` and `estimate_chance` against it, printing what the service
   would have logged. This is the harness packages 4 and 5 validate on.
+- `scripts/dev/allsky/library_to_buffer.py` (§7.2): an image-library night → the same
+  dump format, so the replay harness has real frames before any dev build ships.
 - Tests: `tests/test_allsky_buffer_dump.py` — round-trip, cap of 5, no image data, bundle
-  inclusion (extend `test_diagnostics_bundle.py`).
+  inclusion (extend `test_diagnostics_bundle.py`); the library loader on a two-frame
+  synthetic library folder.
 - Wiki: `Diagnostics-Export.md` (new file listed), `All-Sky-Overlay.md` (the button).
 
 ### Package 1 — Equipment map and label persistence
@@ -373,6 +376,11 @@ the current shape — update it.
 "When the overlay is drawn"); package 1's `get_config` fix must land first or these keys
 are wiped on the first panel edit (H11) — if package 2 merges first, include the fix here.
 
+A real fixture exists (§7.1): the reference rig's Sep 17 23:59 frame, roof Closed at
+100 % **at a 13 s exposure** — the exposure floor does not fire, the roof verdict and
+the no-stars rule must. Package 2 is not done until that frame is blanked by rule 4 with
+the roof verdict removed from its metadata.
+
 **Tests** (new `tests/test_sky_evidence.py`; extend `test_observing_window.py`,
 `test_status_strip_static.py`, `test_image_processor.py`): exposure parsing for every
 format; 0.06 s blocks, 10 s passes, absent passes, `0` disables; static blocks; Open + 3
@@ -500,7 +508,8 @@ user's observation in §0.1.
   ring. The rotation-pole fit (4c) and the bootstrap search (package 5) take the ring;
   refinement keeps the rolling buffer. Package 0's dump grows to include the ring.
 - Detector filters (new `services/allsky/detection_filters.py`, applied in
-  `_detect_frame` and `_detect_sky_mask` after `detect_stars`): drop components whose
+  `_detect_frame` and `_detect_sky_mask` after `detect_stars`; also takes
+  `ignore_rects` for burned-in text boxes, used by the library replay in §7): drop components whose
   bounding box aspect exceeds 3.2 with the long side over 6 px × scale (streaks, edges);
   drop components whose local background minimum within `EDGE_R` (10 px × scale) falls
   below `DARK_FLOOR` (35/255 on the stretched frame) — glints on silhouette rims and
@@ -757,3 +766,70 @@ multi-hour frames voting together, and the pole-seeded roll vote (package 5) is 
 global search with two of its three orientation angles already known. If package 4's pole
 is withheld on a rig, package 5's search must still work unseeded, which is exactly the
 roll-vote-plus-scale-scan path.
+
+## 7. Test data (2026-09-25)
+
+Real frames matter more than synthetic ones for this work, and the reference rig produces
+a usable set without any code change. What exists, what it is good for, and what it is
+not.
+
+### 7.1 Reference-rig image library
+
+The app-data folder of the reference rig (synced to Google Drive, `PFRSentinel/Library/`)
+holds the image library: one JPEG per processed capture, in per-night folders
+(`2026-09-17` … `2026-09-21` at the time of writing), plus `library.db` (SQLite, table
+`images`: `captured_at`, `exposure`, `gain`, `temp`, `camera`, `weather`, `roof`,
+`condition`, `clouds`, `star_count`, `seeing`, `fwhm` per frame).
+
+- **Format:** the finished output image — 750 px longest edge (`library.max_dimension`),
+  JPEG quality 85, stretched, with the weather / roof / camera text and logo burned in.
+  Not linear, not full resolution, and the text boxes are static high-contrast features.
+- **Retention is 7 days** (`library.retention_days`) and pruning runs in-app every 15 min,
+  so these nights vanish as soon as the app is next started. **Copy the per-night
+  folders and `library.db` out now** to a permanent, gitignored location
+  (`sample_images/reference_rig_2026-09/` is the convention this repo already ignores).
+- **Ground truth for the same nights:** the guided model of 2026-09-15 (§0.5) scaled by
+  `model_in_frame` to 750 px, and the reference rig's logs for Sep 17, 18 and 20 (pole
+  estimates, every rejected fit's parameters).
+
+**Good for:**
+
+- Package 2 fixtures: a real closed-roof frame at a 13 s exposure (Sep 17 23:59:46, roof
+  Closed 100 %) that the exposure floor cannot catch and the no-stars rule must; dusk
+  frames from Sep 19 (sun gate); moonlit and clear frames from Sep 17–18. Each carries
+  its `roof`, `exposure` and `star_count` in `library.db`, so tests can be built from the
+  database rows instead of hand labels.
+- Package 1: the equipment ring at 750 px over several nights, for the map's convergence
+  and healing tests on real silhouettes.
+- Packages 4 and 5, low-resolution regression: build the buffer format from a library
+  night (detections from `detect_stars` on each JPEG, `dt` from `captured_at`,
+  `exposure` from the row) and require the solver to re-find the guided model's
+  orientation: axis within 1°, mirror correct, a1 within 5 % of 1259 × (750 / 3552), the
+  projected pole within 8 px at 750 px (≈ 40 px full-res). A solver that fails this on
+  the maintainer's own rig is not fixed.
+- Package 4a, negative control: at 750 px the predicted Polaris arc over 35 min is
+  about 0.4 px, far below the static noise floor — the finder **must withhold** on these
+  frames rather than pick a light. (The full-resolution logs show it finding Polaris
+  correctly, §0.5, which is the positive control.)
+
+**Not good for:** RMS / tolerance tuning (JPEG centroids at 750 px), package 3's chance
+thresholds, or anything at the 16 px scale of the full sensor. Burned-in text must be
+masked in any replay: add `ignore_rects` to the detector filters (package 4) for the
+overlay boxes, whose positions are known from the overlay config.
+
+### 7.2 Package 0 gets a library loader
+
+Add `scripts/dev/allsky/library_to_buffer.py` to package 0: reads a library night folder
+plus `library.db`, runs `detect_stars` on each frame, and writes the same JSON the buffer
+dump produces (`dt`, `detected`, sky circle, frame size, exposure). The replay harness
+then has real data from the first day, and the same script converts any future user's
+library into a replayable night without a dev build.
+
+### 7.3 Full-resolution frames
+
+The library never holds full-resolution frames. The reference rig's file sink and the
+raw-frame diagnostics export are the sources for those; one clear night of saved
+full-resolution output on the reference rig (a few hundred frames at 3552 px) is the
+dataset packages 4 and 5 should be tuned on. Package 0's buffer dump captures the
+detections without the images and is enough for the solver; the images are needed only
+for the detector filters (package 4) and the equipment map (package 1).
