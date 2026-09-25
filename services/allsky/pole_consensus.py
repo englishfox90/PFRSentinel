@@ -159,6 +159,7 @@ def to_frame(e: PoleEstimate, ref_w: int, ref_h: int) -> Optional[PoleEstimate]:
         return None
     s = ref_w / w
     return replace(e, x=e.x * s, y=e.y * s,
+                   a1_px_per_rad=float(getattr(e, 'a1_px_per_rad', 0.0) or 0.0) * s,
                    image_width=int(ref_w), image_height=int(ref_h))
 
 

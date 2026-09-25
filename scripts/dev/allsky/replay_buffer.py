@@ -43,6 +43,7 @@ from services.allsky.multi_calibrate import (  # noqa: E402
     median_sky_r, refine_from_detections)
 from services.allsky.pole_consensus import PoleHistory  # noqa: E402
 from services.allsky.pole_finder import find_pole  # noqa: E402
+from services.allsky.static_lights import clean_pools  # noqa: E402
 
 
 def _section(title: str) -> None:
@@ -78,20 +79,26 @@ def _describe_model(model, label: str) -> None:
           f"quality={q} final_tol_px={tol}")
 
 
-def replay(frames, seed, incumbent, lat) -> int:
+def replay(frames, seed, incumbent, lat, ring=None, use_pole: bool = True) -> int:
+    _section("Pool hygiene")
+    raw_n = sum(len(f['detected']) for f in frames)
+    frames, ring, lights = clean_pools(frames, ring, None)
+    print(f"static lights stripped: {len(lights)}; detections {raw_n} -> "
+          f"{sum(len(f['detected']) for f in frames)}")
     sky_r = median_sky_r(frames)
     pole_w, pole_h = median_frame_resolution(frames)
 
     _section("Pole finder")
     history = PoleHistory()
     t0 = time.perf_counter()
-    pole = history.record(find_pole(frames, lat), sky_r)
+    pole = history.record(find_pole(frames, lat, ring=ring) if use_pole else None, sky_r)
     dt_ms = (time.perf_counter() - t0) * 1000.0
     if pole is None:
         print(f"pole: withheld / not trusted ({dt_ms:.0f} ms)")
     else:
-        print(f"pole: ({pole.x:.1f}, {pole.y:.1f}) east_left={pole.east_left} "
-              f"drift={pole.drift_px:.1f}px over {pole.span_minutes:.0f} min "
+        print(f"pole: ({pole.x:.1f}, {pole.y:.1f}) ± {pole.sigma_px:.1f}px "
+              f"source={pole.source} east_left={pole.east_left} "
+              f"a1={pole.a1_px_per_rad:.0f} over {pole.span_minutes:.0f} min "
               f"({dt_ms:.0f} ms)")
     drought = history.runs_since_trusted
 
@@ -117,7 +124,8 @@ def replay(frames, seed, incumbent, lat) -> int:
     t0 = time.perf_counter()
     try:
         model = refine_from_detections(
-            frames, seed, max_residual_px=MAX_RESIDUAL_PX, east_left_hint=hint)
+            frames, seed, max_residual_px=MAX_RESIDUAL_PX, east_left_hint=hint,
+            pole=pole, lat_deg=lat, ring=ring)
     except CalibrationError as e:
         print(f"REJECTED after {time.perf_counter() - t0:.0f} s: {e}")
         return 1
@@ -161,6 +169,9 @@ def main(argv=None) -> int:
     ap.add_argument("--cold-start", action="store_true",
                     help="ignore any model: run the seedless bootstrap the basin "
                          "escape runs (slow: ~4 min on a 60-frame buffer)")
+    ap.add_argument("--no-pole", action="store_true",
+                    help="run the joint fit without the measured pole (before/"
+                         "after comparisons)")
     args = ap.parse_args(argv)
 
     frames, model_dict, lat, lon = load_buffer(args.dump)
@@ -180,7 +191,7 @@ def main(argv=None) -> int:
             incumbent = scaled
     _describe_model(incumbent, "incumbent")
     seed = None if args.cold_start else incumbent
-    return replay(frames, seed, incumbent, lat)
+    return replay(frames, seed, incumbent, lat, use_pole=not args.no_pole)
 
 
 if __name__ == "__main__":

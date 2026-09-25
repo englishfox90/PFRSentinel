@@ -25,6 +25,7 @@ import numpy as np
 from services.logger import app_logger as log
 
 from .lens_polynomial import MONOTONIC_MAX_THETA_DEG, radial_monotonic
+from .pole_tolerance import POLE_TOL_REF_PX, pole_tolerance_px  # noqa: F401 (re-exported)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,17 @@ def median_frame_resolution(frames: List[dict]) -> Tuple[int, int]:
     if not ws or not hs:
         return 0, 0
     return int(np.median(ws)), int(np.median(hs))
+
+
+def median_sky_r(frames: List[dict]) -> float:
+    """Median trimmed sky radius across frames, or 0.0 if unknown.
+
+    Used to scale match tolerances to the frame resolution (F10). Frames built
+    by dev scripts may omit 'sky_r'; 0.0 makes tol_scale() neutral. Also used
+    by CalibrationService for the pole gate (multi_calibrate re-exports it).
+    """
+    rs = [f.get('sky_r') for f in frames if f.get('sky_r')]
+    return float(np.median(rs)) if rs else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -454,10 +466,9 @@ def validate_a1_scale(model, sky_r: Optional[float]) -> Tuple[bool, str]:
 # Pole-anchor check (see pole_finder.py and ALLSKY_POLE_ANCHOR_PLAN.md)
 # ---------------------------------------------------------------------------
 
-# Generous by design: even a good model can carry 50-70px of regional error at
-# the pole (measured on the reference rig), while wrong-basin fits miss it by
-# 400-1400px. The measurement itself is good to ~15px.
-POLE_TOL_REF_PX = 140.0
+# The tolerance lives in pole_tolerance: calibrated from the estimate's own
+# sigma_px when it has one, the flat POLE_TOL_REF_PX (re-exported above)
+# when it does not.
 
 
 def validate_pole(
@@ -467,6 +478,7 @@ def validate_pole(
     sky_r: Optional[float] = None,
     pole_image_width: Optional[int] = None,
     pole_image_height: Optional[int] = None,
+    tol_px: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """Check the model projects the celestial pole where it was measured.
 
@@ -492,7 +504,13 @@ def validate_pole(
       1. mirror: model.east_left must agree with the measured field-rotation
          direction (when the sign vote was decisive);
       2. position: the projected pole (alt=|lat|, az=0 north / 180 south)
-         must land within POLE_TOL_REF_PX (scaled) of the measured pole.
+         must land within `tol_px` of the measured pole. By default that is
+         pole_tolerance.pole_tolerance_px — 3·sigma_px plus a model-error
+         allowance proportional to the pole's radius from the optical
+         centre, floored, when the estimate carries a sigma
+         (pole_from_rotation); the flat POLE_TOL_REF_PX (scaled) when it
+         does not (Polaris path, pre-sigma history). A caller may pass its
+         own `tol_px`.
     """
     if pole is None:
         return True, "no pole estimate — check skipped"
@@ -511,7 +529,10 @@ def validate_pole(
     xy = proj_model.altaz_to_pixel(alt, az)
     if xy is None:
         return False, "model projects the celestial pole off-image"
-    tol = POLE_TOL_REF_PX * tol_scale(sky_r)
+    if tol_px is None:
+        r_p = float(np.hypot(pole.x - proj_model.cx, pole.y - proj_model.cy))
+        tol_px = pole_tolerance_px(getattr(pole, 'sigma_px', 0.0), tol_scale(sky_r), r_p)
+    tol = float(tol_px)
     d = float(np.hypot(xy[0] - pole.x, xy[1] - pole.y))
     if d <= tol:
         return True, f"pole projected {d:.0f}px from measured (tol {tol:.0f}px)"

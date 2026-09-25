@@ -290,6 +290,7 @@ def fit_rotation(
         window_start=usable[0]['dt'], window_end=usable[-1]['dt'],
         image_width=img_w, image_height=img_h,
         sigma_px=float(sigma), source='rotation',
+        a1_px_per_rad=float(best.lens.a1),
     )
     log.info(
         f"Rotation pole: ({est.x:.1f}, {est.y:.1f}) ± {sigma:.0f} px from "

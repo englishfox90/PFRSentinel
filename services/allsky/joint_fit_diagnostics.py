@@ -24,6 +24,7 @@ def collect_diagnostics(all_matches, model, frames) -> list:
                 'detected_px': (float(dx), float(dy)),
                 'catalog_px':  (float(cat_px[0]), float(cat_px[1])) if cat_px else None,
                 'residual_px': res_px,
+                'hr':         str(star.get('hr', '')),
             })
     diag.sort(key=lambda s: s['residual_px'])
     return diag
