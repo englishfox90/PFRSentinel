@@ -7,6 +7,8 @@ import sys
 import tempfile
 import shutil
 
+from services import app_config
+
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
@@ -35,6 +37,26 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "requires_windows" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _allsky_buffer_dumps_in_tmp(tmp_path_factory, monkeypatch):
+    """Keep calibration buffer dumps out of the developer's real app-data.
+
+    The calibration service writes its buffer to ``<app-data>/allsky/`` when
+    basin escapes are exhausted (services/allsky/buffer_dump.py), and several
+    test files drive it there. A dump left behind by a test run would be the
+    one the next diagnostics bundle ships. The directory is created only if
+    a test actually dumps.
+    """
+    holder = []
+
+    def _dump_dir(create=True):
+        if not holder:
+            holder.append(str(tmp_path_factory.mktemp("allsky_dumps")))
+        return holder[0]
+
+    monkeypatch.setattr(app_config, "get_allsky_buffer_dir", _dump_dir)
 
 
 @pytest.fixture

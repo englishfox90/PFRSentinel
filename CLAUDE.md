@@ -295,7 +295,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_api_control.py` | 51 | `api_control` — command validation, idempotency, `wait` semantics, OpenAPI catalog |
 | `test_web_control.py` | 33 | `web_control` — control routes, auth matrix, no-CORS regression guard |
 | `test_capture_command_bridge.py` | 11 | `CaptureCommandBridge` + headless handler — GUI-thread marshalling |
-| `test_diagnostics_bundle.py` | 9 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary |
+| `test_diagnostics_bundle.py` | 12 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary, newest calibration buffer dump under `allsky/` (absent one listed as missing) |
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
@@ -338,6 +338,8 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_star_pick_canvas.py` | 13 | `StarPickCanvas` — clicks in original image pixels at any zoom, wheel zoom about the cursor, clamped pan, drag never picks, picking can be switched off, view cached at the display pixel ratio (offscreen Qt) |
 | `test_time_context.py` | 22 | `time_context` — `is_astronomical_night` from sun elevation at absolute instants: flips at astronomical dusk/dawn, never night in the afternoon at a western site (the date-clamp bug), same flag from any host zone, high-latitude summer and polar day never raise, no-location clock fallback, per-day sun-times cache, `ui/controllers` shim re-exports |
 | `test_allsky_quality_badge.py` | 11 | `QualityBadge` amber "unconfirmed" / "check alignment" state, panel caution text, controller status line and badge level after a guided save (offscreen Qt) |
+| `test_frame_catalog.py` | 3 | `frame_catalog` — `above_horizon_stars` against the scalar per-star loop it replaced: same star objects, exact alt/az, same order and tuple shape at a mid-latitude, a southern and a polar site |
+| `test_allsky_buffer_dump.py` | 33 | `buffer_dump` + `frame_catalog` — dump/load round trip keeps aware datetimes, float detections and the recomputed catalogue list, site rounded to 0.01°, extras on the model survive, image arrays on a frame never reach the file, newest 5 kept (files only), exhaustion dumps once, basin escape dumps in a dev build only, `dump_now` on an empty buffer is None, controller status line and panel button (offscreen Qt); `library_to_buffer.py` on a synthetic two-frame library (closed roof skipped, file-name times without a db, `--ignore-rect`) |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
@@ -366,6 +368,7 @@ Standalone (not in pytest suite):
 - [`docs/METEOR_DETECTION_PLAN.md`](docs/METEOR_DETECTION_PLAN.md) — meteor detection rework for the long-exposure regime; read before touching `services/meteor/`
 - [`docs/FEATURE_HARDENING_PLAN.md`](docs/FEATURE_HARDENING_PLAN.md) — prioritized hardening backlog (web server, ASCOM roof safety file, timelapse) from the 2026-06-28 deep review; P0/P1/P2 + sizing + file:line pointers
 - [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
+- [`docs/ALLSKY_HOSTING_SITE_PLAN.md`](docs/ALLSKY_HOSTING_SITE_PLAN.md) — issue #93: persisted equipment map, observable-sky gate (roof verdict + star evidence), chance-aware quality, pole from the rotating field with Polaris hidden, pole-constrained solve; six independently mergeable packages with agent briefs
 - [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
 
 Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).

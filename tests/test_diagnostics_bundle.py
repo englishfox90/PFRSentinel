@@ -7,8 +7,8 @@ import zipfile
 import pytest
 
 from services.diagnostics_bundle import (
-    REDACTED, build_bundle, default_bundle_path, environment_info,
-    recent_log_files, redact_config,
+    BUFFER_DUMP_PLACEHOLDER, REDACTED, allsky_buffer_dump_files, build_bundle,
+    default_bundle_path, environment_info, recent_log_files, redact_config,
 )
 
 
@@ -126,3 +126,41 @@ class TestBuildBundle:
         env = environment_info("9.9.9")
         assert env["app_version"] == "9.9.9"
         assert env["python"] and env["platform"] and env["created_at"]
+
+
+class TestAllskyBufferDump:
+    """The newest calibration buffer dump rides along under ``allsky/``."""
+
+    def test_newest_dump_only(self, tmp_path):
+        old = tmp_path / "buffer_20260922_010000.json"
+        new = tmp_path / "buffer_20260923_010000.json"
+        for p in (old, new):
+            p.write_text("{}")
+        (tmp_path / "buffer_20260924_010000.json.tmp").write_text("half written")
+        assert allsky_buffer_dump_files(tmp_path) == {
+            "allsky/buffer_20260923_010000.json": str(new)}
+
+    def test_no_dump_is_recorded_as_missing(self, tmp_path):
+        assert allsky_buffer_dump_files(tmp_path / "never-created") == {
+            BUFFER_DUMP_PLACEHOLDER: None}
+        assert not (tmp_path / "never-created").exists()
+
+    def test_bundle_includes_the_dump(self, tmp_path):
+        dump_dir = tmp_path / "allsky"
+        dump_dir.mkdir()
+        dump = dump_dir / "buffer_20260923_010000.json"
+        dump.write_text('{"version": 1, "frames": []}')
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        dest = tmp_path / "bundle.zip"
+
+        build_bundle(dest, config_data=SAMPLE_CONFIG, log_dir=log_dir,
+                     summary={}, extra_files=allsky_buffer_dump_files(dump_dir))
+        with zipfile.ZipFile(dest) as zf:
+            assert zf.read("allsky/buffer_20260923_010000.json") == dump.read_bytes()
+            assert json.loads(zf.read("summary.json"))["missing"] == []
+
+        build_bundle(dest, config_data=SAMPLE_CONFIG, log_dir=log_dir,
+                     summary={}, extra_files=allsky_buffer_dump_files(tmp_path / "none"))
+        with zipfile.ZipFile(dest) as zf:
+            assert json.loads(zf.read("summary.json"))["missing"] == [BUFFER_DUMP_PLACEHOLDER]
