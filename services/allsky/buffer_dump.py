@@ -68,8 +68,10 @@ FRAME_SCALARS = ('sky_cx', 'sky_cy', 'sky_r', 'image_width', 'image_height',
 
 # Attributes `multi_calibrate` sets on a model with setattr rather than as
 # dataclass fields (see ALLSKY_HOSTING_SITE_PLAN §0.2). Carried when present
-# so a replay can re-run the chance gate at the tolerance the service used.
-MODEL_EXTRAS = ('final_tol_px', 'chance_expected')
+# so a replay can re-run the chance gate exactly as the service did.
+# `final_tol_px` and `chance_ratio` became dataclass fields with package 3
+# and travel through `asdict` like every other field.
+MODEL_EXTRAS = ('chance_expected',)
 
 
 # ---------------------------------------------------------------------------

@@ -222,6 +222,10 @@ def calibrate_from_anchors(
         (given, name, fitted.get(name) if i in used else None)
         for i, (given, name) in enumerate(zip(given_names, names))]
     model.guided_rms_limit = float(rms_limit)
+    # Persisted twin of guided_rms_limit: the tolerance this fit was judged
+    # at. chance_ratio stays 0.0 — a handful of user-named anchors is not a
+    # chance process (calibration_fit_merit exempts guided models).
+    model.final_tol_px = float(rms_limit)
     if note:
         model.guided_note = note   # session-only; surfaced in the status msg
         log.warning(f"Guided calibration rescue: {note}")

@@ -109,6 +109,22 @@ def is_guided(model) -> bool:
                 and getattr(model, 'provenance', '') == PROVENANCE_GUIDED)
 
 
+def is_user_anchored(model) -> bool:
+    """The guided solve itself — not a joint fit descended from it.
+
+    `is_guided` is a BASIN claim: admit_candidate stamps every same-basin
+    automatic refinement PROVENANCE_GUIDED and dataclasses.replace carries
+    it through the joint fit, so after one Guided Calibration every later
+    600-star fit reads guided. The chance-aware checks (calibration_fit_merit,
+    incumbent_chance, calibration_attention) exempt only the human-anchored
+    solve: a joint fit always records chance_ratio > 0 and n_images >= 3,
+    the solve over clicked anchors records neither.
+    """
+    return bool(is_guided(model)
+                and float(getattr(model, 'chance_ratio', 0.0) or 0.0) == 0.0
+                and int(getattr(model, 'n_images', 1) or 1) <= 1)
+
+
 def is_pole_corroborated(model) -> bool:
     return bool(model is not None
                 and getattr(model, 'provenance', '') == PROVENANCE_POLE)

@@ -109,6 +109,10 @@ RMS is the typical distance, in pixels, between where matched stars appear and w
 
 A guided calibration is rated **Preliminary** because it rests on one frame and a handful of stars, not because it is unreliable: its orientation is pinned by stars you named yourself. Automatic refinement then raises the rating as frames accumulate.
 
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> A fit whose star matches are no better than chance is capped at **Preliminary**, however many frames it spans. On a high-resolution camera, a wrong calibration still "matches" hundreds of stars by coincidence — any star that happens to fall within the matching distance counts — and its RMS then measures that distance rather than the sky. Every calibration now records the matching distance it was judged at and how far above chance its match count was, and a rating above Preliminary needs both to look like a real fit: an RMS well under the matching distance, and at least twice the matches chance would supply. Hover over the badge to see the reason when a rating has been capped. The guided solve itself is not judged this way — its stars are ones you identified — but the automatic refinements that later build on it are. Calibrations saved by an earlier version have neither number recorded and keep their rating until they are next refined.
+
 ### When the badge turns amber
 
 > **New in the next release** — not available in version 3.7.7 or earlier.
@@ -119,8 +123,13 @@ The badge describes how well the calibration fitted **when it was saved**. It is
 |-------------|---------------|
 | **Good — unconfirmed** (any level) | The last three or more automatic refinements were rejected, and recent frames could not confirm the saved calibration either way. |
 | **Good — check alignment** (any level) | The last three or more refinements were rejected **and** the saved calibration missed the bright stars in the last three frames. |
+| **Preliminary — check alignment** | The saved calibration matched the stars in recent frames no better than chance would, in two automatic runs in a row. See below. |
 
 Neither changes or deletes your calibration, and cloud causes both: a cloudy night hides the stars the check relies on. On a clear night, look at the overlay in the preview. If the constellation lines sit on their stars, nothing is needed and the badge returns to normal after the next successful refinement. If they don't, run [Guided Calibration](#guided-calibration). A calibration that still hits its bright stars never shows the caution, however many refinements are rejected.
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> Each time automatic refinement runs, the saved calibration is now also checked against the same frames the refinement used: how many stars it matches, compared with how many a wrong calibration would match by coincidence. If it comes out no better than chance in two runs in a row, the badge drops to **Preliminary — check alignment**, its tooltip shows the measurement (how many stars matched against how many chance would supply) together with the rating from when the calibration was saved, and the status line reads "matches at chance level" until a later run clears it. This check works on obstructed and moonlit skies where the bright-star check cannot reach a verdict, which is why it can appear without the "refinements rejected" trigger above. It is skipped, rather than counted against the calibration, when the frames hold too few stars to judge by (cloud, or glare from the Moon). The calibration file itself is not changed, and nothing else is saved or re-pointed: the badge shows the live verdict, the file keeps its own rating.
 
 > **New in the next release** — not available in version 3.7.6 or earlier.
 >
@@ -151,6 +160,10 @@ If refinements are rejected three times in a row, PFR Sentinel first checks whet
 > **New in the next release** — not available in version 3.7.6 or earlier.
 >
 > Because the current calibration has just failed that same bright-star check, a fresh result that also lines up with the bright stars replaces it outright, whatever the RMS says — a model that cannot find the bright stars does not get to veto one that can on a flattering-but-meaningless residual. (This override does not apply to a Guided Calibration; see [Guided calibration is trusted over automatic calibration](#guided-calibration-is-trusted-over-automatic-calibration).) Short of that, a fresh result still only replaces the current calibration when the pole check or a trusted calibration backs it up, or when it is clearly better — at least 15% lower RMS with at least as many matched stars. A near-identical score is not enough to swap one orientation for another.
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> Two of those rules have tightened. First, when a fresh result is backed by the pole check or a trusted calibration, it must also stand on its own numbers before it can skip the RMS comparison: an RMS well under the matching distance it was judged at, and at least twice the matches chance would supply. A measured pole can be a light on the pier rather than Polaris, and on its own that must not be enough to install a calibration whose matches are coincidences. A result that fails this is held to the normal comparison instead. Second, a current calibration that has matched the stars no better than chance in two runs in a row (see [When the badge turns amber](#when-the-badge-turns-amber)) is treated like one that missed the bright stars: a fresh result that passes both checks replaces it outright, whatever the RMS says. A Guided Calibration is still never replaced this way.
 
 > **New in the next release** — not available in version 3.7.6 or earlier.
 >
