@@ -7,7 +7,7 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from ml.calibration_store import load_calibration
-from ml.jev_label_audit import _answer_row, store_jev_audit
+from ml.jev_label_audit import ResponseCache, _answer_row, build_state, store_jev_audit
 from ml.jev_review import (
     JEV_KEY, banner_text, conflict_kinds, describe_jev, is_corroborated,
     make_jev_block, review_priority, roof_conflict, sky_conflict,
@@ -78,6 +78,42 @@ def test_report_row_reads_string_booleans_like_the_rest_of_the_tool():
     assert row["nina_roof"] is False and row["ai_roof"] is True
     assert row["human_stars"] is False
     assert _answer_row({"labels": {}}, {})["human_roof"] is None
+
+
+def test_state_reads_string_booleans_so_a_closed_roof_is_never_sent_as_open():
+    cal = {"roof_state": {"available": "True", "roof_open": "False"},
+           "weather_context": {"available": "False"},
+           "time_context": {"is_astronomical_night": "False"},
+           "moon_context": {"moon_is_up": "False"}, "stretch": {"is_dark_scene": "False"}}
+    state = build_state(cal, use_nina=True, use_weather=True)
+    assert state["observatory_safety_monitor"]["roof"] == "closed"
+    assert state["weather_service"] == "not available"
+    assert state["time"]["astronomical_night"] == "no"
+    assert state["moon"]["above_horizon"] == "no"
+    assert state["image_statistics"]["dark_scene_flag"] == "no"
+
+
+def test_cache_survives_concurrent_writers_and_a_corrupt_line(tmp_path):
+    import threading
+    path = tmp_path / "responses.jsonl"
+    cache = ResponseCache(path)
+    payload = {"answers": {"roof": {"choice": "open"}}, "usage": {"cost": 0.00001}}
+
+    def writer(n):
+        for i in range(50):
+            cache.put(f"k{n}-{i}", payload)
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    with open(path, "a", encoding="utf-8") as f:
+        f.write('{"key": "half-written", "resp')   # a crash mid-append
+    reloaded = ResponseCache(path)
+    assert len(reloaded.entries) == 400
+    assert reloaded.get("k7-49") == payload
+    assert reloaded.skipped == 1
 
 
 # ── conflicts ────────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -94,10 +95,10 @@ def build_state(cal: dict, use_nina: bool, use_weather: bool) -> dict:
         },
         "time": {
             "period": tc.get("detailed_period") or tc.get("period") or "unknown",
-            "astronomical_night": "yes" if tc.get("is_astronomical_night") else "no",
+            "astronomical_night": "yes" if to_bool(tc.get("is_astronomical_night")) else "no",
         },
         "moon": {
-            "above_horizon": "yes" if mc.get("moon_is_up") else "no",
+            "above_horizon": "yes" if to_bool(mc.get("moon_is_up")) else "no",
             "phase": (mc.get("phase_name") or "unknown").replace("_", " "),
             "illumination": _bucket(mc.get("illumination_pct"), [10, 40, 70, 95],
                                     ["new", "crescent", "half", "gibbous", "full"]),
@@ -105,7 +106,7 @@ def build_state(cal: dict, use_nina: bool, use_weather: bool) -> dict:
         "image_statistics": {
             "overall_brightness": _bucket(median, [0.04, 0.12, 0.30, 0.55],
                                           ["very dark", "dark", "mid grey", "bright", "very bright"]),
-            "dark_scene_flag": "yes" if stretch.get("is_dark_scene") else "no",
+            "dark_scene_flag": "yes" if to_bool(stretch.get("is_dark_scene")) else "no",
             "contrast": _bucket(stretch.get("dynamic_range"), [0.05, 0.15, 0.35],
                                 ["almost flat (uniform frame)", "low", "moderate", "high"]),
             "bright_highlights_above_median": _bucket(
@@ -125,7 +126,7 @@ def build_state(cal: dict, use_nina: bool, use_weather: bool) -> dict:
 
     if use_weather:
         wx = cal.get("weather_context", {})
-        if wx.get("available"):
+        if to_bool(wx.get("available")):
             state["weather_service"] = {
                 "reported_condition": wx.get("description") or wx.get("condition") or "unknown",
                 "cloud_cover": _bucket(wx.get("cloud_coverage_pct"), [11, 36, 66, 90],
@@ -141,9 +142,9 @@ def build_state(cal: dict, use_nina: bool, use_weather: bool) -> dict:
 
     if use_nina:
         rs = cal.get("roof_state", {})
-        if rs.get("available") and rs.get("roof_open") is not None:
+        if to_bool(rs.get("available")) and rs.get("roof_open") is not None:
             state["observatory_safety_monitor"] = {
-                "roof": "open" if rs.get("roof_open") else "closed",
+                "roof": "open" if to_bool(rs.get("roof_open")) else "closed",
                 "note": "reported by the observatory control software at capture time",
             }
         else:
@@ -227,25 +228,40 @@ def store_jev_audit(cal_path, block: dict):
 
 
 class ResponseCache:
-    """Append-only JSONL so a re-run, or a changed flag, never pays twice for one state."""
+    """Append-only JSONL so a re-run, or a changed flag, never pays twice for one state.
+
+    Workers write concurrently, and appends from separate handles are not atomic
+    on Windows, so one lock covers the dict and the file. A line that still
+    fails to parse is skipped and counted, never fatal: that frame is simply
+    fetched again.
+    """
 
     def __init__(self, path: Path):
         self.path = path
         self.entries = {}
+        self.skipped = 0
+        self._lock = threading.Lock()
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
-                    if line.strip():
+                    if not line.strip():
+                        continue
+                    try:
                         row = json.loads(line)
                         self.entries[row["key"]] = row["response"]
+                    except (ValueError, KeyError, TypeError):
+                        self.skipped += 1
 
     def get(self, key):
-        return self.entries.get(key)
+        with self._lock:
+            return self.entries.get(key)
 
     def put(self, key, response):
-        self.entries[key] = response
-        with open(self.path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"key": key, "response": response}) + "\n")
+        line = json.dumps({"key": key, "response": response}) + "\n"
+        with self._lock:
+            self.entries[key] = response
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(line)
 
 
 # --- scoring -------------------------------------------------------------------
@@ -270,7 +286,7 @@ def _answer_row(cal: dict, answers: dict) -> dict:
         "jev_roof": roof.get("choice") == "open" if roof.get("choice") else None,
         "jev_roof_p_open": round(roof_probs.get("open", float("nan")), 3),
         "jev_roof_conf": round(roof.get("confidence", 0.0), 3),
-        "nina_roof": _opt_bool(rs.get("roof_open")) if rs.get("available") else None,
+        "nina_roof": _opt_bool(rs.get("roof_open")) if to_bool(rs.get("available")) else None,
         "ai_roof": _opt_bool(ai.get("roof_open")),
         "human_sky": labels.get("sky_condition") or None,
         "jev_sky": sky.get("choice"),
@@ -278,7 +294,7 @@ def _answer_row(cal: dict, answers: dict) -> dict:
         "ai_sky": ai.get("sky_condition") or None,
         "human_stars": _opt_bool(labels.get("stars_visible")),
         "jev_stars_p": round(stars.get("noul", float("nan")), 3),
-        "weather_cloud_pct": wx.get("cloud_coverage_pct") if wx.get("available") else None,
+        "weather_cloud_pct": wx.get("cloud_coverage_pct") if to_bool(wx.get("available")) else None,
         "exposure": cal.get("exposure"),
         "period": cal.get("time_context", {}).get("detailed_period"),
         "label_source": labels.get("label_source") or "unknown",
@@ -447,6 +463,8 @@ def main():
     out_dir.mkdir(exist_ok=True)
     tag = args.model.split("/")[-1] + ("" if use_nina else "_nonina") + ("" if use_weather else "_nowx")
     cache = ResponseCache(out_dir / f"responses_{tag}.jsonl")
+    if cache.skipped:
+        print(f"  cache: skipped {cache.skipped} unreadable line(s); those frames are fetched again")
 
     def work(item):
         cal_path, cal = item
