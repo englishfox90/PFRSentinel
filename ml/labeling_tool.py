@@ -37,6 +37,7 @@ from ml.labeling_io import (
 from ml.calibration_store import load_calibration
 from ml.frame_prediction import load_classifiers, predict_frame, describe_prediction
 from ml.label_suggestion import to_bool
+from ml.jev_review import banner_text as jev_banner_text
 from ml.labels_widget import LabelsWidget
 from ml.context_widget import ContextPanel
 from ml.tagged_image_view import TaggedImageView
@@ -467,20 +468,19 @@ class LabelingTool(QMainWindow):
 
         ai = cal.get('ai_suggestion')
         rs = cal.get('roof_state', {})
-        if not ai or not rs.get('available') or rs.get('roof_open') is None:
-            self.mismatch_banner.setVisible(False)
-            return
+        if ai and rs.get('available') and rs.get('roof_open') is not None:
+            ai_open = bool(ai.get('roof_open'))
+            nina_open = to_bool(rs.get('roof_open'))
+            if ai_open != nina_open:
+                self.mismatch_banner.setText(
+                    f"⚠️ MISMATCH — AI: roof {'OPEN' if ai_open else 'CLOSED'}  vs  "
+                    f"NINA: roof {'OPEN' if nina_open else 'CLOSED'}  ·  worth reviewing")
+                self.mismatch_banner.setVisible(True)
+                return
 
-        ai_open = bool(ai.get('roof_open'))
-        nina_open = to_bool(rs.get('roof_open'))
-        if ai_open == nina_open:
-            self.mismatch_banner.setVisible(False)
-            return
-
-        self.mismatch_banner.setText(
-            f"⚠️ MISMATCH — AI: roof {'OPEN' if ai_open else 'CLOSED'}  vs  "
-            f"NINA: roof {'OPEN' if nina_open else 'CLOSED'}  ·  worth reviewing")
-        self.mismatch_banner.setVisible(True)
+        jev = jev_banner_text(cal)
+        self.mismatch_banner.setText(jev or "")
+        self.mismatch_banner.setVisible(bool(jev))
 
     def _do_save(self) -> bool:
         if not self.samples:

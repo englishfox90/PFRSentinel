@@ -9,14 +9,25 @@ Compares ML predictions vs NINA roof state vs manual labels.
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QLabel, QPushButton, QGroupBox, QHeaderView, QAbstractItemView,
-    QComboBox, QProgressBar, QMessageBox
+    QComboBox, QProgressBar, QMessageBox, QApplication
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QBrush
 
 from .calibration_store import load_calibration
+from .jev_review import (
+    JEV_KEY, conflict_kinds, is_corroborated, jev_block, review_priority,
+)
 from .label_suggestion import to_bool  # noqa: F401  re-exported for existing callers
 from .worker_lifetime import join_worker, stop_worker
+
+JEV_FILTERS = {
+    9: "Jev disagrees with manual label (roof)",
+    10: "Jev disagrees with manual label (sky)",
+    11: "Jev + NINA/AI all against manual label",
+    12: "Has Jev audit",
+    13: "Missing Jev audit",
+}
 
 
 class ReviewTab(QWidget):
@@ -24,7 +35,9 @@ class ReviewTab(QWidget):
     
     # Signal to navigate to a specific sample in the labeling tab
     navigate_to_sample = Signal(int)
-    
+
+    FOLDER_COLUMN = 13
+
     def __init__(self, samples: list, parent=None):
         super().__init__(parent)
         self.samples = samples
@@ -91,6 +104,7 @@ class ReviewTab(QWidget):
             "Missing AI suggestion",
             "AI disagrees with NINA",
             "AI disagrees with manual label",
+            *JEV_FILTERS.values(),
         ])
         self.filter_combo.currentIndexChanged.connect(self.apply_filter)
         stats_layout.addWidget(self.filter_combo)
@@ -115,11 +129,12 @@ class ReviewTab(QWidget):
         
         # Results table
         self.table = QTableWidget()
-        self.table.setColumnCount(12)
+        self.table.setColumnCount(15)
         self.table.setHorizontalHeaderLabels([
             "Timestamp", "ML Prediction", "Confidence", "NINA State",
             "ML vs NINA", "Manual Label", "ML vs Label",
-            "AI Pred", "AI vs NINA", "AI vs Label", "Folder", "Open"
+            "AI Pred", "AI vs NINA", "AI vs Label",
+            "Jev Roof", "Jev Sky", "Jev vs Label", "Folder", "Open"
         ])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.cellDoubleClicked.connect(self._on_row_activated)
@@ -142,25 +157,18 @@ class ReviewTab(QWidget):
         """)
         
         # Column sizing
+        # Never ResizeToContents here: while the table is on screen Qt re-measures
+        # the whole column on every setItem, which turned a 2,000-row fill into
+        # minutes of frozen GUI. Columns are sized once, after the fill.
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Timestamp
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # ML Prediction
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Confidence
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # NINA
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # ML vs NINA
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Manual
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # ML vs Label
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # AI Pred
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # AI vs NINA
-        header.setSectionResizeMode(9, QHeaderView.ResizeToContents)  # AI vs Label
-        header.setSectionResizeMode(10, QHeaderView.Stretch)          # Folder
-        header.setSectionResizeMode(11, QHeaderView.ResizeToContents)  # Go
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setSectionResizeMode(self.FOLDER_COLUMN, QHeaderView.Stretch)
         
         layout.addWidget(self.table)
         
         # Legend
         legend = QLabel(
-            "🟢 OPEN  🔴 CLOSED  ✅ Match  ❌ Mismatch  "
+            "🟢 OPEN  🔴 CLOSED  ✅ Match  ❌ Mismatch  ‼️ Mismatch, NINA/AI side with Jev  "
             "⚠️ No NINA data  📝 Labeled  ⬜ Unlabeled   ·   double-click a row to open it"
         )
         legend.setStyleSheet("color: #888; padding: 5px;")
@@ -192,6 +200,9 @@ class ReviewTab(QWidget):
                 'nina_state': roof,
                 'labels': labels,
                 'ai': ai,
+                # Only what jev_review reads, so a row never pins the whole JSON.
+                'jev_view': {'labels': labels, 'roof_state': roof,
+                             'ai_suggestion': ai, JEV_KEY: jev_block(cal)},
                 'lum': sample.get('lum'),
                 'cal_path': sample['calibration'],
             })
@@ -243,10 +254,30 @@ class ReviewTab(QWidget):
                 if ai and has_label:
                     if bool(ai.get('roof_open')) != to_bool(labels.get('roof_open')):
                         self.filtered_data.append(item)
+            elif filter_idx in JEV_FILTERS:
+                if self._jev_filter_matches(filter_idx, item['jev_view']):
+                    self.filtered_data.append(item)
+
+        if filter_idx in JEV_FILTERS:
+            # Corroborated conflicts first, then Jev's most confident disagreements.
+            self.filtered_data.sort(key=lambda d: -review_priority(d['jev_view']))
 
         self.update_table()
         self.update_stats()
     
+    @staticmethod
+    def _jev_filter_matches(filter_idx: int, view: dict) -> bool:
+        kinds = conflict_kinds(view)
+        if filter_idx == 9:
+            return "roof" in kinds
+        if filter_idx == 10:
+            return "sky" in kinds
+        if filter_idx == 11:
+            return is_corroborated(view)
+        if filter_idx == 12:
+            return jev_block(view) is not None
+        return jev_block(view) is None
+
     def update_stats(self):
         """Update statistics labels."""
         total = len(self.all_data)
@@ -290,11 +321,14 @@ class ReviewTab(QWidget):
     
     def update_table(self):
         """Update table with filtered data."""
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         self.table.setUpdatesEnabled(False)
         try:
             self._fill_table()
+            self.table.resizeColumnsToContents()
         finally:
             self.table.setUpdatesEnabled(True)
+            QApplication.restoreOverrideCursor()
 
     def _fill_table(self):
         self.table.setRowCount(len(self.filtered_data))
@@ -392,16 +426,46 @@ class ReviewTab(QWidget):
                 ai and labels.get('labeled_at'),
                 ai and bool(ai.get('roof_open')) == to_bool(labels.get('roof_open'))))
 
+            for col, cell in enumerate(self._jev_cells(item['jev_view']), start=10):
+                self.table.setItem(row, col, cell)
+
             # Folder
             folder_item = QTableWidgetItem(item['folder'])
-            self.table.setItem(row, 10, folder_item)
+            self.table.setItem(row, self.FOLDER_COLUMN, folder_item)
 
             # A cell widget per row made this table the slowest thing in the tool;
             # rows open on double-click instead.
             open_item = QTableWidgetItem("→")
             open_item.setToolTip("Double-click the row to open it in the Labeling tab")
             open_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 11, open_item)
+            self.table.setItem(row, 14, open_item)
+
+    def _jev_cells(self, view: dict) -> list:
+        """Jev Roof / Jev Sky / Jev vs Label cells for one row."""
+        jev = jev_block(view)
+        if not jev:
+            cells = [QTableWidgetItem("--") for _ in range(3)]
+            for c in cells:
+                c.setForeground(QBrush(QColor("#888")))
+            return cells
+        if "roof_open" in jev:
+            roof = QTableWidgetItem(f"{'🟢 OPEN' if jev['roof_open'] else '🔴 CLOSED'} "
+                                    f"{jev.get('roof_confidence', 0):.0%}")
+            roof.setForeground(QBrush(QColor("#10b981" if jev['roof_open'] else "#ef4444")))
+        else:
+            roof = QTableWidgetItem("--")
+        sky = QTableWidgetItem(f"{jev['sky_condition']} {jev.get('sky_confidence', 0):.0%}"
+                               if jev.get('sky_condition') else "--")
+        kinds = conflict_kinds(view)
+        if not (view.get('labels') or {}).get('labeled_at'):
+            verdict = QTableWidgetItem("--")
+        elif not kinds:
+            verdict = self._match_cell(True, True)
+        else:
+            corroborated = is_corroborated(view)
+            verdict = QTableWidgetItem(("‼️ " if corroborated else "❌ ") + "+".join(kinds))
+            verdict.setForeground(QBrush(QColor("#f472b6" if corroborated else "#ef4444")))
+        return [roof, sky, verdict]
     
     def _match_cell(self, applicable, is_match) -> QTableWidgetItem:
         """Build a ✅/❌ cell, or '--' when the comparison doesn't apply."""

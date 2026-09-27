@@ -374,6 +374,35 @@ The Review tab also adds AI columns (AI Pred / AI vs NINA / AI vs Label) and AI
 filters ("AI disagrees with NINA", "AI disagrees with manual label", …) so you can
 surface exactly the frames worth a second look.
 
+### Jev label audit (optional, second opinion on existing labels)
+
+TypeSafe's Jev is a text-only decision model: it never sees the frame, only the
+numbers already in the calibration JSON (image statistics, exposure, moon, weather,
+NINA roof state), and answers typed questions with calibrated probabilities. That
+makes it useless as a label source and useful as an auditor — a confident
+disagreement means either the label or the metadata is wrong.
+
+```bash
+$env:OPENROUTER_API_KEY = "sk-or-..."
+python ml/jev_label_audit.py --dry-run       # print example states, no API calls
+python ml/jev_label_audit.py --sample 200    # random subset first
+python ml/jev_label_audit.py                 # every human-labelled frame, ~$0.10
+python ml/jev_label_audit.py --no-nina       # image statistics only
+```
+
+Each verdict is stored under `jev_audit` in the frame's JSON (labels are never
+touched; `--no-store` keeps the files untouched entirely), a report and a
+`conflicts.csv` land in `<data dir>/_jev_audit/`, and responses are cached so a
+re-run is free. In the labeling tool:
+
+- **Labeling tab** — a "🎯 Jev Audit" panel shows the verdict beside the AI
+  pre-label, and the banner flags a frame whose label Jev disputes. Jev never
+  pre-fills the form.
+- **Review Predictions tab** — Jev Roof / Jev Sky / Jev vs Label columns and the
+  filters "Jev disagrees with manual label (roof / sky)", "Jev + NINA/AI all
+  against manual label" (the likeliest label errors, listed first), "Has / Missing
+  Jev audit". Double-click a row to open and fix it.
+
 ### Data Collection
 
 Use the calibration collector (in PFR Sentinel dev mode) to capture samples:

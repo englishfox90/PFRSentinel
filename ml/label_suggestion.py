@@ -19,6 +19,7 @@ def to_bool(value) -> bool:
 
 
 CLOUDY = ("Partly Cloudy", "Overcast")
+SKY_LEVELS = ("Clear",) + CLOUDY   # the sky_condition enum, least to most cloud
 
 
 def roof_votes(cal: dict, roof_pred=None) -> dict:

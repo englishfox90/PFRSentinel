@@ -10,11 +10,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
+from .jev_review import describe_jev
 from .label_suggestion import to_bool
 
 
 class ContextPanel(QWidget):
-    """Read-only column: context, ML predictions, AI pre-label, classified mode."""
+    """Read-only column: context, ML predictions, AI pre-label, Jev audit, classified mode."""
 
     ai_requested = Signal()      # user clicked "AI Suggest" for the current frame
     ai_all_requested = Signal()  # user asked to pre-label every unlabeled frame
@@ -63,6 +64,15 @@ class ContextPanel(QWidget):
         ai_layout.addWidget(self.ai_all_button)
         layout.addWidget(ai_group, 3)
 
+        jev_group = QGroupBox("🎯 Jev Audit (metadata only, never sees the image)")
+        jev_group.setStyleSheet("QGroupBox { font-weight: bold; color: #f472b6; }")
+        jev_layout = QVBoxLayout(jev_group)
+        self.jev_text = QTextEdit()
+        self.jev_text.setReadOnly(True)
+        self.jev_text.setStyleSheet("background: #2a1020; font-family: monospace; border: 2px solid #f472b6;")
+        jev_layout.addWidget(self.jev_text)
+        layout.addWidget(jev_group, 2)
+
         mode_group = QGroupBox("Classified Mode")
         mode_layout = QVBoxLayout(mode_group)
         self.mode_label = QLabel("")
@@ -89,6 +99,7 @@ class ContextPanel(QWidget):
         """Refresh context, AI pre-label, and mode from calibration data."""
         self.context_text.setText("\n".join(self._context_lines(cal)))
         self.ai_text.setText(self._ai_text(cal))
+        self.jev_text.setText(describe_jev(cal))
         self.mode_label.setText(self._classify_mode(cal))
 
     # ── builders ──────────────────────────────────────────────────────────────
