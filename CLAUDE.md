@@ -298,6 +298,8 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_diagnostics_bundle.py` | 12 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary, newest calibration buffer dump under `allsky/` (absent one listed as missing) |
 | `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
+| `test_coordinate_hemisphere.py` | 24 | `coordinate_hemisphere` + `config_migrate` — unsigned DMS is read north/east and the typed text kept under `weather.hemisphere_unconfirmed`, clock-based longitude default, applying an answer signs the decimal and clears the mark, the startup prompt saves on Confirm and keeps the question on Ask me later, the diagnostics bundle redacts the typed text |
+| `test_hemisphere_dialog.py` | 4 | `HemisphereDialog` — one radio pair per pending field, defaults preselected, typed text shown (offscreen Qt) |
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
 | `test_dev_build_notes.py` | 12 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list |
 | `test_dev_build_changelog.py` | 7 | `scripts/ci/dev_build_changelog.py` — PRs since the last release via commits, grouping, delta since the previous dev build, API failure never blocks |

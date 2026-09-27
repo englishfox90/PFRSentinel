@@ -40,8 +40,12 @@ class Config:
                     app_logger.warning(f"Could not migrate old config: {e}")
         
         self.config_path = config_path
+        self._coordinates_rewritten = False
         self.data = self.load()
-        
+        if self._coordinates_rewritten:
+            self._coordinates_rewritten = False
+            self.save()
+
         # Migrate any paths that still reference old ASIOverlayWatchDog
         self._migrate_old_paths()
         
@@ -221,6 +225,22 @@ class Config:
                         # artefacts ("Camera 0", "... (Index: 2)").
                         from .camera_profiles import prune_bogus_profiles
                         loaded = prune_bogus_profiles(loaded)
+
+                        # Coordinates typed as DMS into old versions (or by
+                        # hand) become canonical signed decimals, so every
+                        # reader sees one form. The rewrite is persisted by
+                        # __init__ so it happens once, not on every load.
+                        from .config_migrate import normalise_weather_coordinates
+                        notices = normalise_weather_coordinates(loaded)
+                        if notices:
+                            self._coordinates_rewritten = any(
+                                level == 'info' for level, _ in notices)
+                            try:
+                                from .logger import app_logger
+                                for level, message in notices:
+                                    getattr(app_logger, level)(message)
+                            except Exception:
+                                pass
 
                         # Merge with defaults to ensure new keys exist
                         config = copy.deepcopy(DEFAULT_CONFIG)

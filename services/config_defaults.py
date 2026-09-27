@@ -249,6 +249,9 @@ DEFAULT_CONFIG = {
         "units": "metric",  # "metric", "imperial", or "standard"
         "cache_duration": 600,  # Cache weather data for 10 minutes
         "elevation": "",       # Observer elevation in metres (for refraction)
+        # {field: text as typed} for DMS coordinates saved without a hemisphere;
+        # the GUI asks once, then clears it (services/coordinate_hemisphere.py).
+        "hemisphere_unconfirmed": {},
     },
     
     # Discord alerts

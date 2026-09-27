@@ -136,6 +136,10 @@ class MainWindow(
 
         self.load_config()
 
+        # A coordinate saved without a hemisphere letter gets one question,
+        # after the window is up and the panels show the migrated value.
+        QTimer.singleShot(1500, self._confirm_coordinate_hemispheres)
+
         # Bring the web server up now if it's enabled — it publishes the latest
         # image/status and shouldn't wait for the first capture to start. Deferred
         # to the event loop so the app bar (status indicator) exists, and the bind

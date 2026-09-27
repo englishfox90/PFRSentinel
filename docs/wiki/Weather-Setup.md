@@ -53,6 +53,10 @@ Latitude and longitude accept decimal degrees or degrees-minutes-seconds. All of
 
 Use a leading minus or an S or W letter for southern latitudes and western longitudes. When you leave the field, the value is rewritten as decimal degrees. If it can't be understood, the field gets a red border, the status line shows "Invalid coordinate — use decimal degrees", and the saved coordinate is cleared.
 
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> Coordinates saved by an older version in degrees-minutes-seconds are converted to decimal degrees when the app starts, so weather, the timelapse sun window and the capture schedule read them too (they used to fall back silently). A value with no hemisphere letter and no minus can't be placed on its own, so shortly after the window opens the app asks once which side you meant, showing the value as you typed it. North and, for a PC whose clock runs behind UTC, West are pre-selected; **Confirm** writes the signed value, **Ask me later** asks again next start, and editing the field in Settings yourself also settles it. In headless mode there is no prompt, only a warning in the log. A value that can't be understood at all is left as it was.
+
 **Elevation** is used by the [All-Sky Overlay](All-Sky-Overlay) for atmospheric refraction. Weather doesn't need it.
 
 ### Option 2: City Name

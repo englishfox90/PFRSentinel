@@ -133,3 +133,121 @@ class TestMigrationAtLoadTime:
         assert profile["exposure_ms"] == 250.0
         assert profile["gain"] == 180
         assert profile["bayer_pattern"] == "BGGR"
+
+
+# ---------------------------------------------------------------------------
+# Weather coordinate normalisation
+# ---------------------------------------------------------------------------
+
+from services.config_migrate import normalise_weather_coordinates  # noqa: E402
+
+
+def _weather(**fields):
+    return {"weather": {"api_key": "", **fields}}
+
+
+class TestNormaliseWeatherCoordinates:
+    def test_dms_with_hemisphere_becomes_signed_decimal(self):
+        data = _weather(latitude="31 19 49 N", longitude="100 27 25 W")
+        notices = normalise_weather_coordinates(data)
+        assert data["weather"]["latitude"] == "31.3302778"
+        assert data["weather"]["longitude"] == "-100.4569444"
+        assert [level for level, _ in notices] == ["info", "info"]
+
+    def test_leading_minus_carries_the_sign(self):
+        data = _weather(longitude="-100 27 25")
+        normalise_weather_coordinates(data)
+        assert data["weather"]["longitude"].startswith("-100.45")
+
+    def test_canonical_decimal_is_untouched_and_silent(self):
+        data = _weather(latitude="31.3303162", longitude="-100.4570705")
+        before = json.dumps(data, sort_keys=True)
+        assert normalise_weather_coordinates(data) == []
+        assert json.dumps(data, sort_keys=True) == before
+
+    def test_unsigned_dms_reads_east_and_north_with_a_warning(self):
+        data = _weather(latitude="31 19 49", longitude="100 27 25")
+        notices = normalise_weather_coordinates(data)
+        assert data["weather"]["longitude"] == "100.4569444"
+        assert data["weather"]["latitude"] == "31.3302778"
+        warnings = [m for level, m in notices if level == "warning"]
+        assert len(warnings) == 2
+        assert "EAST" in warnings[1] and "trailing W" in warnings[1]
+        assert "NORTH" in warnings[0] and "trailing S" in warnings[0]
+
+    def test_unsigned_decimal_gets_no_hemisphere_warning(self):
+        # A bare positive decimal is a deliberate east/north value, not a
+        # sign the parser had to guess.
+        data = _weather(longitude="100.457")
+        notices = normalise_weather_coordinates(data)
+        assert all(level == "info" for level, _ in notices)
+
+    def test_notices_never_carry_the_coordinate(self):
+        data = _weather(latitude="31 19 49", longitude="100 27 25 W")
+        for _, message in normalise_weather_coordinates(data):
+            assert "31" not in message and "100" not in message
+
+    def test_blank_and_missing_are_noops(self):
+        assert normalise_weather_coordinates(_weather(latitude="", longitude="  ")) == []
+        assert normalise_weather_coordinates({}) == []
+        assert normalise_weather_coordinates({"weather": "not a dict"}) == []
+        assert normalise_weather_coordinates(_weather()) == []
+
+    def test_garbage_is_left_alone_with_a_warning(self):
+        data = _weather(latitude="somewhere", longitude="-100.46")
+        notices = normalise_weather_coordinates(data)
+        assert data["weather"]["latitude"] == "somewhere"
+        assert data["weather"]["longitude"] == "-100.46"
+        assert notices == [("warning", notices[0][1])]
+        assert "left unchanged" in notices[0][1]
+
+    def test_out_of_range_is_left_alone(self):
+        data = _weather(latitude="100 0 0")
+        normalise_weather_coordinates(data)
+        assert data["weather"]["latitude"] == "100 0 0"
+
+    def test_numeric_json_value_becomes_canonical_string(self):
+        data = _weather(latitude=31.5, longitude=-100.25)
+        normalise_weather_coordinates(data)
+        assert data["weather"] == {"api_key": "", "latitude": "31.5", "longitude": "-100.25"}
+
+    def test_is_idempotent(self):
+        data = _weather(latitude="31 19 49 N", longitude="100 27 25 W")
+        normalise_weather_coordinates(data)
+        once = json.dumps(data, sort_keys=True)
+        assert normalise_weather_coordinates(data) == []
+        assert json.dumps(data, sort_keys=True) == once
+
+
+class TestCoordinateNormalisationAtLoadTime:
+    def test_dms_config_is_canonical_in_memory_and_on_disk(self, tmp_path):
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "weather": {"latitude": "31 19 49 N", "longitude": "100 27 25 W", "api_key": "k"},
+        }))
+
+        cfg = Config(str(cfg_path))
+
+        assert cfg.get("weather")["longitude"] == "-100.4569444"
+        assert cfg.get("weather")["latitude"] == "31.3302778"
+        on_disk = json.loads(cfg_path.read_text())["weather"]
+        assert on_disk["longitude"] == "-100.4569444"
+        assert on_disk["api_key"] == "k"
+
+    def test_canonical_config_is_not_rewritten_on_load(self, tmp_path):
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({"weather": {"latitude": "31.33", "longitude": "-100.46"}}))
+        stamp = cfg_path.stat().st_mtime_ns
+
+        Config(str(cfg_path))
+
+        assert cfg_path.stat().st_mtime_ns == stamp
+
+    def test_unparseable_coordinate_survives_load_unchanged(self, tmp_path):
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({"weather": {"latitude": "somewhere", "longitude": "-100.46"}}))
+
+        cfg = Config(str(cfg_path))
+
+        assert cfg.get("weather")["latitude"] == "somewhere"
+        assert json.loads(cfg_path.read_text())["weather"]["latitude"] == "somewhere"

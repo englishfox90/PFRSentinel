@@ -9,6 +9,56 @@ from services.logger import app_logger
 class _MainWindowLifecycleMixin:
 
     # =========================================================================
+    # COORDINATE HEMISPHERE PROMPT
+    # =========================================================================
+
+    def _confirm_coordinate_hemispheres(self):
+        """Ask once which hemisphere a DMS coordinate saved without one meant.
+
+        The config migration has already made the value usable (read as
+        north / east) and recorded the text that was typed; this settles the
+        sign. "Ask me later" leaves the record, so the question returns next
+        start. Never runs headless — there the log warning is all there is.
+        Reschedules itself while the window is hidden (tray start).
+        """
+        from services.coordinate_hemisphere import (
+            apply_hemisphere, default_hemisphere, pending_confirmations)
+
+        weather = self.config.get('weather', {}) or {}
+        pending = pending_confirmations(weather)
+        if not pending:
+            return
+        # A tray/logon start never shows the window. MessageBoxBase is a child
+        # of it, so exec() there would park the GUI thread in a nested loop
+        # behind an invisible dialog for the whole session. Wait for the
+        # window instead; the record persists, so nothing is lost.
+        if not self.isVisible():
+            QTimer.singleShot(60_000, self._confirm_coordinate_hemispheres)
+            return
+        defaults = {field: default_hemisphere(field) for field in pending}
+        try:
+            from ..dialogs.hemisphere_dialog import show_hemisphere_dialog
+            choices = show_hemisphere_dialog(self, pending, defaults)
+        except Exception as e:
+            app_logger.warning(f"Hemisphere prompt failed: {e}")
+            return
+        if not choices:
+            app_logger.info("Hemisphere prompt deferred - will ask again next start")
+            return
+        for field, letter in choices.items():
+            apply_hemisphere(weather, field, letter)
+        self.config.set('weather', weather)
+        self.config.save()
+        # Never the coordinate itself in the log (issue #65).
+        app_logger.info(
+            "Hemisphere confirmed for " + ", ".join(f"{f} ({l})" for f, l in choices.items()))
+        try:
+            self.settings_panel.load_from_config(self.config)
+            self._on_settings_changed()
+        except Exception as e:
+            app_logger.debug(f"Settings refresh after hemisphere prompt skipped: {e}")
+
+    # =========================================================================
     # UPDATE CHECKER
     # =========================================================================
 
