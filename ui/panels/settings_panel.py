@@ -420,6 +420,11 @@ class SettingsPanel(QScrollArea):
         from services.coordinates import parse_coordinate, to_decimal_string
         text = field.text().strip()
         weather = self.main_window.config.get('weather', {})
+        # An actual edit answers the startup "which hemisphere?" question;
+        # tabbing through the field with the migrated value untouched does not.
+        if text != str(weather.get(key, '') or ''):
+            from services.coordinate_hemisphere import dismiss_confirmation
+            dismiss_confirmation(weather, key)
         if not text:
             weather[key] = ''
             self._set_coord_error(field, False)
