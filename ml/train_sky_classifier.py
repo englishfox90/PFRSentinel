@@ -388,7 +388,7 @@ def train_model(
     scaler = GradScaler('cuda')
     use_amp = device.type == 'cuda'
     if use_amp:
-        print("✓ Mixed precision (FP16) enabled")
+        print("Mixed precision (FP16) enabled")
     
     # Training loop
     best_val_loss = float('inf')
@@ -521,7 +521,7 @@ def train_model(
         'use_pool': use_pool,
     }, model_path)
     
-    print(f"\n✓ Model saved to: {model_path}")
+    print(f"\nModel saved to: {model_path}")
     
     # Final evaluation on the HELD-OUT test set (never seen during selection).
     print("\n" + "=" * 60)
