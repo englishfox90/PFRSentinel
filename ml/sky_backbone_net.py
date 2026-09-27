@@ -87,4 +87,8 @@ class BackboneSkyNet(nn.Module):
         f = F.relu(self.fc_image(self.dropout(f)))
         m = F.relu(self.fc_meta(metadata))
         z = self.dropout(F.relu(self.fc_fusion(torch.cat([f, m], dim=1))))
-        return self.head_sky(z), self.head_stars(z), self.head_density(z), self.head_moon(z)
+        # Density is a 0-1 value, sigmoid'd in the graph like SkyClassifierCNN:
+        # ml.sky_classifier and services.ml_service read it as-is, unclamped.
+        # The stars and moon heads stay logits — those callers apply the sigmoid.
+        density = torch.sigmoid(self.head_density(z))
+        return self.head_sky(z), self.head_stars(z), density, self.head_moon(z)

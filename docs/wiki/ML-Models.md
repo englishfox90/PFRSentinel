@@ -39,11 +39,11 @@ Assesses the sky. It only runs when the roof classifier reports Open, because wi
 |----------|-------|
 | Input | Frame reduced to 384x384 greyscale, plus 6 context values |
 | Output | Sky condition, whether stars are visible, star density, whether the moon is visible |
-| Accuracy (sky condition) | 93.5% overall on a held-out test set of 340 frames: Clear 96.1% (271 of 282), Partly Cloudy 39 of 47, Overcast 8 of 11; 82.8% on the 93 test frames added after the June model (September 27, 2026 model) |
+| Accuracy (sky condition) | 93.2% overall on a held-out test set of 340 frames: Clear 95.4% (269 of 282), Partly Cloudy 39 of 47, Overcast 9 of 11; 86.0% on the 93 test frames added after the June model (September 27, 2026 model) |
 
 > **New in the next release** — not available in version 3.7.7 or earlier.
 >
-> The sky classifier is now built on an image-recognition network pre-trained on general photographs and fine-tuned on pier camera frames, instead of a network trained from nothing. On frames neither model had seen, it is right 83% of the time against 70% for the June model, and Partly Cloudy went from 54% to 75%. The same network trained from nothing scores exactly like the June model, so the gain comes from the pre-training. It costs about 4 ms more per frame on a CPU.
+> The sky classifier is now built on an image-recognition network pre-trained on general photographs and fine-tuned on pier camera frames, instead of a network trained from nothing. On frames neither model had seen, it is right 86% of the time against 70% for the June model, and Partly Cloudy went from 54% to 71%. The same network trained from nothing scores exactly like the June model, so the gain comes from the pre-training. It costs about 4 ms more per frame on a CPU.
 
 | Output | Values |
 |--------|--------|
