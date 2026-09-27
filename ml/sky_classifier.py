@@ -208,12 +208,19 @@ class SkyClassifier:
             self.image_size = checkpoint.get('image_size', 256)
             metadata_features = checkpoint.get('metadata_features', 6)
 
-            # Create and load model
-            self.model = SkyClassifierCNN(
-                image_size=self.image_size,
-                metadata_features=metadata_features,
-                use_pool=checkpoint.get('use_pool', False),
-            )
+            # Create and load model. A checkpoint from train_sky_backbone.py names
+            # its torchvision trunk under 'arch'; the from-scratch CNN has none.
+            arch = checkpoint.get('arch')
+            if arch:
+                from ml.sky_backbone_net import BackboneSkyNet
+                self.model = BackboneSkyNet(arch, metadata_features=metadata_features,
+                                            pretrained=False)
+            else:
+                self.model = SkyClassifierCNN(
+                    image_size=self.image_size,
+                    metadata_features=metadata_features,
+                    use_pool=checkpoint.get('use_pool', False),
+                )
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.model.to(self.device)
             self.model.eval()
