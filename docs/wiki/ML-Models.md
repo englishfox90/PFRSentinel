@@ -16,7 +16,7 @@ Decides whether the roof is open or closed from the pier camera image.
 |----------|-------|
 | Input | Frame reduced to 128x128 greyscale, plus 4 context values |
 | Output | Open or Closed, with a confidence percentage |
-| Accuracy | 99.8% validation accuracy (June 27, 2026 model) |
+| Accuracy | 99.8% on a held-out test set of 1,120 frames, and 327 of 327 on frames added after the June model (September 27, 2026 model) |
 
 Alongside the image, the model uses:
 
@@ -29,7 +29,7 @@ Alongside the image, the model uses:
 
 > **New in the next release** — not available in version 3.7.7 or earlier.
 >
-> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The models shipped so far were trained before the flag was corrected, so the full benefit arrives with the next retrained models; until then the corrected flag is closer to what they learned than the clock was.
+> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The September 27, 2026 models were trained with the corrected flag; the models shipped before that were trained on the clock-based one, for which the corrected flag is still closer to what they learned than the clock was.
 
 ### Sky Classifier
 
@@ -39,7 +39,11 @@ Assesses the sky. It only runs when the roof classifier reports Open, because wi
 |----------|-------|
 | Input | Frame reduced to 384x384 greyscale, plus 6 context values |
 | Output | Sky condition, whether stars are visible, star density, whether the moon is visible |
-| Accuracy (sky condition) | 90.4% overall on the held-out test set: Clear 92.7% (204 of 220), Partly Cloudy 15 of 23, Overcast 6 of 6 (June 27, 2026 model) |
+| Accuracy (sky condition) | 93.2% overall on a held-out test set of 340 frames: Clear 95.4% (269 of 282), Partly Cloudy 39 of 47, Overcast 9 of 11; 86.0% on the 93 test frames added after the June model (September 27, 2026 model) |
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> The sky classifier is now built on an image-recognition network pre-trained on general photographs and fine-tuned on pier camera frames, instead of a network trained from nothing. On frames neither model had seen, it is right 86% of the time against 70% for the June model, and Partly Cloudy went from 54% to 71%. The same network trained from nothing scores exactly like the June model, so the gain comes from the pre-training. It costs about 4 ms more per frame on a CPU.
 
 | Output | Values |
 |--------|--------|
@@ -66,7 +70,7 @@ Non-square frames are centre-cropped to a square before they are reduced, so the
 - **Trained on one observatory.** Both models were trained on frames from a single pier camera (a ZWO ASI676MC with square frames). Other cameras, lenses, fields of view and enclosures may give noticeably different results. Watch the predictions for a few nights before relying on them.
 - **Overexposure hurts roof detection.** In testing, the roof classifier's remaining errors were overexposed frames, typically bright daytime frames with the roof open. Bright moonlight on its own was not a significant cause of errors.
 - **Moonlit clear nights can read as Partly Cloudy.** Moon glow and twilight wash out the sky in a way that looks like thin cloud. Much of the training data carries the same ambiguity, so treat Partly Cloudy on a bright-moon night with caution.
-- **Partly Cloudy is the weakest class.** It was right on 15 of 23 test frames (about 65%), limited by how few partly cloudy frames exist in the training data. Overcast has only a handful of test frames, so its score is not a reliable estimate.
+- **Partly Cloudy is the weakest class.** The September 27, 2026 model was right on 39 of 47 test frames (83%), up from about 65% for the June model, but thin cloud against a clear sky is a judgement call even for a person, and the labels carry that ambiguity. Overcast has only a handful of test frames, so its score is not a reliable estimate.
 - **Time features use the PC clock.** Make sure the observatory PC's time and time zone are correct.
 - **The models see the raw frame.** Predictions are made before stretching, brightness and overlays, so image processing settings don't affect them. Very underexposed or overexposed raw frames do.
 
@@ -181,7 +185,7 @@ Development builds can additionally save per-frame calibration data (FITS and JS
 
 ## Training Data
 
-As of the June 27, 2026 models, the roof classifier was trained on about 4,000 labelled pier camera frames. The sky classifier was trained on the roof-open subset of those frames, which is dominated by clear nights. Labels were reviewed to remove moon-glow and closed-roof mislabels before retraining.
+As of the September 27, 2026 models, the roof classifier was trained on 5,598 labelled pier camera frames, 1,000 of them new since June, with 1,632 sky labels rechecked by hand before the retrain. The sky classifier was trained on the 2,262 roof-open frames among them, which are dominated by clear nights. The June 2026 models used about 4,000 frames, reviewed to remove moon-glow and closed-roof mislabels.
 
 Ground truth came from:
 

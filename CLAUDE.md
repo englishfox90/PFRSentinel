@@ -109,7 +109,7 @@ New functionality gets a new file when it has a distinct responsibility — don'
 ### ML module
 Phase 1–3 complete; Phase 4 future:
 - **Phase 1**: Roof open/closed (CNN, 100% on test set)
-- **Phase 2**: Sky conditions (85.3%), stars (91.2%), moon (100%)
+- **Phase 2**: Sky conditions (93.2%), stars (93.5%), moon (94.1%) — ImageNet-pretrained ResNet18 trunk since 2026-09-27 (`ml/sky_backbone_net.py`, trained by `ml/train_sky_backbone.py`); the from-scratch CNN in `ml/train_sky_classifier.py` is kept for comparison and scores ~82% on the same split
 - **Phase 3**: Dev-mode integration that saves calibration JSON + FITS per frame
 - **Phase 4** (future): Stretch recipe prediction
 - All inference is local via ONNX. Production interface: `services/ml_service.py` (`MLService.analyze_image`, `get_ml_service()` singleton), on whenever `ml_models.enabled` is set, in every build. `ui/controllers/ml_prediction.py` is a separate dev-only loader for the calibration JSON export, gated by `is_dev_mode_available()` along with `dev_mode_utils.py` and the Dev Mode card.

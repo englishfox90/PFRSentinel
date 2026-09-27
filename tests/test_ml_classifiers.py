@@ -98,6 +98,47 @@ class TestSkyClassifierONNX:
         assert isinstance(result.stars_visible, (bool, np.bool_))
         assert isinstance(result.moon_visible, (bool, np.bool_))
 
+    def test_star_density_is_bounded_in_the_graph(self):
+        """star_density is read unclamped by ml_service and bucketed at 0.3 / 0.6.
+
+        The from-scratch CNN sigmoids that head inside the model; the pretrained
+        backbone shipped in PR #103 first exported it raw (review finding). The
+        ONNX graph itself must end that output in a Sigmoid, and extreme inputs
+        must not push it outside 0..1.
+        """
+        _require(SKY_ONNX)
+        import onnxruntime as ort
+        from ml.sky_classifier import SkyClassifier
+
+        session = ort.InferenceSession(str(SKY_ONNX), providers=["CPUExecutionProvider"])
+        density_output = session.get_outputs()[2]
+        assert density_output.name == "star_density"
+        try:
+            import onnx
+        except ImportError:
+            onnx = None
+        if onnx is not None:
+            graph = onnx.load(str(SKY_ONNX)).graph
+            producer = next(n for n in graph.node if "star_density" in n.output)
+            assert producer.op_type == "Sigmoid", producer.op_type
+
+        clf = SkyClassifier.load(str(SKY_ONNX))
+        size = clf.image_size
+        rng = np.random.default_rng(0)
+        extremes = [
+            np.zeros((size, size), dtype=np.float32),
+            np.full((size, size), 65535.0, dtype=np.float32),
+            rng.uniform(0, 65535, (size, size)).astype(np.float32),
+        ]
+        for image in extremes:
+            for median in (0.0, 65535.0):
+                result = clf.predict(image, metadata={
+                    "corner_to_center_ratio": 8.0, "median_lum": median,
+                    "is_astronomical_night": True, "hour": 23,
+                    "moon_illumination": 100.0, "moon_is_up": True,
+                })
+                assert 0.0 <= result.star_density <= 1.0, result.star_density
+
 
 class TestProductionPredictionAPI:
     """The dev-only export loader in `ui/controllers/ml_prediction.py` gates on dev mode.
