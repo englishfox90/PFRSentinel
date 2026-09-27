@@ -301,6 +301,16 @@ def _answer_row(cal: dict, answers: dict) -> dict:
     }
 
 
+def _sky_comparable(r: dict) -> bool:
+    """Same rule as jev_review.sky_conflict: the roof must be open on the human label.
+
+    A closed-roof frame can still carry a stale sky label until
+    scrub_closed_roof_sky.py runs; judging it here would make the report and
+    conflicts.csv disagree with the Review tab for the same frame.
+    """
+    return bool(r["human_roof"]) and r["human_sky"] in SKY_LEVELS and bool(r["jev_sky"])
+
+
 def _conf_band(c):
     return "high (>=0.9)" if c >= 0.9 else "mid (0.7-0.9)" if c >= 0.7 else "low (<0.7)"
 
@@ -335,7 +345,7 @@ def write_report(rows: list, out_dir: Path, model: str, use_nina: bool) -> str:
                          f"({100 * a_hit / len(ai_rows):.1f}%)")
         lines.append("")
 
-    sky_rows = [r for r in rows if r["human_sky"] in SKY_LEVELS and r["jev_sky"]]
+    sky_rows = [r for r in rows if _sky_comparable(r)]
     if sky_rows:
         hit = sum(r["human_sky"] == r["jev_sky"] for r in sky_rows)
         lines.append(f"SKY   {hit}/{len(sky_rows)} agree with human  ({100 * hit / len(sky_rows):.1f}%)"
@@ -391,7 +401,7 @@ def write_csvs(rows: list, out_dir: Path):
                 kinds.append("ROOF: jev+nina/ai all disagree with human")
             else:
                 kinds.append("ROOF: jev disagrees with human")
-        if r["human_sky"] in SKY_LEVELS and r["jev_sky"] and r["human_sky"] != r["jev_sky"]:
+        if _sky_comparable(r) and r["human_sky"] != r["jev_sky"]:
             if r["ai_sky"] in SKY_LEVELS and r["ai_sky"] == r["jev_sky"]:
                 kinds.append("SKY: jev+ai agree against human")
             else:

@@ -75,11 +75,11 @@ def sky_conflict(cal: dict):
 def _other_roof_opinions(cal: dict) -> list:
     opinions = []
     rs = cal.get("roof_state") or {}
-    if rs.get("available") and rs.get("roof_open") is not None:
+    if to_bool(rs.get("available")) and rs.get("roof_open") is not None:
         opinions.append(to_bool(rs["roof_open"]))
     ai = cal.get("ai_suggestion") or {}
-    if "roof_open" in ai:
-        opinions.append(bool(ai["roof_open"]))
+    if ai.get("roof_open") is not None:
+        opinions.append(to_bool(ai["roof_open"]))
     return opinions
 
 

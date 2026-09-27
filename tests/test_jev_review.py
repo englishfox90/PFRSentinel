@@ -7,7 +7,9 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from ml.calibration_store import load_calibration
-from ml.jev_label_audit import ResponseCache, _answer_row, build_state, store_jev_audit
+from ml.jev_label_audit import (
+    ResponseCache, _answer_row, build_state, store_jev_audit, write_csvs, write_report,
+)
 from ml.jev_review import (
     JEV_KEY, banner_text, conflict_kinds, describe_jev, is_corroborated,
     make_jev_block, review_priority, roof_conflict, sky_conflict,
@@ -157,6 +159,34 @@ def test_nina_siding_with_jev_corroborates_the_roof_conflict():
 
     cal["ai_suggestion"] = {"roof_open": True}   # one dissenter is enough to withhold it
     assert not is_corroborated(cal)
+
+
+def test_corroboration_reads_string_flags_like_the_report_does():
+    # A closed AI verdict stored as "False" must not count as an open opinion,
+    # and an unavailable monitor stored as "False" must not count at all.
+    cal = {"labels": _labels(True, None), JEV_KEY: _jev(False, None),
+           "roof_state": {"available": "False", "roof_open": "True"},
+           "ai_suggestion": {"roof_open": "False"}}
+    assert is_corroborated(cal)
+    cal["ai_suggestion"]["roof_open"] = "True"
+    assert not is_corroborated(cal)
+
+
+def test_report_judges_sky_only_where_the_human_roof_is_open(tmp_path):
+    """Matches jev_review.sky_conflict; a closed-roof frame may still carry a
+    stale sky label until scrub_closed_roof_sky.py runs."""
+    def row(roof_open, name):
+        cal = {"labels": {"roof_open": roof_open, "sky_condition": "Clear", "labeled_at": "x"}}
+        r = _answer_row(cal, {"sky": {"choice": "Overcast", "confidence": 0.9}})
+        r["file"] = name
+        return r
+    rows = [row(True, "open.json"), row(False, "closed.json")]
+    n_conflicts = write_csvs(rows, tmp_path)
+    report = write_report(rows, tmp_path, "m", True)
+    assert n_conflicts == 1
+    assert "open.json" in (tmp_path / "conflicts.csv").read_text(encoding="utf-8")
+    assert "closed.json" not in (tmp_path / "conflicts.csv").read_text(encoding="utf-8")
+    assert "SKY   0/1 agree" in report
 
 
 def test_ai_siding_with_jev_corroborates_the_sky_conflict():
