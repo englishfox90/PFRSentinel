@@ -7,7 +7,7 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from ml.calibration_store import load_calibration
-from ml.jev_label_audit import store_jev_audit
+from ml.jev_label_audit import _answer_row, store_jev_audit
 from ml.jev_review import (
     JEV_KEY, banner_text, conflict_kinds, describe_jev, is_corroborated,
     make_jev_block, review_priority, roof_conflict, sky_conflict,
@@ -64,6 +64,20 @@ def test_store_keeps_a_label_written_meanwhile(tmp_path):
     assert on_disk["labels"] == _labels()
     assert on_disk[JEV_KEY]["sky_condition"] == "Overcast"
     assert on_disk["exposure"] == "10s"
+
+
+def test_report_row_reads_string_booleans_like_the_rest_of_the_tool():
+    """Calibration JSONs carry roof_open as a bool or as 'True'/'False'; a string
+    compared with Jev's real bool would count every match as a disagreement."""
+    cal = {"labels": {"roof_open": "True", "stars_visible": "False", "labeled_at": "x"},
+           "roof_state": {"available": True, "roof_open": "False"},
+           "ai_suggestion": {"roof_open": "True"}}
+    row = _answer_row(cal, {"roof": {"choice": "open", "confidence": 0.9,
+                                     "probabilities": {"open": 0.9, "closed": 0.1}}})
+    assert row["human_roof"] is True and row["jev_roof"] is True
+    assert row["nina_roof"] is False and row["ai_roof"] is True
+    assert row["human_stars"] is False
+    assert _answer_row({"labels": {}}, {})["human_roof"] is None
 
 
 # ── conflicts ────────────────────────────────────────────────────────────────

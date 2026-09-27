@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from ml.calibration_store import load_calibration, update_calibration  # noqa: E402
 from ml.dataset_files import iter_calibration_files  # noqa: E402
 from ml.jev_review import JEV_KEY, make_jev_block  # noqa: E402
-from ml.label_suggestion import SKY_LEVELS  # noqa: E402
+from ml.label_suggestion import SKY_LEVELS, to_bool  # noqa: E402
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/systemone"
 DEFAULT_MODEL = "typesafe/jev-1.13"
@@ -250,6 +250,11 @@ class ResponseCache:
 
 # --- scoring -------------------------------------------------------------------
 
+def _opt_bool(value):
+    """Calibration booleans may be real bools or 'True'/'False' strings; absent stays None."""
+    return None if value is None else to_bool(value)
+
+
 def _answer_row(cal: dict, answers: dict) -> dict:
     labels = cal.get("labels", {})
     rs = cal.get("roof_state", {})
@@ -261,17 +266,17 @@ def _answer_row(cal: dict, answers: dict) -> dict:
     roof_probs = roof.get("probabilities", {})
     return {
         "file": "",
-        "human_roof": labels.get("roof_open"),
+        "human_roof": _opt_bool(labels.get("roof_open")),
         "jev_roof": roof.get("choice") == "open" if roof.get("choice") else None,
         "jev_roof_p_open": round(roof_probs.get("open", float("nan")), 3),
         "jev_roof_conf": round(roof.get("confidence", 0.0), 3),
-        "nina_roof": rs.get("roof_open") if rs.get("available") else None,
-        "ai_roof": ai.get("roof_open"),
+        "nina_roof": _opt_bool(rs.get("roof_open")) if rs.get("available") else None,
+        "ai_roof": _opt_bool(ai.get("roof_open")),
         "human_sky": labels.get("sky_condition") or None,
         "jev_sky": sky.get("choice"),
         "jev_sky_conf": round(sky.get("confidence", 0.0), 3),
         "ai_sky": ai.get("sky_condition") or None,
-        "human_stars": labels.get("stars_visible"),
+        "human_stars": _opt_bool(labels.get("stars_visible")),
         "jev_stars_p": round(stars.get("noul", float("nan")), 3),
         "weather_cloud_pct": wx.get("cloud_coverage_pct") if wx.get("available") else None,
         "exposure": cal.get("exposure"),
