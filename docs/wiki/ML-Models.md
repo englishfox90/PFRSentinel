@@ -27,7 +27,7 @@ Alongside the image, the model uses:
 | Night flag | Whether it is astronomical night at your location (sun more than 18° below the horizon), from the latitude and longitude in [Weather Setup](Weather-Setup). With no location set, the PC clock between 22:00 and 05:00. |
 | Hour | Hour of day from the PC clock. |
 
-> **New in the next release** — not available in version 3.7.7 or earlier.
+> Added in version v3.7.8.
 >
 > The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The September 27, 2026 models were trained with the corrected flag; the models shipped before that were trained on the clock-based one, for which the corrected flag is still closer to what they learned than the clock was.
 
@@ -41,7 +41,7 @@ Assesses the sky. It only runs when the roof classifier reports Open, because wi
 | Output | Sky condition, whether stars are visible, star density, whether the moon is visible |
 | Accuracy (sky condition) | 93.2% overall on a held-out test set of 340 frames: Clear 95.4% (269 of 282), Partly Cloudy 39 of 47, Overcast 9 of 11; 86.0% on the 93 test frames added after the June model (September 27, 2026 model) |
 
-> **New in the next release** — not available in version 3.7.7 or earlier.
+> Added in version v3.7.8.
 >
 > The sky classifier is now built on an image-recognition network pre-trained on general photographs and fine-tuned on pier camera frames, instead of a network trained from nothing. On frames neither model had seen, it is right 86% of the time against 70% for the June model, and Partly Cloudy went from 54% to 71%. The same network trained from nothing scores exactly like the June model, so the gain comes from the pre-training. It costs about 4 ms more per frame on a CPU.
 
@@ -97,7 +97,7 @@ The status strip in [Live Monitoring](Live-Monitoring) has **Roof** and **Sky** 
 
 #### Too Much Static
 
-> **New in the next release** — not available in version 3.7.7 or earlier.
+> Added in version v3.7.8.
 
 A frame that is almost entirely sensor noise gives the models nothing to judge. This is typical of a closed roof at night with the exposure at its maximum. On such a frame the roof model can report a low-confidence **Open**, and the sky model a confident **Clear**, when neither is true.
 
@@ -107,7 +107,7 @@ This is a warning only. The roof reading, the overlay tokens, roof change notifi
 
 ### Skipping Sky Features While the Roof Is Closed
 
-> **New in the next release** — not available in version 3.7.7 or earlier.
+> Added in version v3.7.8.
 
 With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. The roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — does not blank the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
 
