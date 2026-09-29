@@ -53,6 +53,7 @@ Every request is signed with that secret. Hermes rejects any request whose signa
 | `roof_changed` | **Post Roof Changes** | When the roof classifier reports the same new state on two frames in a row. Needs **Enable ML Analysis** turned on and the roof model installed; there's no separate switch per classifier. See [ML Models](ML-Models). |
 | `timelapse_done` | **Post Timelapse** | When a timelapse video finishes. Only the details are sent, not the video. |
 | `calibration_done` | **Post Calibration** | When **Calibrate Now** or a guided all-sky calibration completes successfully. Automatic background refinements and failed calibrations send nothing. See [All-Sky Overlay](All-Sky-Overlay). |
+| `calibration_discredited` | **Post Calibration** | When the saved all-sky calibration has matched the stars no better than chance in two automatic runs in a row and its overlay is withheld. Sent once per episode, at `warning` level; nothing more until a later run clears it or a new calibration is saved. See [When the badge turns amber](All-Sky-Overlay#when-the-badge-turns-amber). **New in the next release** — not available in version 3.7.8 or earlier. |
 | `periodic_image` | **Periodic Image Updates** | At the periodic update interval. See below. |
 
 Starting or stopping capture doesn't send an event to Hermes. The **Post Startup/Shutdown** switch covers starting and exiting PFR Sentinel only, even though its description mentions capture.
@@ -82,7 +83,7 @@ By default every event goes to the base **Webhook URL**. Turn on **Route Events 
 | **Periodic Image** | `periodic_image` |
 | **Startup/Shutdown** | `lifecycle` |
 | **Timelapse** | `timelapse_done` |
-| **Calibration** | `calibration_done` |
+| **Calibration** | `calibration_done`, and from the next release `calibration_discredited` |
 
 - A blank field falls back to the base **Webhook URL**.
 - The event switches still decide *whether* an event is sent. The URLs only decide *where* it goes.
@@ -119,6 +120,7 @@ Each event also carries one block of its own details:
 | `periodic_image` | `capture` | `exposure`, `gain`, `temp`, `resolution`. Each value is text as the overlay shows it, for example `"2.50s"`, or `"N/A"` when unknown. |
 | `timelapse_done` | `timelapse` | `frame_count`, `elapsed_seconds`, `filename` |
 | `calibration_done` | `calibration` | `rms_residual`, `n_matches`, `calibrated_at`, `a1`, `cx`, `cy` |
+| `calibration_discredited` | `calibration` | `state` (always `discredited`), `rms_residual`, `n_matches`, `calibrated_at`, `reason` (the explanation in words). New in the next release. |
 
 Example:
 

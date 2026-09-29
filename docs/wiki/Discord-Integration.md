@@ -46,6 +46,7 @@ Treat the webhook URL like a password: anyone who has it can post to your channe
 | Roof Open / Roof Closed | **Post Roof Changes** | When the roof classifier reports the same new roof state on two frames in a row. Needs **Enable ML Analysis** turned on and the roof model installed. There's no separate switch per classifier. See [ML Models](ML-Models). The first reading after PFR Sentinel starts only sets the starting state, so it isn't posted. |
 | Timelapse Complete | **Post Timelapse Video** | When a timelapse video finishes. Shows the frame count, session length and file name. Timelapse recording only works in ZWO camera mode. |
 | PFR Sentinel - Status Update | **Periodic Updates** | At your chosen interval. See [Periodic Updates](#periodic-updates). |
+| All-Sky Calibration Needs Attention | *(none in the app — `post_calibration` in `config.json`)* | When the saved all-sky calibration has matched the stars no better than chance in two automatic runs in a row and its overlay is withheld. Once per episode. See [When the badge turns amber](All-Sky-Overlay#when-the-badge-turns-amber). **New in the next release** — not available in version 3.7.8 or earlier. |
 
 Stopping capture doesn't post a message. A post only goes out when **Enable Discord Alerts** and the matching setting are both on.
 
