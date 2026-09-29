@@ -9,7 +9,7 @@
 
 # Core ML (install via CUDA index above, not from here, for GPU support)
 torch>=2.14.0
-torchvision>=0.15.0
+torchvision>=0.29.0
 
 # Inference (lightweight alternative to full PyTorch)
 onnxruntime>=1.15.0
