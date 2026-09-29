@@ -8,6 +8,7 @@ Development Mode enables features useful for debugging and ML training:
 - **Raw debug file saving** - Saves FITS/TIFF files to `%LOCALAPPDATA%\PFRSentinel\raw_debug\`
 - **Calibration JSON exports** - Detailed image analysis metadata
 - **ML predictions in the calibration JSON export** - roof/sky results written into each `calibration_*.json`
+- **Memory trace** - the opt-in `diagnostics.memory_trace` tracemalloc hotspot report. The `Resources:` memory/CPU line, the growth warning and the `resources` block in the diagnostics bundle are NOT dev-only; they run in every build (see [RESOURCE_MONITOR.md](RESOURCE_MONITOR.md))
 
 **RAW16 camera mode is NOT part of dev mode** - it's a user-facing feature that remains available regardless.
 
@@ -121,6 +122,7 @@ for the production path. Setting `DEV_MODE_AVAILABLE = False` does not turn ML o
 - `ui\controllers\dev_mode_utils.py` - FITS/JSON saving
 - `ui\controllers\ml_prediction.py` - ML predictions for the calibration JSON export
 - `ui\panels\image_processing.py` - UI controls
+- `ui\controllers\resource_monitor_controller.py` - honours `diagnostics.memory_trace` only when the flag is on (the resource line itself is every-build)
 
 **Always Available:**
 - `services\ml_service.py` - per-frame ML inference (gated by `ml_models.enabled` only)

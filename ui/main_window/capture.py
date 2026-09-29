@@ -120,6 +120,7 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
             self._notify(f"Capture started ({mode} mode)")
 
             self._send_posthog_capture_started(mode)
+            self._mark_resources('capture started', new_regime=True)
 
             # Faster status updates while capturing
             self.status_timer.setInterval(200)
@@ -172,6 +173,7 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
             self._update_start_button()
 
             app_logger.info("Capture stopped")
+            self._mark_resources('capture stopped', new_regime=True)
 
             from services.posthog_service import capture_event
             capture_event('capture_stopped', {
@@ -197,6 +199,7 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
             return
         from services.working_set import trim_working_set
         trim_working_set()
+        self._mark_resources('after working-set trim')
 
     def _send_posthog_capture_started(self, mode: str):
         try:

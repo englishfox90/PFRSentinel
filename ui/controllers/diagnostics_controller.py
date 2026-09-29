@@ -181,9 +181,18 @@ class DiagnosticsController(QObject):
                                          'is_watching', False)),
             'selected_camera': cfg.get('zwo_selected_camera_name', ''),
             'live_camera': self._live_camera_settings(),
+            'resources': self._resource_snapshot(),
             'notes': notes,
         })
         return info
+
+    def _resource_snapshot(self) -> dict:
+        """Latest memory/CPU sample (services/resource_monitor.py); {} if none."""
+        monitor = getattr(self._mw, 'resource_monitor', None)
+        try:
+            return monitor.snapshot() if monitor is not None else {}
+        except Exception:
+            return {}
 
     def _live_camera_settings(self):
         zwo = getattr(getattr(self._mw, 'camera_controller', None), 'zwo_camera', None)

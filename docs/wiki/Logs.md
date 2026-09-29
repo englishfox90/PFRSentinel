@@ -61,6 +61,19 @@ When asking for help, attach a [diagnostics bundle](Diagnostics-Export) rather t
 
 ---
 
+## Resource Lines
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+PFR Sentinel writes a `Resources:` line to the log at start-up, when capture starts or stops, and whenever the app's memory use moves noticeably (about every 30 minutes otherwise). It shows two memory figures that mean different things:
+
+- **working set** is the number Task Manager's Memory column shows. Windows leaves pages resident after a frame is processed even though the app has finished with them, so this figure sits near the peak of the last frame and drops when the app asks Windows to trim it (after capture stops). It is not a measure of what the app is holding.
+- **private** is the memory the app has actually claimed. If this figure rises line after line while capture runs, something is holding on to frames; if it stays flat while the working set is high, nothing is being retained.
+
+The rest of the line gives the CPU share since the previous line and how many frames the all-sky calibration, meteor detection and timelapse queues are holding. A **Memory growth** warning appears if the private figure keeps rising for most of an hour. When reporting a memory problem, attach a [diagnostics bundle](Diagnostics-Export): the log lines and the latest figures are both included.
+
+---
+
 ## Notes
 
 - If **Send Anonymous Usage Data** is on in [Settings](Settings), warning and error messages are also sent to the developer's analytics service. Turning that setting off stops this.

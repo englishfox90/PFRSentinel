@@ -9,6 +9,30 @@ from services.logger import app_logger
 class _MainWindowLifecycleMixin:
 
     # =========================================================================
+    # RESOURCE MONITOR
+    # =========================================================================
+
+    def _start_resource_monitor(self):
+        """Periodic memory/CPU line in the log (services/resource_monitor.py).
+
+        Every build: a memory report from a production user arrives as a
+        diagnostics bundle, and this is what makes that bundle answer it.
+        """
+        self.resource_monitor = None
+        try:
+            from ..controllers.resource_monitor_controller import ResourceMonitorController
+            self.resource_monitor = ResourceMonitorController(self)
+            self.resource_monitor.start()
+        except Exception as e:
+            self.resource_monitor = None
+            app_logger.warning(f"Resource monitor not started: {e}")
+
+    def _mark_resources(self, reason: str, new_regime: bool = False):
+        monitor = getattr(self, 'resource_monitor', None)
+        if monitor is not None:
+            monitor.mark(reason, new_regime=new_regime)
+
+    # =========================================================================
     # COORDINATE HEMISPHERE PROMPT
     # =========================================================================
 
@@ -161,6 +185,8 @@ class _MainWindowLifecycleMixin:
             self.watchdog_timer.stop()
         if getattr(self, '_web_server_retry_timer', None):
             self._web_server_retry_timer.stop()
+        if getattr(self, 'resource_monitor', None):
+            self.resource_monitor.stop()
 
         if hasattr(self, 'update_checker') and self.update_checker:
             self.update_checker.stop()
