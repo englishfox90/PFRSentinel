@@ -106,6 +106,7 @@ class GuidedCalibrationDialog(QDialog):
         self._canvas = StarPickCanvas()
         self._canvas.set_image(self._pil_to_pixmap(pil_image), self._snap_px)
         self._canvas.clicked.connect(self._on_image_click)
+        self._canvas.hint_dropped.connect(self._on_hint_dropped)
         self._canvas.zoom_changed.connect(self._on_zoom_changed)
         left.addWidget(self._canvas, 1)
 
@@ -141,7 +142,8 @@ class GuidedCalibrationDialog(QDialog):
             "Click a bright star, say which star it is, then Add. Identify "
             f"at least {MIN_ANCHORS}, spread across the sky — 6 or more lets "
             "the solver recover if one is wrong. After 3, the other bright "
-            "stars are labelled for you.")
+            "stars are labelled for you: drag a blue circle onto the star it "
+            "belongs to and it is identified in one go.")
         self._hint.setWordWrap(True)
         side.addWidget(self._hint)
 
@@ -305,22 +307,28 @@ class GuidedCalibrationDialog(QDialog):
     # User actions
     # ------------------------------------------------------------------
 
-    def _on_image_click(self, ix: float, iy: float):
-        """Snap the click to the nearest detected star (image coords)."""
-        if self._state != _STATE_COLLECT:
-            return
+    def _snap(self, ix: float, iy: float) -> Tuple[Tuple[float, float], bool]:
+        """The nearest detected star within the snap radius, else the point."""
         best, best_d = None, self._snap_px
         for d in self._detections:
             dist = math.hypot(d[0] - ix, d[1] - iy)
             if dist <= best_d:
                 best, best_d = (d[0], d[1]), dist
-        self._pending = best if best is not None else (ix, iy)
-        self._pending_snapped = best is not None
-        snapped = ("snapped to detected star" if best is not None
-                   else "no detected star nearby — the solve is much less "
-                        "accurate with unsnapped clicks")
+        return (best, True) if best is not None else ((ix, iy), False)
+
+    @staticmethod
+    def _snap_text(snapped: bool) -> str:
+        return ("snapped to detected star" if snapped
+                else "no detected star nearby — the solve is much less "
+                     "accurate with unsnapped clicks")
+
+    def _on_image_click(self, ix: float, iy: float):
+        """Snap the click to the nearest detected star (image coords)."""
+        if self._state != _STATE_COLLECT:
+            return
+        self._pending, self._pending_snapped = self._snap(ix, iy)
         text = (f"Selected ({self._pending[0]:.0f}, {self._pending[1]:.0f}) "
-                f"— {snapped}.")
+                f"— {self._snap_text(self._pending_snapped)}.")
         suggestion = self._hint_near(*self._pending)
         if suggestion is not None:
             self._select_candidate(suggestion.label)
@@ -328,6 +336,39 @@ class GuidedCalibrationDialog(QDialog):
         self._pending_lbl.setText(text)
         self._combo.setFocus()
         self._refresh()
+
+    def _on_hint_dropped(self, label: str, ix: float, iy: float) -> None:
+        """A suggested star was dragged onto its real position: identify it.
+
+        In the review step the suggestions are the solved model's predictions,
+        so a drop there means the result missed that star — the held result
+        is discarded (as Adjust stars does) and the star joins the anchors for
+        the next solve.
+        """
+        if self._state == _STATE_SOLVING:
+            return
+        from_review = self._state == _STATE_REVIEW
+        if from_review:
+            self._on_back()
+        c = next((c for c in self._candidates if c['name'] == label), None)
+        if c is None:
+            return
+        if any(a['name'] == c['name'] for a in self._anchors):
+            self._pending_lbl.setText(
+                f"{c['name']} is already identified — each star can only be "
+                "used once.")
+            return
+        (px, py), snapped = self._snap(ix, iy)
+        self._anchors.append({
+            'px': px, 'py': py, 'ra': c['ra_deg'], 'dec': c['dec_deg'],
+            'name': c['name'], 'snapped': snapped})
+        self._pending = None
+        self._pending_snapped = False
+        text = f"{c['name']} added — {self._snap_text(snapped)}."
+        if from_review:
+            text += " Press Solve to fit again with it."
+        self._pending_lbl.setText(text)
+        self._anchors_changed()
 
     def _hint_near(self, ix: float, iy: float) -> Optional[CanvasHint]:
         best, best_d = None, self._snap_px
