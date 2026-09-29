@@ -35,6 +35,8 @@ def canvas(qapp):
     qapp.processEvents()
     clicks = []
     widget.clicked.connect(lambda x, y: clicks.append((x, y)))
+    widget.drops = []
+    widget.hint_dropped.connect(lambda n, x, y: widget.drops.append((n, x, y)))
     yield widget, clicks
     widget.close()
     widget.deleteLater()
@@ -163,6 +165,87 @@ def test_view_is_rendered_at_the_display_pixel_ratio(canvas, qapp):
     dpr = widget.devicePixelRatioF()
     assert widget._view.devicePixelRatio() == pytest.approx(dpr)
     assert widget._view.width() == round(widget.width() * dpr)
+
+
+HINT_IMAGE = (2000.0, 2000.0)          # one hint, in image pixels
+
+
+def _with_hint(widget):
+    widget.set_overlays([], [CanvasHint(*HINT_IMAGE, "Arcturus")], None)
+    pt = widget.image_to_widget(*HINT_IMAGE)
+    return QPoint(round(pt.x()), round(pt.y()))
+
+
+def _drag(widget, start, end):
+    _mouse(widget, QEvent.MouseButtonPress, start)
+    _mouse(widget, QEvent.MouseMove, QPoint((start.x() + end.x()) // 2,
+                                            (start.y() + end.y()) // 2))
+    _mouse(widget, QEvent.MouseMove, end)
+    _mouse(widget, QEvent.MouseButtonRelease, end, buttons=Qt.NoButton)
+
+
+class TestHintDrag:
+
+    def test_dragging_a_hint_reports_its_label_at_the_drop_point(self, canvas):
+        widget, clicks = canvas
+        start = _with_hint(widget)
+        end = QPoint(start.x() + 60, start.y() - 40)
+        _drag(widget, QPoint(start.x() + 6, start.y() - 4), end)
+        (name, x, y), = widget.drops
+        assert name == "Arcturus"
+        assert (x, y) == pytest.approx(widget.widget_to_image(QPointF(end)))
+        assert clicks == []
+
+    def test_a_hint_drag_does_not_pan_the_view(self, canvas):
+        widget, _clicks = canvas
+        _wheel(widget, QPoint(400, 400), notches=4)
+        start = _with_hint(widget)
+        origin = widget.widget_to_image(QPointF(0, 0))
+        _drag(widget, start, QPoint(start.x() - 120, start.y() - 90))
+        assert widget.widget_to_image(QPointF(0, 0)) == pytest.approx(origin)
+        assert len(widget.drops) == 1
+
+    def test_a_drag_that_starts_on_empty_sky_still_pans(self, canvas):
+        widget, _clicks = canvas
+        _wheel(widget, QPoint(400, 400), notches=4)
+        _with_hint(widget)
+        start = QPoint(100, 100)
+        before = widget.widget_to_image(QPointF(start))
+        _drag(widget, start, QPoint(220, 160))
+        assert widget.drops == []
+        assert widget.widget_to_image(QPointF(220, 160)) == pytest.approx(before, abs=1.0)
+
+    def test_a_click_on_a_hint_is_still_a_click(self, canvas):
+        widget, clicks = canvas
+        start = _with_hint(widget)
+        _click(widget, start)
+        assert widget.drops == []
+        assert len(clicks) == 1
+
+    def test_hints_can_be_dragged_while_picking_is_off(self, canvas):
+        """The review step shows the solved model's predictions as hints and
+        switches picking off; dragging one onto the star it missed must work."""
+        widget, clicks = canvas
+        widget.set_interactive(False)
+        start = _with_hint(widget)
+        _drag(widget, start, QPoint(start.x() + 50, start.y() + 30))
+        assert [d[0] for d in widget.drops] == ["Arcturus"]
+        assert clicks == []
+
+    def test_a_drop_outside_the_frame_is_ignored(self, canvas):
+        widget, _clicks = canvas
+        start = _with_hint(widget)
+        _drag(widget, start, QPoint(VIEW + 200, VIEW + 200))
+        assert widget.drops == []
+
+    def test_ghost_paints_while_dragging(self, canvas):
+        widget, _clicks = canvas
+        start = _with_hint(widget)
+        _mouse(widget, QEvent.MouseButtonPress, start)
+        _mouse(widget, QEvent.MouseMove, QPoint(start.x() + 40, start.y() + 40))
+        assert not widget.grab().toImage().isNull()
+        _mouse(widget, QEvent.MouseButtonRelease,
+               QPoint(start.x() + 40, start.y() + 40), buttons=Qt.NoButton)
 
 
 def test_paints_with_every_overlay_kind(canvas, qapp):
