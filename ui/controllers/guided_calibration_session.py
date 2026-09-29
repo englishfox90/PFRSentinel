@@ -72,7 +72,8 @@ class _HintWorker(QThread):
                 self._anchors, p.get('candidates', []), p.get('detections', []),
                 p['lat'], p['lon'], p['dt'],
                 p['sky_cx'], p['sky_cy'], p['sky_r'],
-                should_cancel=self.isInterruptionRequested)
+                should_cancel=self.isInterruptionRequested,
+                is_sky=p.get('is_sky'))
         except Exception as e:
             log.debug(f"Guided hints failed (non-fatal): {e}")
         self.ready.emit(self._id, result)

@@ -274,15 +274,25 @@ class AllSkyController(QObject):
                         f"showing the linear frame instead: {e}")
             display_image = image
 
+        width = getattr(image, 'width', 0)
+        height = getattr(image, 'height', 0)
+        # The equipment map, if it has learned this rig, keeps predictions
+        # that land on the mount out of the suggestion support vote. Learned
+        # on the output frame, so it is carried to this frame's pixels here.
+        from services.allsky.equipment_lookup import sky_lookup_for_frame
+        from services.allsky.obstruction_map import get_obstruction_map
+        is_sky = sky_lookup_for_frame(get_obstruction_map(), width, height)
+
         log.info(f"Guided calibration prep: {len(detections)} detections, "
-                 f"{len(candidates)} bright stars above horizon ({source})")
+                 f"{len(candidates)} bright stars above horizon ({source}"
+                 f"{', equipment map on' if is_sky else ''})")
         return {
             'image': image, 'display_image': display_image,
             'detections': detections,
             'sky_cx': sky_cx, 'sky_cy': sky_cy, 'sky_r': sky_r,
             'lat': lat, 'lon': lon, 'dt': dt, 'candidates': candidates,
-            'image_width': getattr(image, 'width', 0),
-            'image_height': getattr(image, 'height', 0),
+            'image_width': width, 'image_height': height,
+            'is_sky': is_sky,
         }
 
     def begin_guided_session(self, prep: dict):
