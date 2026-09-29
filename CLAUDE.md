@@ -197,7 +197,9 @@ build check would never report on them. `claude-review` only makes a merge wait
 for the review to post; it passes whatever the review finds. Any check added here
 must report on *every* PR (skipped counts as passing, absent does not).
 When CI fails on a same-repo PR, `claude-ci-fix.yml` has Claude open a fix PR
-against that branch. CodeQL and Dependabot are enabled at the repo level.
+against that branch. It reads the log of the attempt the event names and stops
+if a newer attempt already exists, so a manual re-run started in the same minute
+no longer hands it an empty log (PR #113, 2026-09-29). CodeQL and Dependabot are enabled at the repo level.
 
 `.github/workflows/build.yml` makes unsigned dev builds. Every merge to `main`
 (or a dispatch with `publish` ticked) replaces the single rolling `dev-latest` prerelease and posts
