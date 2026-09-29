@@ -347,17 +347,20 @@ class GuidedCalibrationDialog(QDialog):
         """
         if self._state == _STATE_SOLVING:
             return
-        from_review = self._state == _STATE_REVIEW
-        if from_review:
-            self._on_back()
         c = next((c for c in self._candidates if c['name'] == label), None)
         if c is None:
             return
+        # Validate before discarding: a renamed anchor ("Vega" solved as
+        # another star) leaves "Vega" drawn as a prediction, and dropping it
+        # must not throw the held result away only to refuse the star.
         if any(a['name'] == c['name'] for a in self._anchors):
             self._pending_lbl.setText(
                 f"{c['name']} is already identified — each star can only be "
                 "used once.")
             return
+        from_review = self._state == _STATE_REVIEW
+        if from_review:
+            self._on_back()
         (px, py), snapped = self._snap(ix, iy)
         self._anchors.append({
             'px': px, 'py': py, 'ra': c['ra_deg'], 'dec': c['dec_deg'],

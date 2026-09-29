@@ -321,6 +321,24 @@ class TestReview:
         assert 'Solve' in dlg._pending_lbl.text()
         assert req['save'] == 0
 
+    def test_dropping_an_identified_name_in_review_keeps_the_result(self, dialog):
+        """A star the solver renamed leaves its given name drawn as a
+        prediction. Dropping that circle must be refused BEFORE the held
+        result is discarded, or the user loses the solve and gains nothing."""
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        taken = dlg._anchors[0]['name']
+        dlg.show_solved(_solved())
+        predicted = list(dlg._predicted)
+
+        dlg._on_hint_dropped(taken, 1510.0, 405.0)
+
+        assert req['discard'] == 0
+        assert dlg._predicted == predicted
+        assert dlg._state == 'review'
+        assert len(dlg._anchors) == MIN_ANCHORS
+        assert 'already identified' in dlg._pending_lbl.text()
+
     def test_adjust_stars_discards_the_result_and_returns_to_picking(self, dialog):
         dlg, req = dialog
         _identify(dlg, MIN_ANCHORS)
