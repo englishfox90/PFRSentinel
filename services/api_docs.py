@@ -222,6 +222,13 @@ WEBHOOK_EVENT_BLOCKS = [
         ("cx", "number", "Lens model parameter: optical centre X."),
         ("cy", "number", "Lens model parameter: optical centre Y."),
     ]),
+    ("calibration_discredited", "calibration", [
+        ("state", "string", "Always 'discredited'."),
+        ("rms_residual", "number", "Fit residual of the saved model, pixels."),
+        ("n_matches", "integer", "Star matches the saved model was fitted on."),
+        ("calibrated_at", "string", "ISO-8601 timestamp of the saved model."),
+        ("reason", "string", "Why the model is no longer trusted, in words."),
+    ]),
 ]
 
 _WEBHOOK_ENVELOPE_FIELDS = [
@@ -548,8 +555,8 @@ def _render_webhook_section(spec: dict) -> str:
     return f"""
 <h2>Outbound Webhook Notifications</h2>
 <p class="sub">PFR Sentinel can <strong>POST</strong> HMAC-signed JSON to a configured
-webhook (e.g. a Hermes agent) for six event types: roof_changed, error, lifecycle,
-periodic_image, timelapse_done, calibration_done. This is a client callback the app
+webhook (e.g. a Hermes agent) for seven event types: roof_changed, error, lifecycle,
+periodic_image, timelapse_done, calibration_done, calibration_discredited. This is a client callback the app
 makes outbound &mdash; it is not a route this server serves, so it will not appear
 under <code>/openapi.json</code> "paths"; the payload shape is documented via the
 <code>WebhookNotification</code> and per-event component schemas instead.</p>

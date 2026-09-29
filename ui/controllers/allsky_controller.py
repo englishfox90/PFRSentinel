@@ -14,7 +14,8 @@ from typing import Optional, TYPE_CHECKING
 from PySide6.QtCore import QObject, Signal, QThread, QTimer
 
 from services.logger import app_logger as log
-from services.notifications import CALIBRATION_DONE, NotificationEvent
+from services.notifications import (
+    CALIBRATION_DISCREDITED, CALIBRATION_DONE, NotificationEvent)
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -139,6 +140,7 @@ class AllSkyController(QObject):
         self._cal_service.status_changed.connect(self.status_changed)
         self._cal_service.attention_changed.connect(self.attention_changed)
         self._cal_service.badge_quality_changed.connect(self.badge_quality_changed)
+        self._cal_service.model_discredited.connect(self._notify_calibration_discredited)
 
         # Load existing model into both controller and service
         self._update_status()
@@ -615,3 +617,14 @@ class AllSkyController(QObject):
             ))
         except Exception as e:
             log.debug(f"Calibration notification failed: {e}")
+
+    def _notify_calibration_discredited(self, title: str, body: str) -> None:
+        """Once per discredit episode (CalibrationService.model_discredited)."""
+        try:
+            self._mw.notifier.notify(NotificationEvent(
+                type=CALIBRATION_DISCREDITED, title=title, body=body,
+                level='warning',
+                data={'model_info': self.get_calibration_info() or {}},
+            ))
+        except Exception as e:
+            log.debug(f"Calibration discredited notification failed: {e}")

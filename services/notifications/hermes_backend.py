@@ -9,6 +9,7 @@ from ..app_config import APP_DISPLAY_NAME
 from ..logger import app_logger
 from .base import NotificationBackend
 from .events import (
+    CALIBRATION_DISCREDITED,
     CALIBRATION_DONE,
     ERROR,
     LIFECYCLE,
@@ -27,7 +28,12 @@ _EVENT_GATE_KEY = {
     PERIODIC_IMAGE: 'periodic_enabled',
     TIMELAPSE_DONE: 'post_timelapse',
     CALIBRATION_DONE: 'post_calibration',
+    CALIBRATION_DISCREDITED: 'post_calibration',
 }
+
+# Per-event URL routing has one field per switch, not per event type: an
+# event that shares a switch shares its route.
+_ROUTE_KEY = {CALIBRATION_DISCREDITED: CALIBRATION_DONE}
 
 
 def _utc_now_iso() -> str:
@@ -54,7 +60,8 @@ class HermesBackend(NotificationBackend):
         and set, otherwise the base URL."""
         base = (hermes.get('url') or '').strip()
         if hermes.get('route_by_event', False):
-            override = ((hermes.get('event_urls') or {}).get(event_type) or '').strip()
+            route = _ROUTE_KEY.get(event_type, event_type)
+            override = ((hermes.get('event_urls') or {}).get(route) or '').strip()
             return override or base
         return base
 
@@ -171,6 +178,17 @@ class HermesBackend(NotificationBackend):
                     "a1": model_info.get('a1'),
                     "cx": model_info.get('cx'),
                     "cy": model_info.get('cy'),
+                }
+            }
+        if event.type == CALIBRATION_DISCREDITED:
+            model_info = data.get('model_info', {})
+            return {
+                "calibration": {
+                    "state": "discredited",
+                    "rms_residual": model_info.get('rms_residual'),
+                    "n_matches": model_info.get('n_matches'),
+                    "calibrated_at": model_info.get('calibrated_at'),
+                    "reason": event.body,
                 }
             }
         return {}
