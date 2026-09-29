@@ -18,6 +18,7 @@ from services.logger import app_logger as log
 from services.observing_window import SAME_CAPTURE_KEY
 from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
 
+from .discredit_policy import overlay_withheld
 from .fisheye import FisheyeModel
 from .label_collision import LabelGrid
 from .label_stability import get_label_stabilizer, upsample
@@ -214,6 +215,11 @@ def render_allsky_for_preview(
     if not allsky_cfg.get('enabled', False):
         return output_img
     if not allsky_cfg.get('calibration_file', ''):
+        return output_img
+    # A model the service has discredited (discredit_policy) is treated as
+    # no model: its labels are wrong, and drawing them for hours is what
+    # 2026-09-28 looked like. The file itself is untouched.
+    if overlay_withheld():
         return output_img
     try:
         from services.observing_window import is_observing_window
