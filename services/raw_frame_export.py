@@ -4,7 +4,7 @@ Given the main window's cached frame (camera mode: the SDK Bayer bytes plus
 geometry; watch mode: the clean PIL image) this writes:
 
 - ``<stem>_bayer.fits``      the sensor mosaic, unscaled, with BAYERPAT — only
-                             in camera mode, needs astropy
+                             in camera mode
 - ``<stem>_unprocessed.png`` debayered + white-balanced, before stretch,
                              sharpening, overlays or resize
 - ``<stem>_metadata.json``   the frame's scalar metadata (exposure, gain,
@@ -21,6 +21,7 @@ from datetime import datetime
 import numpy as np
 
 from .camera.frame_builder import is_rebuildable, rebuild_frame
+from .fits_writer import write_fits
 from .logger import app_logger
 
 # metadata key -> FITS keyword (8 chars max)
@@ -86,7 +87,7 @@ def export_raw_frame(dest_dir, metadata, pil_image=None, stem=None) -> dict:
             npy_path = os.path.join(dest_dir, f'{stem}_bayer.npy')
             np.save(npy_path, mosaic)
             files.append(npy_path)
-            notes.append('astropy unavailable: Bayer mosaic saved as .npy instead of FITS')
+            notes.append('FITS write failed: Bayer mosaic saved as .npy instead')
     else:
         notes.append('No Bayer data cached (watch mode or no frame yet): FITS skipped')
 
@@ -111,15 +112,15 @@ def export_raw_frame(dest_dir, metadata, pil_image=None, stem=None) -> dict:
 
 
 def _write_bayer_fits(path, mosaic, metadata) -> bool:
-    try:
-        from astropy.io import fits
-    except ImportError:
-        return False
-    hdu = fits.PrimaryHDU(mosaic)
+    header = {}
     for meta_key, fits_key in FITS_HEADER_KEYS:
         value = metadata.get(meta_key)
         if value is not None:
-            hdu.header[fits_key] = str(value) if not isinstance(value, (int, float)) else value
-    hdu.header['COMMENT'] = 'PFR Sentinel raw sensor mosaic - unscaled, not debayered'
-    hdu.writeto(path, overwrite=True)
+            header[fits_key] = str(value) if not isinstance(value, (int, float)) else value
+    header['COMMENT'] = 'PFR Sentinel raw sensor mosaic - unscaled, not debayered'
+    try:
+        write_fits(path, mosaic, header)
+    except Exception as e:
+        app_logger.warning(f"Raw frame export: FITS write failed ({e}); saving .npy instead")
+        return False
     return True

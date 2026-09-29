@@ -382,7 +382,7 @@ a = Analysis(
         'pandas',
         'matplotlib', 'mpl_toolkits',
         'seaborn', 'plotly',
-        'astropy',  # Only needed for FITS in dev mode — all-sky uses pure numpy
+        'astropy',  # FITS writes go through services/fits_writer.py, which needs no astropy
         # Note: scipy is intentionally NOT excluded (needed for calibration)
         'sympy',  # Not needed
         
