@@ -168,13 +168,14 @@ class TestRoofClosedConfirmation:
         assert self._frame('Open (96%)') is True
 
     def test_consecutive_closed_frames_suppress(self):
+        assert self._frame('Open (95%)') is True
         verdicts = [self._frame('Closed (98%)')
                     for _ in range(ROOF_CLOSED_CONFIRM_FRAMES + 2)]
         assert verdicts[:ROOF_CLOSED_CONFIRM_FRAMES - 1] == [True] * (ROOF_CLOSED_CONFIRM_FRAMES - 1)
         assert all(v is False for v in verdicts[ROOF_CLOSED_CONFIRM_FRAMES - 1:])
 
     def test_an_open_frame_restarts_the_count(self):
-        for status in ('Closed (98%)', 'Open (90%)', 'Closed (98%)'):
+        for status in ('Open (90%)', 'Closed (98%)', 'Open (90%)', 'Closed (98%)'):
             assert self._frame(status) is True
 
     def test_reopening_lifts_the_suppression_at_once(self):
@@ -184,6 +185,7 @@ class TestRoofClosedConfirmation:
     def test_several_callers_in_one_frame_count_as_one_frame(self):
         """Star detection, the calibration feed and the overlay all ask about
         the same frame; three questions must not look like three frames."""
+        assert self._frame('Open (95%)') is True
         metadata = {'ROOF_STATUS': 'Closed (98%)'}
         answers = [is_observing_window(self.CONFIG, metadata, feature=f)
                    for f in ("Star detection", "All-sky calibration", "All-sky overlay")]
@@ -192,14 +194,60 @@ class TestRoofClosedConfirmation:
     def test_frames_with_the_gate_switched_off_do_not_count(self):
         off = {'weather': {}, 'ml_models': {'enabled': True,
                                             'roof_gates_sky_features': False}}
+        assert self._frame('Open (95%)') is True
         for _ in range(ROOF_CLOSED_CONFIRM_FRAMES + 1):
             assert is_observing_window(off, {'ROOF_STATUS': 'Closed (98%)'},
                                        feature="test") is True
         assert self._frame('Closed (98%)') is True
 
+    def test_a_cold_start_on_a_closed_roof_suppresses_at_once(self):
+        """The first frame of the 2026-09-29 dev build was drawn full of
+        labels on a roof read Closed at 100 %, and posted to Discord: the
+        two-frame wait defends an Open state, and there was none yet."""
+        assert self._frame('Closed (100%)') is False
+        assert self._frame('Closed (100%)') is False
+
+    def test_a_cold_start_misread_costs_one_frame_then_open_is_established(self):
+        assert self._frame('Closed (71%)') is False
+        assert self._frame('Open (95%)') is True
+        assert self._frame('Closed (71%)') is True
+        assert self._frame('Closed (71%)') is False
+
+    def test_a_no_verdict_frame_does_not_establish_open(self):
+        for status in ('N/A', 'N/A'):
+            assert self._frame(status) is True
+        assert self._frame('Closed (98%)') is False
+
+    def test_a_blind_caller_at_cold_start_reads_the_standing_state(self):
+        assert self._frame('Closed (98%)') is False
+        assert is_observing_window(self.CONFIG, {}, feature="Watch overlay") is False
+
+    def test_a_day_of_twilight_forgets_last_nights_open_state(self, monkeypatch):
+        """Night 1 saw the roof Open; a day of twilight frames never reaches
+        the roof rule, so without an explicit reset night 2's first Closed
+        frame would wait for a second and be drawn with labels."""
+        sited = _config(ml_models={'enabled': True},
+                        weather={'latitude': '51.5074', 'longitude': '-0.1278'})
+        sun = {'alt': -20.0}
+        monkeypatch.setattr('astral.sun.elevation', lambda *a, **kw: sun['alt'])
+        night = lambda status: is_observing_window(sited, {'ROOF_STATUS': status}, feature="t")
+
+        assert night('Open (95%)') is True                     # night 1
+        sun['alt'] = 10.0
+        for _ in range(3):
+            assert night('Open (95%)') is False                # the day: twilight rule
+        sun['alt'] = -20.0
+        assert night('Closed (100%)') is False                 # night 2, first frame
+
+    def test_reset_forgets_the_established_open_state(self):
+        assert self._frame('Open (95%)') is True
+        reset_roof_gate()
+        assert self._frame('Closed (98%)') is False
+
     def test_reprocessing_a_capture_does_not_count_it_twice(self):
         """Nudging a setting re-runs the same capture with fresh metadata. One
         misread frame must not be able to confirm itself."""
+        assert self._frame('Open (95%)') is True
         assert self._frame('Closed (98%)') is True
         for _ in range(3):
             again = {'ROOF_STATUS': 'Closed (98%)', SAME_CAPTURE_KEY: True}
@@ -213,6 +261,7 @@ class TestRoofClosedConfirmation:
 
     def test_a_reprocess_cannot_clear_the_streak_either(self):
         """Whatever the re-run reads, the count belongs to real captures."""
+        assert self._frame('Open (95%)') is True
         assert self._frame('Closed (98%)') is True
         again = {'ROOF_STATUS': 'Open (95%)', SAME_CAPTURE_KEY: True}
         assert is_observing_window(self.CONFIG, again, feature="test") is True
@@ -224,6 +273,7 @@ class TestRoofClosedConfirmation:
         second question is not an 'Open' reading."""
         blind = lambda: is_observing_window(self.CONFIG, {}, feature="All-sky overlay")
 
+        assert self._frame('Open (95%)') is True       # frame 0: Open established
         assert self._frame('Closed (98%)') is True     # frame 1, processor
         assert blind() is True                          # frame 1, overlay
         assert self._frame('Closed (98%)') is False    # frame 2: confirmed...
@@ -231,6 +281,7 @@ class TestRoofClosedConfirmation:
 
     def test_an_explicit_na_from_ml_still_clears_the_count(self):
         """ML ran and had no answer: that is a reading, and it is not Closed."""
+        assert self._frame('Open (95%)') is True
         assert self._frame('Closed (98%)') is True
         assert self._frame('N/A') is True
         assert self._frame('Closed (98%)') is True
@@ -300,9 +351,11 @@ class TestExposureFloor:
         assert metadata[REASON_KEY] == 'exposure'
 
     def test_short_frames_leave_the_roof_streak_alone(self):
+        assert _judge(GATE_ML, star_count=400, exposure='10s', roof='Open (95%)')[0] is True
         for _ in range(3):
             assert _judge(GATE_ML, exposure='0.06s', roof='Closed (98%)')[1] == 'exposure'
-        # The streak never counted those: this is the first Closed frame.
+        # The streak never counted those: this is the first Closed frame
+        # after an Open one, so it waits for a second.
         assert _judge(GATE_ML, star_count=40, exposure='10s', roof='Closed (98%)')[0] is True
 
 

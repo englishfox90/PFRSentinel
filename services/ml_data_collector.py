@@ -18,91 +18,9 @@ from typing import Optional, Dict, Any, Tuple
 import numpy as np
 
 from services.logger import app_logger
+from .fits_writer import write_fits
 from .reveal_in_file_manager import reveal_path
 from .utils_paths import get_ml_contribution_dir
-
-# Optional: astropy for FITS
-# Astropy is excluded from PyInstaller builds to save ~30MB.
-# We use a lightweight FITS writer as fallback (sufficient for our simple needs).
-try:
-    from astropy.io import fits as astropy_fits
-    # Verify PrimaryHDU is actually accessible (partial imports can succeed
-    # but leave submodule attributes missing in PyInstaller bundles)
-    _test = astropy_fits.PrimaryHDU
-    del _test
-    _astropy_fits = astropy_fits
-    ASTROPY_AVAILABLE = True
-except Exception:
-    _astropy_fits = None
-    ASTROPY_AVAILABLE = False
-
-
-def _write_simple_fits(path: Path, data: np.ndarray, header_cards: dict):
-    """Write a minimal FITS file without astropy.
-    
-    Supports a single Primary HDU with a 2D float32 image and string header cards.
-    Compliant with FITS standard (2880-byte blocks, 80-char card images).
-    """
-    import struct
-
-    data = data.astype(np.float32)
-    if data.ndim != 2:
-        raise ValueError(f"Expected 2D array, got {data.ndim}D")
-
-    naxis1, naxis2 = data.shape[1], data.shape[0]  # FITS: NAXIS1=cols, NAXIS2=rows
-
-    def _card(keyword: str, value, comment: str = '') -> bytes:
-        """Format a single 80-byte FITS header card."""
-        kw = keyword.upper().ljust(8)[:8]
-        if isinstance(value, bool):
-            val_str = 'T' if value else 'F'
-            val_field = f"= {val_str:>20s}"
-        elif isinstance(value, int):
-            val_field = f"= {value:>20d}"
-        elif isinstance(value, float):
-            val_field = f"= {value:>20.6E}"
-        else:
-            # String value - must be quoted, left-justified within quotes
-            s = str(value)[:68]
-            val_field = f"= '{s}'"
-            val_field = val_field.ljust(30)  # Pad for readability
-        card = f"{kw}{val_field}"
-        if comment:
-            remaining = 80 - len(card) - 3  # space + / + space
-            if remaining > 0:
-                card += f" / {comment[:remaining]}"
-        return card.ljust(80)[:80].encode('ascii', errors='replace')
-
-    # Build header
-    cards = []
-    cards.append(_card('SIMPLE', True, 'Conforms to FITS standard'))
-    cards.append(_card('BITPIX', -32, 'IEEE single precision float'))
-    cards.append(_card('NAXIS', 2, 'Number of axes'))
-    cards.append(_card('NAXIS1', naxis1, 'Width'))
-    cards.append(_card('NAXIS2', naxis2, 'Height'))
-
-    for key, val in header_cards.items():
-        key_upper = key.upper()[:8]
-        if key_upper not in ('SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'END'):
-            cards.append(_card(key_upper, val))
-
-    cards.append(b'END'.ljust(80))
-
-    # Pad header to multiple of 2880 bytes (36 cards per block)
-    while len(cards) % 36 != 0:
-        cards.append(b' ' * 80)
-
-    header_bytes = b''.join(cards)
-
-    # Write data in big-endian (FITS standard)
-    data_bytes = data.astype('>f4').tobytes()
-    # Pad data to multiple of 2880
-    pad_len = (2880 - len(data_bytes) % 2880) % 2880
-    data_bytes += b'\x00' * pad_len
-
-    with open(path, 'wb') as f:
-        f.write(header_bytes)
-        f.write(data_bytes)
 
 # Google Form URL for data submission
 UPLOAD_FORM_URL = "https://forms.gle/ZW5rEZC2eyQognDMA"
@@ -381,13 +299,7 @@ class MLDataCollector:
             'MLCONTRI': True,
         }
         
-        if ASTROPY_AVAILABLE:
-            hdu = _astropy_fits.PrimaryHDU(data.astype(np.float32))
-            for key, val in header_cards.items():
-                hdu.header[key] = val
-            hdu.writeto(path, overwrite=True)
-        else:
-            _write_simple_fits(path, data, header_cards)
+        write_fits(path, data.astype(np.float32), header_cards)
     
     def _anonymize_calibration(self, cal: Dict[str, Any]) -> Dict[str, Any]:
         """

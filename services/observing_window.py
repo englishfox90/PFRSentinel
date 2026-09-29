@@ -46,6 +46,7 @@ TWILIGHT_SUN_ALT_DEG = -6.0
 # other consumers of the same verdict (the ASCOM safety file and the roof
 # alert) already wait for a second frame; this gate was the odd one out.
 # A real closure costs one frame of delay, on a frame with no stars in it.
+# Only an established Open state earns the wait: see _RoofClosedStreak.
 ROOF_CLOSED_CONFIRM_FRAMES = 2
 
 # Consecutive frames without star evidence before the roof's Open verdict is
@@ -82,24 +83,47 @@ _TRANSITION_TEXT = {
 
 
 class _RoofClosedStreak:
-    """Counts consecutive Closed verdicts, one per frame."""
+    """Counts consecutive Closed verdicts, one per frame.
+
+    The confirmation frames exist to ride out one misread Closed amid Open
+    frames. Until an Open verdict has been seen at all — the first frames
+    after start-up, or the first night frames after a day of twilight — there
+    is no Open state to defend, so a single Closed counts as confirmed
+    (``_evaluate`` resets the streak on every twilight frame): the
+    first frame of the 2026-09-29 dev build was drawn full of labels on a
+    roof the classifier had read Closed at 100 %, and that frame went to
+    Discord as the night's first status post. A misread on a cold start
+    costs one frame without labels, on a frame that has none to lose.
+    """
 
     def __init__(self):
         self._count = 0
+        self._open_seen = False
         self._lock = threading.Lock()
 
-    def observe(self, closed: bool) -> int:
+    def observe(self, roof_status: str) -> int:
         with self._lock:
-            self._count = self._count + 1 if closed else 0
-            return self._count
+            if roof_status.startswith('Closed'):
+                self._count += 1
+            else:
+                self._count = 0
+                if roof_status.startswith('Open'):
+                    self._open_seen = True
+            return self._confirmed_count()
 
     def current(self) -> int:
         with self._lock:
-            return self._count
+            return self._confirmed_count()
+
+    def _confirmed_count(self) -> int:
+        if self._count and not self._open_seen:
+            return ROOF_CLOSED_CONFIRM_FRAMES
+        return self._count
 
     def reset(self) -> None:
         with self._lock:
             self._count = 0
+            self._open_seen = False
 
 
 class _NoStarsStreak:
@@ -230,6 +254,9 @@ def _evaluate(config, metadata, feature) -> str:
             f"{feature} suppressed: sun elevation {sun_alt:.1f}° "
             f"(above civil twilight {TWILIGHT_SUN_ALT_DEG:.0f}°)"
         )
+        # A day has passed: last night's Open frames say nothing about
+        # tonight's roof, so the next night starts as a cold start does.
+        _roof_streak.reset()
         return 'twilight'
 
     signals = ml_star_signals(metadata)
@@ -273,7 +300,7 @@ def _roof_closed(config, metadata, feature) -> bool:
         roof_status = roof_status or 'no verdict on this call'
         streak = _roof_streak.current()
     else:
-        streak = _roof_streak.observe(roof_status.startswith('Closed'))
+        streak = _roof_streak.observe(roof_status)
     if streak >= ROOF_CLOSED_CONFIRM_FRAMES:
         app_logger.debug(f"{feature} suppressed: ML roof status '{roof_status}'")
         return True
