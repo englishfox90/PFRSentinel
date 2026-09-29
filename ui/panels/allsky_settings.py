@@ -17,9 +17,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from qfluentwidgets import (
-    PushButton, SwitchButton,
+    PushButton, SwitchButton, ComboBox,
     CardWidget, CaptionLabel, BodyLabel, SubtitleLabel,
     MessageBox,
+)
+from services.allsky.label_size import (
+    CONFIG_KEY as LABEL_SIZE_KEY, DEFAULT_PRESET as LABEL_SIZE_DEFAULT,
+    preset_keys, preset_names,
 )
 from services.config_defaults import DEFAULT_CONFIG
 from ..components.scroll_safe_spinbox import DoubleSpinBox, SpinBox
@@ -371,6 +375,14 @@ class AllSkySettingsPanel(QScrollArea):
         self._master_toggle.toggled.connect(self._on_setting_changed)
         vl.addWidget(self._master_toggle)
         self._top_n = self._spin_row(vl, "Max objects visible", 5, 50, 15, 5)
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel("Label size"))
+        self._label_size = ComboBox()
+        self._label_size.addItems(list(preset_names()))
+        self._label_size.setCurrentIndex(preset_keys().index(LABEL_SIZE_DEFAULT))
+        self._label_size.currentIndexChanged.connect(self._on_setting_changed)
+        row.addWidget(self._label_size)
+        vl.addLayout(row)
         self._layout.addWidget(card)
 
     def _build_gate_card(self):
@@ -531,6 +543,10 @@ class AllSkySettingsPanel(QScrollArea):
         self._top_n.setValue(int(c.get('top_n', 15)))
         self._min_exposure.setValue(float(c.get('min_exposure_s', 0.5)))
         self._min_stars.setValue(int(c.get('min_star_detections', 100)))
+        keys = preset_keys()
+        preset = c.get(LABEL_SIZE_KEY, LABEL_SIZE_DEFAULT)
+        self._label_size.setCurrentIndex(
+            keys.index(preset if preset in keys else LABEL_SIZE_DEFAULT))
 
         burn = c.get('burn_into_output', {})
         self._burn_saved_file.set_checked(burn.get('saved_file', False))
@@ -574,6 +590,7 @@ class AllSkySettingsPanel(QScrollArea):
         cfg['top_n'] = self._top_n.value()
         cfg['min_exposure_s'] = float(self._min_exposure.value())
         cfg['min_star_detections'] = int(self._min_stars.value())
+        cfg[LABEL_SIZE_KEY] = preset_keys()[self._label_size.currentIndex()]
         cfg['burn_into_output'].update({
             'saved_file': self._burn_saved_file.is_checked(),
             'web': self._burn_web.is_checked(),

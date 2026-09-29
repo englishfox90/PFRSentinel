@@ -53,7 +53,8 @@ def _customised():
     hold, so equality after the round-trip proves nothing was rebuilt."""
     cfg = copy.deepcopy(DEFAULT_CONFIG['allsky_overlay'])
     cfg.update(enabled=True, calibration_file='cal.json', top_n=20,
-               utc_offset_hours=5, min_exposure_s=1.25, min_star_detections=40)
+               utc_offset_hours=5, min_exposure_s=1.25, min_star_detections=40,
+               label_size_preset='small')
     cfg['constellations'].update(enabled=False, lines=False, labels=False, color='#112233',
                                  line_width=7, label_size=21, opacity=99, edge_fade_px=123)
     cfg['bright_stars'].update(enabled=True, max_magnitude=4.0, bayer_fallback=True,
@@ -131,3 +132,27 @@ def test_the_panel_does_not_alias_or_mutate_the_loaded_dict(panel):
     out['planets']['colors']['Mars'] = '#000000'
     assert loaded['planets']['colors']['Mars'] == '#123456'
     assert panel.get_config()['planets']['colors']['Mars'] == '#123456'
+
+
+def test_the_label_size_combo_loads_and_emits_the_preset(panel, qapp):
+    from services.allsky.label_size import preset_keys
+
+    loaded = _customised()
+    panel.load_from_config(loaded)
+    assert preset_keys()[panel._label_size.currentIndex()] == 'small'
+
+    emitted = []
+    panel.settings_changed.connect(emitted.append)
+    panel._label_size.setCurrentIndex(preset_keys().index('why_so_large'))
+    qapp.processEvents()
+    assert emitted[-1]['label_size_preset'] == 'why_so_large'
+
+
+def test_an_unknown_label_size_preset_loads_as_large(panel):
+    from services.allsky.label_size import preset_keys
+
+    loaded = _customised()
+    loaded['label_size_preset'] = 'gigantic'
+    panel.load_from_config(loaded)
+    assert preset_keys()[panel._label_size.currentIndex()] == 'large'
+    assert panel.get_config()['label_size_preset'] == 'large'

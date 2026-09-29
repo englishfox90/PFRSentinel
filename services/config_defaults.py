@@ -404,6 +404,9 @@ DEFAULT_CONFIG = {
         # night; rigs without ML or with a small sensor may need it lower.
         "min_exposure_s": 0.5,
         "min_star_detections": 100,
+        # One step for every layer's label_size below (services/allsky/label_size.py):
+        # too_small / small / normal / large / why_so_large. 'large' is unchanged.
+        "label_size_preset": "large",
         "constellations": {
             "enabled": True, "lines": True, "labels": True,
             "color": "#4488FF", "line_width": 2, "label_size": 12, "opacity": 180,

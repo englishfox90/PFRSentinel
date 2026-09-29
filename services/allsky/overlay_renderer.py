@@ -21,6 +21,7 @@ from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
 from .discredit_policy import overlay_withheld
 from .fisheye import FisheyeModel
 from .label_collision import LabelGrid
+from .label_size import apply_label_size_preset
 from .label_stability import get_label_stabilizer, upsample
 from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
@@ -72,6 +73,7 @@ def render_allsky_overlay(
     if not config.get('enabled', False):
         return img
 
+    config = apply_label_size_preset(config)
     original_mode = img.mode
 
     # --- Load fisheye model ---

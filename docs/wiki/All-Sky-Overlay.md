@@ -27,7 +27,7 @@ The overlay, automatic calibration and star detection only run on frames that ca
 - **The sun must be below civil twilight** (6 degrees below the horizon). This check needs your latitude and longitude; without them it is skipped.
 - **The frame must not be sensor noise only.** If [ML Models](ML-Models) are enabled and the frame is flagged as static (a dark, closed roof at high gain, for example), there is nothing in it to annotate.
 - **The exposure must be long enough.** Frames exposed for less than **Minimum exposure** (0.5 seconds by default) are never a night sky: a lit roof or a dusk sky at a few milliseconds still fools the roof classifier, but a real night runs many seconds. Set it to 0 to turn this check off.
-- **The roof must not be reported closed.** If ML Models are enabled and the roof classifier reports **Closed** on two frames in a row, the overlay and calibration pause. A single Closed frame is ignored. Rigs with no roof (for example an open-air all-sky camera) can turn off **Skip Sky Features When Roof Closed** in the ML settings so a misread "Closed" does not suppress them. Detected stars never override a Closed reading.
+- **The roof must not be reported closed.** If ML Models are enabled and the roof classifier reports **Closed** on two frames in a row, the overlay and calibration pause. A single Closed frame between Open ones is ignored (the classifier's known failure is a lone misread on an unusual frame), but there is nothing to protect before the roof has been seen Open at all, so on the first frames after start-up, or the first night frames after a day, one Closed reading is enough. In 3.7.8 and earlier the first frame after start-up was always drawn, labels on a closed roof included, and it was the one posted to Discord as the night's first update. Rigs with no roof (for example an open-air all-sky camera) can turn off **Skip Sky Features When Roof Closed** in the ML settings so a misread "Closed" does not suppress them. Detected stars never override a Closed reading.
 - **Stars must be detected.** When the roof reads Open (or ML is off) but fewer than **Minimum stars detected** (100 by default) star-like points are found on three frames in a row, the frame is a lit roof or an overcast sky, and labels would be drawn on a ceiling or on cloud. The overlay pauses until two frames in a row show at least twice that many stars, so it does not flicker when the count hovers at the floor. The count is coarse — it is taken on a reduced copy of the frame, so only the brighter stars register — and the default is calibrated on a rig whose closed roof is dimly lit and itself carries 20–80 point-like sources (roof lights and their reflections), while its clear nights show 200–450. If the sky classifier says stars are visible, a low count on its own does not pause anything, which is what protects a moon-washed night on a rig with ML Models enabled; rigs without ML, or with a small sensor, may need to lower the floor. Raise it if a lit, closed roof still passes.
 - **A calibration must exist.**
 
@@ -58,6 +58,7 @@ Open **All-Sky** from the navigation rail (in the Image group).
 |---------|---------|-------|-------------|
 | All-Sky overlay enabled | Off | — | Master switch for the overlay. Automatic calibration also only runs while this is on. |
 | Max objects visible | 15 | 5–50 (steps of 5) | Maximum number of labelled bright stars, Messier objects, NGC/IC objects, and planets combined. The brightest visible objects win. Constellations do not count towards this limit. |
+| Label size | Large | Too small, Small, Normal, Large, Why so large | Size of every label on the overlay. **Large** is the size earlier versions always drew; each step down takes 2 px off every layer (at the 750 px reference size, so the step scales with your image), each step up adds 2 px. The layers keep their relative sizes: planets stay a little larger than star names, NGC labels a little smaller. New in the next release. |
 
 ### Burn overlay into output
 
@@ -341,7 +342,7 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 - Labels are only drawn for objects more than 10 degrees above the horizon, and only where the frame shows open sky. Open sky is worked out from where stars are detected.
 - Each label is tried in several positions around its object (right, left, below, above, then the diagonals) and never covers the object it names. A label that would overlap one already placed is dropped. Placement order is constellation abbreviations, then bright stars, Messier, NGC/IC, and planets.
 - **Max objects visible** picks the brightest visible objects.
-- Label text scales with the image size, so labels look the same at any resolution.
+- Label text scales with the image size, so labels look the same at any resolution. **Label size** on the Enable Overlay card makes every label larger or smaller together.
 
 ### Equipment avoidance
 
