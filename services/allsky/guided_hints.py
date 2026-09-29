@@ -19,7 +19,7 @@ does fit predicts stars that sit on empty sky — the `support` figure.
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import numpy as np
 
@@ -62,6 +62,16 @@ _SUPPORT_MIN_DETECTIONS = 15
 # poses scored 0.00-0.18 against the 80 brightest detections. Against all 235
 # detections the wrong poses reached 0.29 — hence the cap above. Obstructions
 # and cloud hide real stars, so a correct pose never scores near 1.
+#
+# Who votes matters as much as the threshold. The identified anchors vote
+# too, and a prediction the equipment map places on the mount does not: on
+# the reference rig (2026-09-28) five correct anchors were exactly the bright
+# stars in clear sky, so once they were named the unnamed remainder — Deneb,
+# Vega, Arcturus, Alphecca and the rest — sat on the pier and telescope,
+# support fell to 1/12 and the hints were withheld with a false "check your
+# stars" while the final solve passed at 2.96 px. An anchor's vote is not
+# circular: a click on empty sky is an unsupported voter, which is what a
+# mis-click looks like.
 _SUPPORT_TRUSTED = 0.3
 
 # Suggestions shown. The pick list runs to ~100 stars at mag 3.5; labelling
@@ -102,6 +112,7 @@ def suggest_stars(
     sky_cy: float,
     sky_radius: float,
     should_cancel=None,
+    is_sky: Optional[Callable[[float, float], bool]] = None,
 ) -> Optional[HintResult]:
     """Predict pixel positions for the candidates the user has not named yet.
 
@@ -111,6 +122,9 @@ def suggest_stars(
 
     should_cancel: optional callable polled during the solve; returning True
         abandons it (the result is None).
+    is_sky: optional (x, y) -> bool in the frame's pixels, from the equipment
+        map (equipment_lookup). A prediction it puts on equipment is still
+        shown, as an unsupported hint, but does not vote on support.
 
     Returns None when there are too few anchors or the solve cannot run;
     otherwise a HintResult whose `trusted` flag says whether the hints should
@@ -154,13 +168,27 @@ def suggest_stars(
                      "other — one of them is probably mis-identified."))
 
     named = {str(a[4]) for a in anchors if len(a) > 4}
+    by_name = {c['name']: c for c in candidates}
     radius = max(_SUPPORT_MIN_PX, _SUPPORT_RADIUS_FRACTION * float(sky_radius))
     det = (np.array([(d[0], d[1])
                      for d in detections[:_SUPPORT_MAX_DETECTIONS]], dtype=float)
            if len(detections) else np.empty((0, 2)))
 
-    hints: List[StarHint] = []
+    def has_detection(x: float, y: float) -> bool:
+        return bool(len(det)) and bool(
+            np.min(np.hypot(det[:, 0] - x, det[:, 1] - y)) <= radius)
+
     voters = supported_voters = 0
+    for a in anchors:
+        c = by_name.get(str(a[4])) if len(a) > 4 else None
+        # An anchor the pick list does not know (tests, scripted callers) is
+        # counted: the user chose it because it was bright and visible.
+        if c is not None and not _votes(c):
+            continue
+        voters += 1
+        supported_voters += int(has_detection(float(a[0]), float(a[1])))
+
+    hints: List[StarHint] = []
     for c in candidates:
         if c['name'] in named:
             continue
@@ -171,12 +199,13 @@ def suggest_stars(
         # Predictions outside the sky circle are horizon clutter, not help.
         if math.hypot(x - sky_cx, y - sky_cy) > float(sky_radius):
             continue
-        supported = bool(len(det)) and bool(
-            np.min(np.hypot(det[:, 0] - x, det[:, 1] - y)) <= radius)
+        supported = has_detection(x, y)
+        # Shown even on equipment: the map's edge is soft and a star at the
+        # rim of the mount is still one the user can find. It just cannot
+        # vote — its absence says nothing about the anchors.
         hints.append(StarHint(c['name'], x, y, float(c.get('vmag', 0.0)),
                               supported))
-        if (float(c.get('vmag', 9.0)) <= _SUPPORT_MAX_MAG
-                and float(c['alt']) >= _SUPPORT_MIN_ALT):
+        if _votes(c) and (is_sky is None or is_sky(x, y)):
             voters += 1
             supported_voters += int(supported)
 
@@ -187,9 +216,16 @@ def suggest_stars(
     message = ""
     if not trusted:
         message = (f"Only {supported_voters} of the {voters} bright stars these "
-                   "identifications predict line up with a star in the frame "
-                   "— one of them is probably mis-identified.")
+                   "identifications place — the ones you identified included "
+                   "— line up with a star in the frame; one of them is "
+                   "probably mis-identified.")
     hints.sort(key=lambda h: h.vmag)
     hints = hints[:MAX_HINTS]
     return HintResult(hints=hints, rms=float(rms), support=support,
                       trusted=trusted, message=message)
+
+
+def _votes(candidate: dict) -> bool:
+    """Bright and high enough that its absence from the frame means something."""
+    return (float(candidate.get('vmag', 9.0)) <= _SUPPORT_MAX_MAG
+            and float(candidate.get('alt', 0.0)) >= _SUPPORT_MIN_ALT)
