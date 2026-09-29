@@ -15,6 +15,7 @@ import pytest
 
 import services.notifications.dispatcher as dispatcher_module
 from services.notifications.events import (
+    CALIBRATION_DISCREDITED,
     CALIBRATION_DONE,
     ERROR,
     LIFECYCLE,
@@ -263,6 +264,63 @@ class TestHermesBackendBuildPayload:
         assert "image" not in payload
 
 
+class TestCalibrationDiscreditedEvent:
+    """#93 follow-up: the saved model matched the live buffer at chance level
+    in consecutive runs. Same switch and route as calibration_done."""
+
+    def test_calibration_block_carries_state_and_reason(self):
+        backend = HermesBackend(_hermes_config())
+        event = NotificationEvent(
+            type=CALIBRATION_DISCREDITED, level="warning",
+            title="All-Sky Calibration Needs Attention",
+            body="matched no better than chance",
+            data={"model_info": {"rms_residual": 5.77, "n_matches": 10,
+                                 "calibrated_at": "2026-09-28T03:33:48Z"}},
+        )
+        payload = backend._build_payload(event)
+        assert payload["event"] == payload["event_type"] == CALIBRATION_DISCREDITED
+        assert payload["level"] == "warning"
+        assert payload["calibration"] == {
+            "state": "discredited",
+            "rms_residual": 5.77,
+            "n_matches": 10,
+            "calibrated_at": "2026-09-28T03:33:48Z",
+            "reason": "matched no better than chance",
+        }
+
+    def test_routes_to_the_calibration_url(self):
+        override = "https://hermes.example.com/calibration"
+        config = _hermes_config(route_by_event=True,
+                                event_urls={"calibration_done": override})
+        response = MagicMock(status_code=200)
+        with patch(
+            "services.notifications.hermes_backend.post_with_retry", return_value=response
+        ) as post_mock, patch("services.posthog_service.capture_event"):
+            HermesBackend(config)._deliver(
+                NotificationEvent(type=CALIBRATION_DISCREDITED, body="x"))
+        assert post_mock.call_args[0][0] == override
+
+    def test_discord_backend_posts_a_warning_on_the_calibration_switch(self):
+        from services.notifications.discord_backend import DiscordBackend
+        config = {"discord": {"enabled": True, "webhook_url": "http://x",
+                              "post_calibration": True}}
+        with patch("services.notifications.discord_backend.DiscordAlerts") as alerts_cls:
+            DiscordBackend(config)._deliver(NotificationEvent(
+                type=CALIBRATION_DISCREDITED, title="t", body="b"))
+            alerts_cls.return_value.send_calibration_discredited.assert_called_once_with("t", "b")
+
+    def test_discord_alerts_gate_on_post_calibration(self):
+        from services.discord_alerts import DiscordAlerts
+        for flag, expected in ((False, 0), (True, 1)):
+            alerts = DiscordAlerts({"discord": {"enabled": True, "webhook_url": "http://x",
+                                                "post_calibration": flag}})
+            with patch.object(alerts, "send_discord_message", return_value=True) as send:
+                alerts.send_calibration_discredited("t", "b")
+            assert send.call_count == expected
+            if expected:
+                assert send.call_args.kwargs.get("level") == "warning"
+
+
 class TestHermesBackendDeliverGating:
     def test_deliver_does_not_post_when_event_flag_disabled(self):
         with patch("services.notifications.hermes_backend.post_with_retry") as post_mock:
@@ -309,6 +367,7 @@ class TestHermesBackendDeliverGating:
             (PERIODIC_IMAGE, "periodic_enabled"),
             (TIMELAPSE_DONE, "post_timelapse"),
             (CALIBRATION_DONE, "post_calibration"),
+            (CALIBRATION_DISCREDITED, "post_calibration"),
         ],
     )
     def test_each_event_type_gated_by_its_own_flag(self, event_type, gate_key):
