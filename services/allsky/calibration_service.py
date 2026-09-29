@@ -49,6 +49,7 @@ from .calibration_workers import (  # re-exported for existing callers
 from .escape_policy import ESCAPE_COOLDOWN_BASE_S, EscapeBackoff
 from .frame_detection import (  # detect_calibration_frame re-exported (was _detect_frame)
     SkippedFrameSummary, detect_calibration_frame)
+from .discredit_policy import DiscreditEpisode, notification_text
 from .incumbent_chance import IncumbentChanceStreak, calibrated_status
 from .incumbent_evidence import incumbent_anchor_health
 from .label_stability import reset_label_stability
@@ -125,6 +126,9 @@ class CalibrationService(QObject):
     status_changed = Signal(str)
     attention_changed = Signal(str, str)
     badge_quality_changed = Signal(str, str)
+    # (title, body) once per discredit episode (discredit_policy): the model
+    # on disk is withheld from the overlay and the user should be told.
+    model_discredited = Signal(str, str)
 
     # Internal signal: queued to main thread for safe QThread creation.
     _check_refine = Signal()
@@ -172,6 +176,9 @@ class CalibrationService(QObject):
         self._ring = FrameRing()   # long-baseline, same-night frames (frame_ring)
         # Chance-level runs on the model on disk (incumbent_chance): UI + rule 3 only.
         self._chance_streak = IncumbentChanceStreak()
+        # What the verdict does (discredit_policy): overlay withheld, seedless
+        # bootstrap, one notification. Synced from _publish_attention.
+        self._episode = DiscreditEpisode()
         self._attention = ('', '')
         self._lat = 0.0
         self._lon = 0.0
@@ -190,6 +197,7 @@ class CalibrationService(QObject):
         if model and model.is_valid():
             self._model = model
             self._chance_streak.reset()
+            self._episode.end()
             self._quality = model_quality(
                 model, model.n_images, model.span_minutes,
             )
@@ -357,6 +365,11 @@ class CalibrationService(QObject):
         return self._model
 
     @property
+    def overlay_withheld(self) -> bool:
+        """True while the model on disk is discredited (discredit_policy)."""
+        return self._episode.active
+
+    @property
     def frame_count(self) -> int:
         with self._lock:
             return len(self._frames)
@@ -394,8 +407,13 @@ class CalibrationService(QObject):
         # rotational degeneracy; refining an existing model only needs a few min.
         # Basin escape reuses the cold-start path: after repeated rejections the
         # on-disk model is suspect and must not seed the fit.
+        # A discredited model (discredit_policy) escapes on the same terms
+        # without waiting for three rejections: the chance verdict already
+        # says its basin is wrong.
+        discredited = self._episode.active
         escape = (self._model is not None
-                  and self._consecutive_refine_failures >= BASIN_ESCAPE_FAILURES
+                  and (discredited
+                       or self._consecutive_refine_failures >= BASIN_ESCAPE_FAILURES)
                   and not self._escape_backoff.exhausted(now)
                   and now - self._last_escape_time >= self._escape_backoff.cooldown())
         cold_start = self._model is None or escape
@@ -429,7 +447,10 @@ class CalibrationService(QObject):
         health = None
         if escape:
             self._last_escape_time = now
-            health = incumbent_anchor_health(self._model, frames_copy)
+            # No veto for a discredited model: two chance-level runs over the
+            # whole buffer outrank a pass on three frames, as in the caution.
+            health = (None if discredited
+                      else incumbent_anchor_health(self._model, frames_copy))
             if health is True:
                 log.warning(
                     f"CalibrationService: {self._consecutive_refine_failures} "
@@ -446,10 +467,14 @@ class CalibrationService(QObject):
         # (cold start / basin escape). Otherwise it refines the existing model.
         if escape:
             log.warning(
-                f"CalibrationService: {self._consecutive_refine_failures} "
-                "consecutive refinement rejections \u2014 the current model may be "
-                "a wrong-basin fit poisoning the seed. Attempting a seedless "
-                "re-calibration (basin escape)."
+                "CalibrationService: " + (
+                    "the current model matched the live buffer at chance level "
+                    "in consecutive runs"
+                    if discredited else
+                    f"{self._consecutive_refine_failures} consecutive refinement "
+                    "rejections") +
+                " \u2014 the current model may be a wrong-basin fit poisoning "
+                "the seed. Attempting a seedless re-calibration (basin escape)."
             )
             self._dump_trigger.escape_started()
         mode = ("basin escape" if escape
@@ -516,7 +541,12 @@ class CalibrationService(QObject):
         self._dump_trigger.exhaustion_reached()
 
     def _publish_attention(self) -> None:
-        """Re-judge the badge caution; emit only when it changes."""
+        """Re-judge the badge caution; emit only when it changes. Every
+        caller has just changed the model or the streak, so the discredit
+        episode is reconciled here too (once per transition)."""
+        if self._episode.update(self._chance_streak.discredited, self._model):
+            self.model_discredited.emit(*notification_text(
+                self._model, self._chance_streak.note(self._quality)))
         with self._lock:
             frames = list(self._frames)
         attention = calibration_attention(

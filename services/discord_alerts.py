@@ -523,6 +523,20 @@ Latest sky capture from {APP_DISPLAY_NAME}."""
             "All-Sky Calibration Complete", description, level="info"
         )
 
+    def send_calibration_discredited(self, title: str, body: str):
+        """The saved all-sky model is no longer trusted (discredit_policy).
+
+        Same switch as the completion post: a user who wants to hear that a
+        calibration landed wants to hear that it stopped working.
+        """
+        if not self.is_enabled():
+            return False
+        if not self.config.get('discord', {}).get('post_calibration', False):
+            return False
+        return self.send_discord_message(
+            title or "All-Sky Calibration Needs Attention", body, level="warning"
+        )
+
     def _send_with_video(self, title: str, description: str, video_path=None):
         """
         Internal helper: send an embed, optionally attaching an MP4 file.
