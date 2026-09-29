@@ -24,7 +24,7 @@ opentelemetry-sdk>=1.20.0          # OTLP log pipeline (services/posthog_logs.py
 opentelemetry-exporter-otlp-proto-http>=1.20.0  # ships app logs to PostHog
 
 # ML inference (lightweight ONNX runtime for production)
-onnxruntime>=1.16.0
+onnxruntime>=1.30.0
 
 # YouTube timelapse uploads
 google-api-python-client>=2.0.0

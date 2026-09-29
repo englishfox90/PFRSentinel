@@ -12,7 +12,7 @@ torch>=2.14.0
 torchvision>=0.15.0
 
 # Inference (lightweight alternative to full PyTorch)
-onnxruntime>=1.15.0
+onnxruntime>=1.30.0
 
 # Data processing
 numpy>=2.5.3
