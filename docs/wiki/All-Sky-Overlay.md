@@ -222,7 +222,9 @@ The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be ma
 3. **Click Add this star.** The star appears under **Identified stars** with a tick, or with a warning mark if the click did not snap. Each star can only be used once. Select an entry and click **Remove selected** to take it out; selecting an entry while zoomed in also brings that star into view.
 4. **After three stars, let the suggestions help.** Three identified stars are enough to work out roughly where every other bright star must be, so the 30 brightest are labelled on the frame with dashed blue circles (fainter where no detected star sits nearby). Click a labelled star and its name is filled in for you — check it, then **Add this star**. If instead you see **Check your stars**, the stars identified so far disagree with each other or with the sky in the frame: one of them is probably wrong, most likely the one you just added.
 
-   > **New in the next release** — not available in version 3.7.8 or earlier. The stars you have already identified count towards that check, and stars the [equipment map](#equipment-avoidance) places on a telescope or mount do not. On a rig where the mount hides much of the sky, naming the visible bright stars no longer sets off the warning.
+   **Or drag the circle onto the star.** Press on a blue circle and drag it onto the real star it belongs to: the star is identified in one gesture, with no name to confirm and no **Add** to press. The drop snaps to the nearest detected star like a click does, and carries the same unsnapped warning if none is nearby.
+
+   > **New in the next release** — not available in version 3.7.8 or earlier. Dragging a suggestion is new. So is the way the **Check your stars** warning is judged: the stars you have already identified count towards that check, and stars the [equipment map](#equipment-avoidance) places on a telescope or mount do not, so on a rig where the mount hides much of the sky, naming the visible bright stars no longer sets off the warning.
 5. **Identify at least 5 stars spread across the sky.** **6 or more** lets the solver recover automatically if one turns out to be wrong. The button shows your progress, for example **Solve (3/5)**, and becomes available at five.
 6. **Click Solve.** A progress bar runs for the few seconds the solve takes.
 
@@ -236,6 +238,7 @@ A solve that passes is **not saved yet**. The dialog shows the RMS error and dra
 
 - **Save calibration** saves it, closes the dialog, and the overlay starts using it. The Lens Calibration status line reads "Guided calibration saved: …" and a notification is added.
 - **Adjust stars** returns to identifying stars without saving, with everything you identified intact.
+- **Drag a blue circle onto its star** when one of the predictions has missed. That discards the unsaved result, returns to identifying stars, and adds that star to your list at the position you dropped it — then click **Solve** again to refit with it. (New in the next release — not available in version 3.7.8 or earlier.)
 
 Closing the dialog with stars identified asks for confirmation first, so a stray Esc does not discard your work.
 
