@@ -146,6 +146,37 @@ class TestCollecting:
         assert dlg._combo.currentData()['name'] == 'Spica'
         assert 'Spica' in dlg._pending_lbl.text()
 
+    def test_dropping_a_suggested_star_identifies_it_in_one_gesture(self, dialog):
+        dlg, req = dialog
+        _identify(dlg, 3)
+        x, y, _flux = dlg._detections[4]
+        dlg.show_hints(HintResult(
+            hints=[StarHint('Spica', x + 8.0, y - 6.0, 1.0, True)], trusted=True))
+        dlg._on_hint_dropped('Spica', x + 4.0, y + 3.0)
+
+        added = dlg._anchors[-1]
+        assert added['name'] == 'Spica'
+        assert (added['px'], added['py']) == (x, y), "snapped to the detection"
+        assert added['snapped']
+        assert 'Spica added' in dlg._pending_lbl.text()
+        assert len(req['hints'][-1]) == 4, "fresh suggestions were requested"
+
+    def test_dropping_without_a_detection_nearby_keeps_the_drop_point(self, dialog):
+        dlg, _req = dialog
+        _identify(dlg, 3)
+        dlg._on_hint_dropped('Spica', 1900.0, 100.0)
+        added = dlg._anchors[-1]
+        assert (added['px'], added['py']) == (1900.0, 100.0)
+        assert not added['snapped']
+        assert 'unsnapped' in dlg._pending_lbl.text()
+
+    def test_dropping_an_already_identified_star_is_refused(self, dialog):
+        dlg, _req = dialog
+        _identify(dlg, 3)
+        dlg._on_hint_dropped('Vega', 1900.0, 100.0)
+        assert len(dlg._anchors) == 3
+        assert 'already identified' in dlg._pending_lbl.text()
+
     def test_untrusted_suggestions_are_withheld_and_explained(self, dialog):
         dlg, _req = dialog
         _identify(dlg, 3)
@@ -270,6 +301,43 @@ class TestReview:
         assert req['save'] == 2 and req['solve'] == []
         dlg.show_saved(True, "")
         assert dlg.saved
+
+    def test_dropping_a_predicted_star_discards_the_result_and_adds_it(self, dialog):
+        """The review circles are where the solve thinks the stars are.
+        Dragging one onto the real star says the solve missed it: back to
+        picking, with that star now identified for the next solve."""
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        dlg.show_solved(_solved())
+        assert not dlg._canvas._interactive, "picking is off during review"
+
+        dlg._on_hint_dropped('Capella', 1510.0, 405.0)
+
+        assert req['discard'] == 1
+        assert dlg._predicted == []
+        assert dlg._solve_btn.text().startswith("Solve")
+        assert [a['name'] for a in dlg._anchors][-1] == 'Capella'
+        assert len(dlg._anchors) == MIN_ANCHORS + 1
+        assert 'Solve' in dlg._pending_lbl.text()
+        assert req['save'] == 0
+
+    def test_dropping_an_identified_name_in_review_keeps_the_result(self, dialog):
+        """A star the solver renamed leaves its given name drawn as a
+        prediction. Dropping that circle must be refused BEFORE the held
+        result is discarded, or the user loses the solve and gains nothing."""
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        taken = dlg._anchors[0]['name']
+        dlg.show_solved(_solved())
+        predicted = list(dlg._predicted)
+
+        dlg._on_hint_dropped(taken, 1510.0, 405.0)
+
+        assert req['discard'] == 0
+        assert dlg._predicted == predicted
+        assert dlg._state == 'review'
+        assert len(dlg._anchors) == MIN_ANCHORS
+        assert 'already identified' in dlg._pending_lbl.text()
 
     def test_adjust_stars_discards_the_result_and_returns_to_picking(self, dialog):
         dlg, req = dialog
