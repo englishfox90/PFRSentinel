@@ -9,6 +9,14 @@ updates:
       python-minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # onnxruntime stopped shipping Intel-Mac wheels after 1.23.2. The floor
+      # is `>=`, so pip already installs the newest release everywhere else and
+      # falls back to 1.23.2 on an Intel Mac; raising the floor would make the
+      # from-source macOS install fail there for no gain. Every other
+      # dependency still ships x86_64 macOS wheels. Revisit if upstream
+      # restores them, or when Intel Macs are dropped deliberately.
+      - dependency-name: onnxruntime
   - package-ecosystem: github-actions
     directory: /
     schedule:
