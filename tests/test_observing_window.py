@@ -222,6 +222,23 @@ class TestRoofClosedConfirmation:
         assert self._frame('Closed (98%)') is False
         assert is_observing_window(self.CONFIG, {}, feature="Watch overlay") is False
 
+    def test_a_day_of_twilight_forgets_last_nights_open_state(self, monkeypatch):
+        """Night 1 saw the roof Open; a day of twilight frames never reaches
+        the roof rule, so without an explicit reset night 2's first Closed
+        frame would wait for a second and be drawn with labels."""
+        sited = _config(ml_models={'enabled': True},
+                        weather={'latitude': '51.5074', 'longitude': '-0.1278'})
+        sun = {'alt': -20.0}
+        monkeypatch.setattr('astral.sun.elevation', lambda *a, **kw: sun['alt'])
+        night = lambda status: is_observing_window(sited, {'ROOF_STATUS': status}, feature="t")
+
+        assert night('Open (95%)') is True                     # night 1
+        sun['alt'] = 10.0
+        for _ in range(3):
+            assert night('Open (95%)') is False                # the day: twilight rule
+        sun['alt'] = -20.0
+        assert night('Closed (100%)') is False                 # night 2, first frame
+
     def test_reset_forgets_the_established_open_state(self):
         assert self._frame('Open (95%)') is True
         reset_roof_gate()

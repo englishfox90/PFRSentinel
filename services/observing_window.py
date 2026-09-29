@@ -88,7 +88,8 @@ class _RoofClosedStreak:
     The confirmation frames exist to ride out one misread Closed amid Open
     frames. Until an Open verdict has been seen at all — the first frames
     after start-up, or the first night frames after a day of twilight — there
-    is no Open state to defend, so a single Closed counts as confirmed: the
+    is no Open state to defend, so a single Closed counts as confirmed
+    (``_evaluate`` resets the streak on every twilight frame): the
     first frame of the 2026-09-29 dev build was drawn full of labels on a
     roof the classifier had read Closed at 100 %, and that frame went to
     Discord as the night's first status post. A misread on a cold start
@@ -253,6 +254,9 @@ def _evaluate(config, metadata, feature) -> str:
             f"{feature} suppressed: sun elevation {sun_alt:.1f}° "
             f"(above civil twilight {TWILIGHT_SUN_ALT_DEG:.0f}°)"
         )
+        # A day has passed: last night's Open frames say nothing about
+        # tonight's roof, so the next night starts as a cold start does.
+        _roof_streak.reset()
         return 'twilight'
 
     signals = ml_star_signals(metadata)
