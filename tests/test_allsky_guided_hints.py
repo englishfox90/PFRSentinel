@@ -168,3 +168,93 @@ def test_anchor_below_horizon_gives_no_suggestions(sky):
     # Dec -89 never rises from latitude +31.
     anchors[0] = (anchors[0][0], anchors[0][1], 10.0, -89.0, 'nowhere')
     assert suggest_stars(anchors, candidates, det, LAT, LON, DT, *SKY) is None
+
+
+# ---------------------------------------------------------------------------
+# Obstructed rigs: who votes (reference rig, 2026-09-28)
+# ---------------------------------------------------------------------------
+
+def _bright_voters(sky):
+    """Candidates that vote on support: mag <= 2.5 and alt >= 25."""
+    candidates, _det, _truth = sky
+    return [c for c in candidates if c['vmag'] <= 2.5 and c['alt'] >= 25.0]
+
+
+def _obstructed_rig(sky, n_anchors=5):
+    """Anchors on the visible bright stars; most other bright stars hidden.
+
+    Returns (anchors, detections, hidden) where `hidden` are the bright
+    voters with no detection — "behind the mount" — chosen so that the
+    unnamed voters alone score under the trust threshold while anchors and
+    unnamed voters together score over it.
+    """
+    candidates, _det, truth = sky
+    anchors = _anchors(sky, n_anchors)
+    named = {a[4] for a in anchors}
+    unnamed = [c for c in _bright_voters(sky) if c['name'] not in named]
+    n = len(unnamed)
+    # k visible unnamed voters: k/n < 0.3 but (anchors + k)/(anchors + n) >= 0.3.
+    k = max(0, int(np.ceil(0.3 * n - 0.7 * n_anchors)))
+    assert k / n < 0.3 <= (n_anchors + k) / (n_anchors + n), (n, k)
+    hidden = {c['name'] for c in unnamed[k:]}
+    detections = [(x, y, 1000.0 - i) for i, (x, y) in
+                  enumerate(truth[c['name']] for c in candidates
+                            if c['name'] not in hidden)]
+    return anchors, detections, hidden
+
+
+def test_named_anchors_keep_voting_on_an_obstructed_rig(sky):
+    """Once the visible bright stars are all named, the unnamed remainder
+    sits on equipment. The anchors' own clicks are the evidence that the
+    pose is right; without their votes correct anchors were accused."""
+    candidates, _det, _truth = sky
+    anchors, detections, hidden = _obstructed_rig(sky)
+    result = suggest_stars(anchors, candidates, detections, LAT, LON, DT, *SKY)
+
+    assert result is not None and result.support is not None
+    assert result.trusted, result.message
+    assert result.support < 1.0, "the hidden stars still count against it"
+    assert {h.name for h in result.hints} >= hidden, "hidden stars still shown"
+
+
+def test_equipment_map_keeps_obstructed_predictions_out_of_the_vote(sky):
+    candidates, _det, truth = sky
+    anchors, detections, hidden = _obstructed_rig(sky)
+    hidden_xy = np.array([truth[n] for n in hidden])
+
+    def is_sky(x, y):
+        return bool(np.min(np.hypot(hidden_xy[:, 0] - x,
+                                    hidden_xy[:, 1] - y)) > 40.0)
+
+    result = suggest_stars(anchors, candidates, detections, LAT, LON, DT, *SKY,
+                           is_sky=is_sky)
+    assert result is not None and result.trusted
+    assert result.support == 1.0, "every voter left has a detection"
+    assert {h.name for h in result.hints} >= hidden, "still shown, just not voting"
+
+
+def test_anchor_on_empty_sky_is_an_unsupported_voter(sky):
+    """An anchor's vote is not circular: a mis-click that landed on nothing
+    counts against the pose, not for it."""
+    candidates, _det, _truth = sky
+    anchors, detections, _hidden = _obstructed_rig(sky)
+    with_click = suggest_stars(anchors, candidates, detections, LAT, LON, DT, *SKY)
+    # Same anchors, but strip the detection under the first click.
+    x0, y0 = anchors[0][0], anchors[0][1]
+    stripped = [d for d in detections if np.hypot(d[0] - x0, d[1] - y0) > 40.0]
+    without = suggest_stars(anchors, candidates, stripped, LAT, LON, DT, *SKY)
+    assert without.support < with_click.support
+
+
+def test_misidentified_anchor_is_still_caught_when_anchors_vote(sky):
+    candidates, _det, truth = sky
+    anchors, detections, _hidden = _obstructed_rig(sky)
+    taken = {a[4] for a in anchors}
+    x, y = anchors[0][0], anchors[0][1]
+    far = max((c for c in candidates[:40] if c['name'] not in taken),
+              key=lambda c: np.hypot(truth[c['name']][0] - x,
+                                     truth[c['name']][1] - y))
+    wrong = [(x, y, far['ra_deg'], far['dec_deg'], far['name'])] + anchors[1:]
+    result = suggest_stars(wrong, candidates, detections, LAT, LON, DT, *SKY)
+    assert result is not None and not result.trusted
+    assert 'mis-identified' in result.message
