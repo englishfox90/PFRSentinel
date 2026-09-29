@@ -8,7 +8,13 @@ whole frame, and a click that did not drag reports its position in ORIGINAL
 image pixels, so callers never see the view transform.
 
 Display only: markers, hints and the pending pick are handed in by the owner.
+A hint can be dragged: a press on its circle moves a ghost of it instead of
+panning, and the release reports the label and drop point (`hint_dropped`), so
+the owner can identify that star in one gesture. Hint drags work whether or not
+picking is on — the review step shows the solved model's predictions as hints,
+and dragging one onto the star it missed is exactly a new anchor.
 """
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -21,6 +27,9 @@ _ZOOM_STEP = 1.25
 # handful of blurry blocks and the snap does the precise work anyway.
 _MAX_SCREEN_PX_PER_IMAGE_PX = 6.0
 _DRAG_THRESHOLD_PX = 5
+# A press this close (screen px) to a hint's circle starts a hint drag rather
+# than a pan. Larger than the circle so the grab is forgiving at any zoom.
+_HINT_HIT_PX = 12.0
 
 # Hover loupe: at whole-frame zoom a 3552 px frame shows ~4 raw pixels per
 # screen pixel, too coarse to tell close stars apart (Mizar vs Alioth). Shown
@@ -62,6 +71,7 @@ class StarPickCanvas(QWidget):
     """Image view with zoom/pan that reports clicks in image coordinates."""
 
     clicked = Signal(float, float)      # image x, y
+    hint_dropped = Signal(str, float, float)   # hint label, image x, y
     zoom_changed = Signal(float)        # zoom relative to whole-frame fit
 
     def __init__(self, parent=None):
@@ -89,6 +99,8 @@ class StarPickCanvas(QWidget):
         self._press_origin = (0.0, 0.0)
         self._dragging = False
         self._cursor: Optional[QPointF] = None
+        self._drag_hint: Optional[CanvasHint] = None   # hint under the press
+        self._drag_pos: Optional[QPointF] = None       # ghost position (widget)
 
         # Smooth scaling a 12 MP frame costs tens of ms; do it once the wheel
         # or drag settles and use the fast path while the view is moving.
@@ -115,9 +127,28 @@ class StarPickCanvas(QWidget):
         self.update()
 
     def set_interactive(self, enabled: bool) -> None:
-        """Picking off (zoom and pan stay on) — while solving or reviewing."""
+        """Picking off (zoom, pan and hint drags stay on) — while solving or
+        reviewing."""
         self._interactive = enabled
-        self.setCursor(Qt.CrossCursor if enabled else Qt.OpenHandCursor)
+        self._reset_cursor()
+
+    def hint_at(self, pos: QPointF) -> Optional[CanvasHint]:
+        """The hint whose circle is under a widget position, if any."""
+        best, best_d = None, _HINT_HIT_PX
+        for h in self._hints:
+            pt = self.image_to_widget(h.x, h.y)
+            d = math.hypot(pt.x() - pos.x(), pt.y() - pos.y())
+            if d <= best_d:
+                best, best_d = h, d
+        return best
+
+    def _reset_cursor(self) -> None:
+        over_hint = self._cursor is not None and self.hint_at(self._cursor)
+        if over_hint:
+            self.setCursor(Qt.SizeAllCursor)
+        else:
+            self.setCursor(Qt.CrossCursor if self._interactive
+                           else Qt.OpenHandCursor)
 
     def zoom(self) -> float:
         return self._zoom
@@ -272,6 +303,7 @@ class StarPickCanvas(QWidget):
             self._paint_hints(p)
             self._paint_markers(p)
             self._paint_pending(p)
+            self._paint_drag_ghost(p)
             self._paint_loupe(p)
         finally:
             p.end()
@@ -313,6 +345,20 @@ class StarPickCanvas(QWidget):
         p.drawLine(QPointF(pt.x() + 5, pt.y()), QPointF(pt.x() + 16, pt.y()))
         p.drawLine(QPointF(pt.x(), pt.y() - 16), QPointF(pt.x(), pt.y() - 5))
         p.drawLine(QPointF(pt.x(), pt.y() + 5), QPointF(pt.x(), pt.y() + 16))
+
+    def _paint_drag_ghost(self, p: QPainter) -> None:
+        if self._drag_hint is None or self._drag_pos is None:
+            return
+        pt = self._drag_pos
+        p.setPen(QPen(_HINT, 2))
+        p.drawEllipse(pt, 9, 9)
+        p.setPen(QPen(_HINT, 1, Qt.DashLine))
+        p.drawLine(self.image_to_widget(self._drag_hint.x, self._drag_hint.y), pt)
+        p.setPen(QPen(_HINT, 2))
+        font = QFont(p.font())
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(QPointF(pt.x() + 12, pt.y() - 6), self._drag_hint.label)
 
     def _paint_loupe(self, p: QPainter) -> None:
         if (self._cursor is None or self._dragging or not self._interactive
@@ -360,6 +406,9 @@ class StarPickCanvas(QWidget):
             self._press_button = ev.button()
             self._press_origin = (self._ox, self._oy)
             self._dragging = False
+            self._drag_hint = (self.hint_at(ev.position())
+                               if ev.button() == Qt.LeftButton else None)
+            self._drag_pos = None
         self.setFocus()
 
     def mouseMoveEvent(self, ev):
@@ -370,6 +419,10 @@ class StarPickCanvas(QWidget):
                                        > _DRAG_THRESHOLD_PX):
                 self._dragging = True
                 self.setCursor(Qt.ClosedHandCursor)
+            if self._dragging and self._drag_hint is not None:
+                self._drag_pos = ev.position()
+                self.update()
+                return
             if self._dragging:
                 s = self._scale()
                 self._ox = self._press_origin[0] - delta.x() / s
@@ -377,20 +430,32 @@ class StarPickCanvas(QWidget):
                 self._clamp_origin()
                 self._invalidate(smooth=False)
                 return
+        else:
+            self._reset_cursor()
         self.update()
 
     def mouseReleaseEvent(self, ev):
         was_drag = self._dragging
         pressed = self._press_pos is not None
         button = self._press_button
+        hint = self._drag_hint
         self._press_pos = None
         self._dragging = False
-        self.setCursor(Qt.CrossCursor if self._interactive else Qt.OpenHandCursor)
-        if (pressed and not was_drag and button == Qt.LeftButton
-                and self._interactive and self._full is not None):
+        self._drag_hint = None
+        self._drag_pos = None
+        self._reset_cursor()
+        inside = False
+        ix = iy = 0.0
+        if pressed and self._full is not None:
             ix, iy = self.widget_to_image(ev.position())
-            if (0 <= ix < self._full.width() and 0 <= iy < self._full.height()):
-                self.clicked.emit(ix, iy)
+            inside = (0 <= ix < self._full.width()
+                      and 0 <= iy < self._full.height())
+        if pressed and was_drag and hint is not None:
+            if inside:
+                self.hint_dropped.emit(hint.label, ix, iy)
+        elif (pressed and not was_drag and button == Qt.LeftButton
+                and self._interactive and inside):
+            self.clicked.emit(ix, iy)
         self.update()
 
     def mouseDoubleClickEvent(self, _ev):
@@ -410,6 +475,8 @@ class StarPickCanvas(QWidget):
 
     def leaveEvent(self, ev):
         self._cursor = None
+        if self._press_pos is None:
+            self._reset_cursor()
         self.update()
         super().leaveEvent(ev)
 
