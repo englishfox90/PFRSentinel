@@ -16,7 +16,7 @@ onnxruntime>=1.15.0
 
 # Data processing
 numpy>=2.5.3
-astropy>=5.0.0
+astropy>=8.0.1
 scikit-learn>=1.9.1
 
 # Optional: GPU-accelerated ONNX inference (use instead of onnxruntime above)

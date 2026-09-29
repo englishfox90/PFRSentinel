@@ -8,7 +8,7 @@ platformdirs>=4.4.0  # Cross-platform app-data root (services/utils_paths.py).
 # Floor is the oldest release declaring Python 3.13 support; 4.0.0 predates it.
 astral>=3.2  # Accurate sunrise/sunset/twilight calculations
 scipy>=1.18.1  # Fisheye lens calibration (scipy.optimize.least_squares)
-astropy>=5.0.0  # FITS file support for ML data contribution
+astropy>=8.0.1  # FITS file support for ML data contribution
 
 # PySide6 Fluent UI (new modern interface)
 # Pinned to the version the installer ships. CI installs from this file, so an
