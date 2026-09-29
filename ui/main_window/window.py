@@ -426,6 +426,7 @@ class MainWindow(
         self.weather_timer.timeout.connect(self._refresh_weather_async)
         self.weather_timer.start(60_000)  # 60s
         QTimer.singleShot(2000, self._refresh_weather_async)  # prompt first fill
+        self._start_resource_monitor()
 
     def _check_admin_privileges(self):
         """Warn once at startup if the app lacks Administrator rights.

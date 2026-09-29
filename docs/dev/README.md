@@ -16,6 +16,7 @@ Developer-facing technical reference. End-user content lives on the project wiki
 | [CAMERA_USB_RESET.md](CAMERA_USB_RESET.md) | Windows `CM_Reenumerate_DevNode` USB reset implementation |
 | [CAMERA_LOGGING_REFERENCE.md](CAMERA_LOGGING_REFERENCE.md) | Log-search cheat sheet for diagnosing camera issues |
 | [DIAGNOSTICS_BUNDLE.md](DIAGNOSTICS_BUNDLE.md) | Logs → Export Diagnostics: bundle contents, redaction, fresh raw-frame capture |
+| [RESOURCE_MONITOR.md](RESOURCE_MONITOR.md) | Dev-build memory/CPU log line: working set vs private bytes, gauges, growth warning, opt-in tracemalloc |
 
 ## Build & release tooling
 

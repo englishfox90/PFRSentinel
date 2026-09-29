@@ -208,6 +208,14 @@ DEFAULT_CONFIG = {
             "sky_classifier": True,   # Predict sky condition (only when roof open)
         }
     },
+
+    # Resource reporting (services/resource_monitor.py). No UI: edit config.json.
+    "diagnostics": {
+        "resource_log_interval_s": 300,  # How often memory/CPU is sampled
+        # tracemalloc hotspots after each resource line. Costs CPU on every
+        # allocation — dev builds only; a production build ignores it.
+        "memory_trace": False,
+    },
     
     # Overlay settings
     "overlays": [

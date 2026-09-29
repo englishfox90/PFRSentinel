@@ -4,8 +4,10 @@ Performance measurement helpers for PFR Sentinel.
 Provides processing time tracking, memory usage, and disk space queries.
 """
 import os
+import sys
 import time
 import shutil
+from typing import Optional
 
 from .logger import app_logger
 
@@ -24,22 +26,39 @@ class ProcessingTimer:
         self.elapsed = time.perf_counter() - self._start
 
 
-def get_memory_usage_mb():
-    """Return current process memory usage in megabytes.
+_MB = 1024 * 1024
 
-    Returns:
-        float: RSS memory in MB, or -1.0 on failure.
+
+def get_process_memory() -> Optional[dict]:
+    """Return this process's memory counters in megabytes, or None on failure.
+
+    Keys: ``working_set_mb`` (what Task Manager's "Memory" column shows —
+    resident private pages, so a working-set trim lowers it without freeing
+    anything), ``peak_working_set_mb`` (lifetime high-water mark, which is
+    where a per-frame transient shows up), ``private_mb`` (committed private
+    bytes — the number that tracks real retention, because a trim cannot
+    touch it) and ``page_faults``. A counter the platform cannot supply is -1.
     """
     try:
         import psutil
-        proc = psutil.Process(os.getpid())
-        return proc.memory_info().rss / (1024 * 1024)
+        info = psutil.Process(os.getpid()).memory_info()
+        return {
+            'working_set_mb': info.rss / _MB,
+            'peak_working_set_mb': getattr(info, 'peak_wset', -_MB) / _MB,
+            'private_mb': getattr(info, 'private', getattr(info, 'data', -_MB)) / _MB,
+            'page_faults': int(getattr(info, 'num_page_faults', -1)),
+        }
     except ImportError:
         pass
     except OSError as e:
         app_logger.debug(f"psutil memory query failed: {e}")
 
-    # Fallback for Windows without psutil
+    if sys.platform == 'win32':
+        return _win32_process_memory()
+    return _proc_status_memory()
+
+
+def _win32_process_memory() -> Optional[dict]:
     try:
         import ctypes
         from ctypes import wintypes
@@ -76,13 +95,53 @@ def get_memory_usage_mb():
         if psapi.GetProcessMemoryInfo(
             kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb
         ):
-            return counters.WorkingSetSize / (1024 * 1024)
+            return {
+                'working_set_mb': counters.WorkingSetSize / _MB,
+                'peak_working_set_mb': counters.PeakWorkingSetSize / _MB,
+                # PagefileUsage is the process's private commit charge.
+                'private_mb': counters.PagefileUsage / _MB,
+                'page_faults': int(counters.PageFaultCount),
+            }
     except (ImportError, AttributeError):
         pass
     except OSError as e:
         app_logger.debug(f"Win32 memory query failed: {e}")
+    return None
 
-    return -1.0
+
+def _proc_status_memory() -> Optional[dict]:
+    """Linux ``/proc/self/status``; other platforms have no cheap equivalent."""
+    try:
+        with open('/proc/self/status', encoding='ascii', errors='replace') as fh:
+            fields = {}
+            for line in fh:
+                key, _, rest = line.partition(':')
+                parts = rest.split()
+                if len(parts) >= 2 and parts[1] == 'kB':
+                    fields[key] = int(parts[0]) * 1024
+        if 'VmRSS' not in fields:
+            return None
+        return {
+            'working_set_mb': fields['VmRSS'] / _MB,
+            'peak_working_set_mb': fields.get('VmHWM', -_MB) / _MB,
+            # VmData is the closest thing to a private commit charge here.
+            'private_mb': fields.get('VmData', -_MB) / _MB,
+            'page_faults': -1,
+        }
+    except OSError:
+        return None
+
+
+def get_memory_usage_mb():
+    """Return current process memory usage in megabytes.
+
+    Returns:
+        float: resident (working set) memory in MB, or -1.0 on failure.
+    """
+    info = get_process_memory()
+    if info is None:
+        return -1.0
+    return float(info['working_set_mb'])
 
 
 def get_disk_space(path):

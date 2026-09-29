@@ -60,6 +60,8 @@ PFRSentinel/
 │   ├── diagnostics_bundle.py   # Support ZIP: logs + redacted config + frames (pure)
 │   ├── frame_static_score.py   # Is a frame scene or only sensor noise? Reporting only — gates nothing
 │   ├── raw_frame_export.py     # Cached frame → Bayer FITS + unprocessed PNG + JSON
+│   ├── performance.py          # get_process_memory(): working set vs private bytes vs peak
+│   ├── resource_monitor.py     # Rate-limited memory/CPU log line + growth warning (every build) + tracemalloc hotspots (dev builds); fed by ui/controllers/resource_monitor_controller.py
 │   ├── allsky/                 # All-sky fisheye calibration + overlay
 │   ├── meteor/                 # Meteor detection — see METEOR_DETECTION_PLAN.md
 │   ├── library/                # Image library index, sessions, retention
@@ -112,7 +114,7 @@ Phase 1–3 complete; Phase 4 future:
 - **Phase 2**: Sky conditions (93.2%), stars (93.5%), moon (94.1%) — ImageNet-pretrained ResNet18 trunk since 2026-09-27 (`ml/sky_backbone_net.py`, trained by `ml/train_sky_backbone.py`); the from-scratch CNN in `ml/train_sky_classifier.py` is kept for comparison and scores ~82% on the same split
 - **Phase 3**: Dev-mode integration that saves calibration JSON + FITS per frame
 - **Phase 4** (future): Stretch recipe prediction
-- All inference is local via ONNX. Production interface: `services/ml_service.py` (`MLService.analyze_image`, `get_ml_service()` singleton), on whenever `ml_models.enabled` is set, in every build. `ui/controllers/ml_prediction.py` is a separate dev-only loader for the calibration JSON export, gated by `is_dev_mode_available()` along with `dev_mode_utils.py` and the Dev Mode card.
+- All inference is local via ONNX. Production interface: `services/ml_service.py` (`MLService.analyze_image`, `get_ml_service()` singleton), on whenever `ml_models.enabled` is set, in every build. `ui/controllers/ml_prediction.py` is a separate dev-only loader for the calibration JSON export, gated by `is_dev_mode_available()` along with `dev_mode_utils.py`, the Dev Mode card and the resource monitor's `diagnostics.memory_trace` option (the monitor itself runs in every build).
 
 ## Working on this codebase
 
@@ -361,6 +363,9 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_pole_tolerance.py` | 16 | `pole_tolerance` — 3σ + radial allowance, floor near the centre, flat 140 px without a sigma, the reference night's margins, a pole near the centre gated tighter than the flat gate; `PoleConstraint` hemisphere; `validate_pole` uses the calibrated tolerance, a caller's own, and legacy estimates without the field |
 | `test_jev_review.py` | 19 | `jev_review` + `jev_label_audit` + `ReviewTab` — Jev block from the systemone answers, stored without touching labels, state / report rows / corroboration read 'True'/'False' strings through `to_bool` (a closed roof is never sent as open), report judges sky only where the human roof is open (same rule as the tab), response cache locked across 8 writers and tolerant of a half-written line; roof / sky conflicts vs the human label (sky only on open-roof frames with a sky label), corroborated only when every other source sides with Jev, corroborated ranks above confident, panel text and banner; Review tab Jev filters, columns and ordering, labeling-tab panel + banner with the form left alone, no per-item column auto-resize (offscreen Qt) |
 | `test_allsky_pole_constrained_real.py` | 5 | Reference-rig 2026-09-18 library night (skips without `sample_images/`) — rotation pole found at the guided plate scale and inside the calibrated gate with a ×3 margin, pole-seeded search under budget, pole-seeded cold start lands in the guided basin (plan §0.7), the pole term is neutral on a seed already in the basin |
+| `test_resource_monitor.py` | 15 | `resource_monitor` + `performance.get_process_memory` — first sample logs, quiet app only on the heartbeat, a 64 MB private-bytes step or a reason earns a line, CPU% = process time / wall / cores, sustained rise warns once and re-arms after another threshold of growth, a spike or the step into capturing never warns, snapshot is plain JSON, real Win32 / `/proc` counters, `MemoryTrace` hotspots and growth |
+| `test_resource_monitor_controller.py` | 12 | `ResourceMonitorController` — every gauge read from a stand-in window (all-sky buffer/ring, meteor stack bytes, queues, overlay cache, reprocess cache, web snapshot), missing or raising subsystems left out, line/warning routed to the logger, sampling failure is DEBUG only, interval and `memory_trace` follow `diagnostics.*`, `memory_trace` refused outside dev builds, started by the window in every build (offscreen Qt) |
+| `test_timelapse_frame_bytes.py` | 5 | `TimelapseWriter._process_frame` — `Image.tobytes()` matches the old `np.array(convert('RGB'))` bytes for RGB / RGBA / L / I;16 input; an RGB frame is never `convert`ed |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
