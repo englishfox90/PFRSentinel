@@ -89,6 +89,9 @@ These two cards are pointers only. Discord settings and storage cleanup are conf
 
 ## Weather API
 
+> **New in the next release** — not available in version 3.7.8 or earlier.
+> Choosing **Imperial** now saves and applies; in 3.7.8 and earlier it was always saved as metric.
+
 Weather data is used for overlay tokens, the Weather tile in the status strip, Discord posts, and cloud cover in the [Image Library](Image-Library). PFR Sentinel uses OpenWeatherMap and caches results for 10 minutes. For a full walkthrough see [Weather Setup](Weather-Setup).
 
 | Setting | Description |
@@ -98,7 +101,7 @@ Weather data is used for overlay tokens, the Weather tile in the status strip, D
 | **Test** | Fetches the current weather with the values entered and shows the result below the key, e.g. "✓ Clear, 12.0°C". Errors include "API key required", "Location or coordinates required", and "No data returned". |
 | **Location** | City name, e.g. "London, UK". Leave blank to use coordinates instead. |
 | **Coordinates** | **Latitude**, **Longitude**, and **Elevation (m)** of your observatory. An alternative to a city name, and more precise. |
-| **Units** | **Metric (°C, m/s)** or **Imperial (°F, mph)**. Known issue: choosing **Imperial** has no effect in the current version. It is always saved as metric, and **Test** ignores it too. See [Weather Setup](Weather-Setup#units). |
+| **Units** | **Metric (°C, m/s)** or **Imperial (°F, mph)**. Applies to the weather overlay tokens, the Weather tile, Discord posts and **Test**, and is kept across restarts. See [Weather Setup](Weather-Setup#units). |
 
 Latitude and longitude can be typed in decimal degrees (`31.33`, `-100.46`) or degrees-minutes-seconds (`31 32 51`, `31:32:51`, `100 27 25 W`). When you leave the field, the value is converted to decimal degrees. South and West are negative. If the value can't be understood, the field gets a red border, the message "Invalid coordinate — use decimal degrees (e.g. 31.33 or -100.46)" appears, and the value is not saved.
 

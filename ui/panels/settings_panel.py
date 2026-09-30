@@ -228,7 +228,8 @@ class SettingsPanel(QScrollArea):
         
         # Units
         self.units_combo = ComboBox()
-        self.units_combo.addItems(["Metric (°C, m/s)", "Imperial (°F, mph)"])
+        self.units_combo.addItem("Metric (°C, m/s)", userData='metric')
+        self.units_combo.addItem("Imperial (°F, mph)", userData='imperial')
         self.units_combo.currentIndexChanged.connect(self._on_weather_changed)
         weather_card.add_row("Units", self.units_combo)
         
@@ -395,10 +396,13 @@ class SettingsPanel(QScrollArea):
             weather['longitude'] = self._normalise_coord(
                 self.lon_input.text(), weather.get('longitude', ''), True)
             weather['elevation'] = self.elevation_input.text()
-            units_text = self.units_combo.currentText()
-            weather['units'] = 'imperial' if 'imperial' in units_text else 'metric'
+            weather['units'] = self._selected_units()
             self.main_window.config.set('weather', weather)
             self.settings_changed.emit()
+
+    def _selected_units(self) -> str:
+        """The OpenWeatherMap units key ('metric' / 'imperial') behind the chosen item."""
+        return self.units_combo.currentData()
 
     @staticmethod
     def _normalise_coord(text: str, previous, is_longitude: bool):
@@ -465,8 +469,7 @@ class SettingsPanel(QScrollArea):
             location = self.location_input.text().strip()
             lat = self.lat_input.text().strip()
             lon = self.lon_input.text().strip()
-            units_text = self.units_combo.currentText()
-            units = 'imperial' if 'imperial' in units_text else 'metric'
+            units = self._selected_units()
             
             if not api_key:
                 self.weather_status_label.setText("❌ API key required")
@@ -545,9 +548,10 @@ class SettingsPanel(QScrollArea):
             self.lon_input.setText(str(weather.get('longitude', '')))
             self.elevation_input.setText(str(weather.get('elevation', '')))
             
-            units = weather.get('units', 'metric')
-            idx = 1 if units == 'imperial' else 0
-            self.units_combo.setCurrentIndex(idx)
+            # A value the combo doesn't offer (e.g. 'standard') reads as Metric
+            # rather than leaving the combo empty.
+            self.units_combo.setCurrentIndex(
+                max(self.units_combo.findData(weather.get('units', 'metric')), 0))
             
         finally:
             self._loading_config = False
