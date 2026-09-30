@@ -215,12 +215,19 @@ The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be ma
 | Drag | Pan when zoomed in. |
 | Double-click, **0**, or the **Whole frame** button | Return to the whole frame. |
 | Hover | At whole-frame zoom a loupe follows the cursor with a near full-resolution close-up, so you can tell close pairs apart (for example Mizar and Alioth). The green circle in the loupe shows how close a click must be to snap to a star. The loupe switches off once you zoom in past full resolution. |
+| **Stretch** slider | How hard the frame is brightened. Left is softer (only the brightest star cores saturate, the sky stays dark), right is harder (faint stars come up, the sky washes out). The middle is what the star detector itself sees, which was the fixed setting before. It changes the display only — the solve is unaffected — and your choice is remembered for next time. |
+
+> **New in the next release** — not available in version 3.7.8 or earlier. The **Stretch** slider is new. So is the way circles and labels are drawn: every ring and name now sits on a dark halo, in a slightly larger bold face, so they stay readable on a bright moonlit frame instead of vanishing into it.
 
 ### Identifying stars
+
+> **New in the next release** — not available in version 3.7.8 or earlier. **Exclude selected** is new: a star you doubt can be left out of the solve without deleting it.
 
 1. **Click a bright star.** The click snaps to the nearest star PFR Sentinel detected. If no detected star is nearby, the click stays where you placed it, with a warning that the solve is much less accurate with unsnapped clicks.
 2. **Choose which star it is.** Type in **Search for a star by name…** to filter the list. It contains bright stars (magnitude 3.5 or brighter) more than 15 degrees above the horizon at the frame's capture time, each shown with its magnitude and altitude. Stars without a proper name are listed by Bayer designation or catalogue number.
 3. **Click Add this star.** The star appears under **Identified stars** with a tick, or with a warning mark if the click did not snap. Each star can only be used once. Select an entry and click **Remove selected** to take it out; selecting an entry while zoomed in also brings that star into view.
+
+   **Not sure about one? Exclude it instead of removing it.** Select the entry and click **Exclude selected**: the star stays in the list and on the frame, in orange and marked **excluded by you**, but it is not given to the solver, does not count towards the **Solve** button and gets no suggestions built on it. The button reads **Include selected** while an excluded star is selected — click it to put the star back. Exclusions are yours: adding or removing other stars, and a failed solve, leave them as they are.
 4. **After three stars, let the suggestions help.** Three identified stars are enough to work out roughly where every other bright star must be, so the 30 brightest are labelled on the frame with dashed blue circles (fainter where no detected star sits nearby). Click a labelled star and its name is filled in for you — check it, then **Add this star**. If instead you see **Check your stars**, the stars identified so far disagree with each other or with the sky in the frame: one of them is probably wrong, most likely the one you just added.
 
    **Or drag the circle onto the star.** Press on a blue circle and drag it onto the real star it belongs to: the star is identified in one gesture, with no name to confirm and no **Add** to press. The drop snaps to the nearest detected star like a click does, and carries the same unsnapped warning if none is nearby.
@@ -231,7 +238,9 @@ The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be ma
 
 ### If the solve fails
 
-Nothing is lost. Every star you identified stays where it was, the message names the star that did not fit and how far off it is, that star is shown in red on the frame and in the list (and selected, ready for **Remove selected**), and the others show their own error. Remove or re-identify the suspect and click **Solve** again. The full detail for every star is also in the [Logs](Logs).
+> **New in the next release** — not available in version 3.7.8 or earlier. Excluding is new, and an excluded star is left alone by a failure.
+
+Nothing is lost. Every star you identified stays where it was, the message names the star that did not fit and how far off it is, that star is shown in red on the frame and in the list (and selected, ready for **Remove selected**), and the others show their own error. Remove or re-identify the suspect and click **Solve** again — or, when you are not sure the named star is the wrong one, select it and click **Exclude selected** to try the solve without it while keeping it in the list. A star you had already excluded takes no part in the failure and keeps its **excluded by you** mark. The full detail for every star is also in the [Logs](Logs).
 
 ### Checking and saving the result
 
@@ -245,7 +254,14 @@ Closing the dialog with stars identified asks for confirmation first, so a stray
 
 ### Outlier rescue
 
-If the full set of stars does not fit well and you identified more than five, the solver tries leaving out one or two of them. If a left-out click actually sits on a different bright star, it is re-identified as that star and kept. The result explains what happened, and the affected star is shown in orange — for example **Pollux → Sirius** when a star you named turned out to be a different one, or **left out** when the solve used 6 of 7 stars.
+> **New in the next release** — not available in version 3.7.8 or earlier. The list now shows what the solver made of every star, and a star you excluded yourself is told apart from one the solver left out.
+
+If the full set of stars does not fit well and you identified more than five, the solver tries leaving out one or two of them. If a left-out click actually sits on a different bright star, it is re-identified as that star and kept. The result explains what happened, and the list shows the solver's verdict on every star after a passing solve:
+
+- **Vega  — 3 px off** — used as identified; the number is how far the calibration puts the star from your click, so the worst-fitting star is easy to spot.
+- **Pollux → Sirius  — 4 px off** (orange) — a star you named turned out to be a different one, and was used under the corrected name.
+- **Altair  — left out** (orange) — the solver could not fit it and solved without it, for example using 6 of 7 stars.
+- **Deneb  — excluded by you** (orange) — your own exclusion; the solver never saw it. In the review a blue circle still shows where the calibration puts that star, so you can see whether your click was on it after all.
 
 ---
 

@@ -263,3 +263,22 @@ def test_paints_with_every_overlay_kind(canvas, qapp):
     _mouse(widget, QEvent.MouseMove, QPoint(200, 200), Qt.NoButton, Qt.NoButton)
     image = widget.grab().toImage()
     assert not image.isNull()
+
+
+def test_replace_image_keeps_zoom_and_pan(canvas):
+    widget, _ = canvas
+    widget.zoom_in()
+    widget.centre_on(3000.0, 2900.0, min_zoom=widget.zoom())
+    zoom, ox, oy = widget.zoom(), widget._ox, widget._oy
+    swap = QPixmap(IMAGE, IMAGE)
+    swap.fill(QColor(90, 90, 90))
+    widget.replace_image(swap)
+    assert widget._full is swap
+    assert widget.zoom() == pytest.approx(zoom)
+    assert (widget._ox, widget._oy) == (ox, oy)
+
+    other = QPixmap(IMAGE // 2, IMAGE // 2)
+    other.fill(QColor(30, 30, 30))
+    widget.replace_image(other)              # a different frame: whole-frame view
+    assert widget._full is other
+    assert widget.zoom() == 1.0

@@ -185,6 +185,8 @@ class _MainWindowSettingsMixin:
             dlg.solve_requested.connect(session.solve)
             dlg.hints_requested.connect(session.request_hints)
             dlg.discard_requested.connect(session.discard)
+            dlg.display_stretch_changed.connect(
+                self.allsky_controller.remember_display_stretch)
             session.solving.connect(dlg.show_solving)
             session.solved.connect(dlg.show_solved)
             session.failed.connect(dlg.show_failed)

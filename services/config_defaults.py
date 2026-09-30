@@ -407,6 +407,9 @@ DEFAULT_CONFIG = {
         # One step for every layer's label_size below (services/allsky/label_size.py):
         # too_small / small / normal / large / why_so_large. 'large' is unchanged.
         "label_size_preset": "large",
+        # Guided Calibration's display stretch slider, 0-1 (0.5 = what the
+        # star detector sees). Display only; never touches the solve.
+        "guided_display_stretch": 0.5,
         "constellations": {
             "enabled": True, "lines": True, "labels": True,
             "color": "#4488FF", "line_width": 2, "label_size": 12, "opacity": 180,

@@ -10,13 +10,14 @@ failed solve keeps every identified star and marks the ones that didn't fit
 
 No business logic lives here. Solving, star suggestions and saving belong to
 ui/controllers/guided_calibration_session.py and AllSkyController; this file
-emits requests and renders what comes back.
+emits requests and renders what comes back. What each identified star says
+in the list, and which of them a solve is given, is allsky_guided_anchors.
 """
 import math
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QPixmap
+from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
     QCompleter, QDialog, QHBoxLayout, QVBoxLayout, QWidget,
 )
@@ -26,10 +27,13 @@ from qfluentwidgets import (
     ToolButton,
 )
 
+from ..components.display_stretch_slider import DisplayStretchSlider
 from ..components.star_pick_canvas import (
     CanvasHint, CanvasMarker, StarPickCanvas)
 from ..theme.icons import mdi
 from ..theme.tokens import Spacing
+from . import allsky_guided_anchors as anchors
+from services.allsky.display_stretch import DEFAULT_STRENGTH
 from services.allsky.guided_calibration import MIN_ANCHORS
 
 # Snap radius within which a click locks onto a detected star. Expressed as a
@@ -48,25 +52,26 @@ _STATE_COLLECT, _STATE_SOLVING, _STATE_REVIEW = 'collect', 'solving', 'review'
 
 _TONE_COLOURS = {'info': '', 'ok': '#3DD68C', 'warn': '#FFD166',
                  'error': '#FF6B6B'}
-_ROW_COLOURS = {'suspect': QColor(255, 107, 107),
-                'excluded': QColor(255, 160, 60),
-                'renamed': QColor(255, 160, 60)}
 
 
 class GuidedCalibrationDialog(QDialog):
     """Collect user-identified star anchors and review the solve.
 
     Signals (requests to the controller layer):
-        solve_requested(list): anchors as (px, py, ra_deg, dec_deg, name).
+        solve_requested(list): anchors as (px, py, ra_deg, dec_deg, name),
+                               the ones the user excluded left out.
         hints_requested(list): same shape; asks where the unnamed stars are.
         save_requested():      the reviewed result should be saved.
         discard_requested():   the reviewed result was abandoned.
+        display_stretch_changed(float): the user settled on a display
+                               stretch strength (0-1), for the config.
     """
 
     solve_requested = Signal(list)
     hints_requested = Signal(list)
     save_requested = Signal()
     discard_requested = Signal()
+    display_stretch_changed = Signal(float)
 
     def __init__(self, prep: dict, parent=None):
         super().__init__(parent)
@@ -85,16 +90,19 @@ class GuidedCalibrationDialog(QDialog):
         self._state = _STATE_COLLECT
         self.saved = False
 
-        # Display uses the pre-stretched copy (a raw all-sky frame is near-
-        # black, see issue #10) — detections/anchors still key off prep['image']
-        # coordinates, which stretch_for_display preserves pixel-for-pixel.
-        self._build_ui(prep.get('display_image', prep['image']))
+        # Display uses a stretched copy (a raw all-sky frame is near-black,
+        # see issue #10) — detections/anchors still key off prep['image']
+        # coordinates, which the stretch preserves pixel-for-pixel. With a
+        # DisplayStretch in the prep the user can re-render it from a slider.
+        self._stretch = prep.get('display_stretch')
+        self._build_ui(prep.get('display_image', prep['image']),
+                       float(prep.get('display_strength', DEFAULT_STRENGTH)))
         self._fit_to_screen()
         self._on_zoom_changed(self._canvas.zoom())
         self._refresh()
 
     # ------------------------------------------------------------------
-    def _build_ui(self, pil_image):
+    def _build_ui(self, pil_image, stretch_strength: float):
         root = QHBoxLayout(self)
         root.setContentsMargins(Spacing.base, Spacing.base,
                                 Spacing.base, Spacing.base)
@@ -125,6 +133,11 @@ class GuidedCalibrationDialog(QDialog):
         self._zoom_lbl = CaptionLabel("")
         bar.addWidget(self._zoom_lbl)
         bar.addStretch(1)
+        self._stretch_ctl = DisplayStretchSlider(stretch_strength)
+        self._stretch_ctl.setVisible(self._stretch is not None)
+        self._stretch_ctl.settled.connect(self._apply_stretch)
+        bar.addWidget(self._stretch_ctl)
+        bar.addSpacing(Spacing.base)
         bar.addWidget(CaptionLabel(
             "Scroll to zoom · drag to pan · hover to magnify"))
         left.addLayout(bar)
@@ -181,10 +194,22 @@ class GuidedCalibrationDialog(QDialog):
         self._list.currentRowChanged.connect(self._on_row_selected)
         side.addWidget(self._list, 1)
 
+        # Each of the two edit buttons gets the column's full width: side by
+        # side, "Remove selected" needs 175 px under Windows' Segoe UI and
+        # got 156 (the Windows test job caught it), the same clipping the
+        # Solve row below was widened for.
         self._remove_btn = PushButton("Remove selected")
         self._remove_btn.setCursor(Qt.PointingHandCursor)
         self._remove_btn.clicked.connect(self._on_remove)
+        self._exclude_btn = PushButton("Exclude selected")
+        self._exclude_btn.setCursor(Qt.PointingHandCursor)
+        self._exclude_btn.setToolTip(
+            "Keep the star in the list but leave it out of the solve — the "
+            "way to test whether it is the one that does not fit. Select it "
+            "again and click Include selected to put it back.")
+        self._exclude_btn.clicked.connect(self._on_toggle_excluded)
         side.addWidget(self._remove_btn)
+        side.addWidget(self._exclude_btn)
 
         # Outcome area: always in the same place, never a vanished window.
         self._status_title = StrongBodyLabel("")
@@ -248,7 +273,7 @@ class GuidedCalibrationDialog(QDialog):
     def show_failed(self, result: dict) -> None:
         """A solve failed: keep every star, mark the ones that didn't fit."""
         self._state = _STATE_COLLECT
-        self._apply_residuals(result.get('anchors', []))
+        anchors.apply_result_rows(self._anchors, result.get('anchors', []))
         self._set_status("Not solved — your stars are kept",
                          result.get('message', ''), 'error')
         self._refresh()
@@ -260,9 +285,12 @@ class GuidedCalibrationDialog(QDialog):
     def show_solved(self, result: dict) -> None:
         """A solve passed and is held unsaved: show it over the frame."""
         self._state = _STATE_REVIEW
-        self._apply_residuals(result.get('anchors', []))
-        # An identified star already carries its own marker and label.
-        mine = {a.get('used_as') or a['name'] for a in self._anchors}
+        anchors.apply_result_rows(self._anchors, result.get('anchors', []))
+        # An identified star already carries its own marker and label. A
+        # star the user excluded is the exception: the circle shows where
+        # the solve, done without it, puts it — on the orange marker or not.
+        mine = {a.get('used_as') or a['name']
+                for a in anchors.included(self._anchors)}
         self._predicted = [
             CanvasHint(p['x'], p['y'], p['name'], supported=True, emphasised=True)
             for p in result.get('predicted', []) if p['name'] not in mine]
@@ -350,13 +378,17 @@ class GuidedCalibrationDialog(QDialog):
         c = next((c for c in self._candidates if c['name'] == label), None)
         if c is None:
             return
-        # Validate before discarding: a renamed anchor ("Vega" solved as
-        # another star) leaves "Vega" drawn as a prediction, and dropping it
-        # must not throw the held result away only to refuse the star.
-        if any(a['name'] == c['name'] for a in self._anchors):
+        # Validate before discarding: a renamed or excluded anchor ("Vega"
+        # solved as another star, or left out) leaves "Vega" drawn as a
+        # prediction, and dropping it must not throw the held result away
+        # only to refuse the star.
+        taken = next((a for a in self._anchors if a['name'] == c['name']), None)
+        if taken is not None:
             self._pending_lbl.setText(
                 f"{c['name']} is already identified — each star can only be "
-                "used once.")
+                "used once." if anchors.is_included(taken) else
+                f"{c['name']} is excluded — select it in the list and click "
+                "Include selected to use it again.")
             return
         from_review = self._state == _STATE_REVIEW
         if from_review:
@@ -437,20 +469,25 @@ class GuidedCalibrationDialog(QDialog):
             self._anchors.pop(i)
             self._anchors_changed()
 
+    def _on_toggle_excluded(self):
+        i = self._list.currentRow()
+        if 0 <= i < len(self._anchors):
+            anchors.toggle_excluded(self._anchors[i])
+            self._anchors_changed()
+
     def _on_row_selected(self, row: int) -> None:
         """Selecting a star in the list brings it into view."""
+        self._refresh_exclude_button()
         if 0 <= row < len(self._anchors) and self._canvas.zoom() > 1.0:
             a = self._anchors[row]
             self._canvas.centre_on(a['px'], a['py'])
 
     def _anchors_changed(self) -> None:
         """The anchor set changed: old residuals no longer describe it."""
-        for a in self._anchors:
-            for key in ('state', 'residual', 'used_as'):
-                a.pop(key, None)
+        anchors.clear_solve_marks(self._anchors)
         self._set_status("", "", 'info')
         self._refresh()
-        self.hints_requested.emit(self._anchor_tuples())
+        self.hints_requested.emit(anchors.solve_tuples(self._anchors))
 
     def _on_primary(self):
         if self._state == _STATE_REVIEW:
@@ -459,7 +496,7 @@ class GuidedCalibrationDialog(QDialog):
             self._refresh()
             self.save_requested.emit()
         elif self._state == _STATE_COLLECT:
-            self.solve_requested.emit(self._anchor_tuples())
+            self.solve_requested.emit(anchors.solve_tuples(self._anchors))
 
     def _on_back(self):
         """Leave the review without saving; the stars stay as they were."""
@@ -493,18 +530,6 @@ class GuidedCalibrationDialog(QDialog):
     # Rendering
     # ------------------------------------------------------------------
 
-    def _anchor_tuples(self) -> list:
-        return [(a['px'], a['py'], a['ra'], a['dec'], a['name'])
-                for a in self._anchors]
-
-    def _apply_residuals(self, rows: List[dict]) -> None:
-        by_name = {r['name']: r for r in rows}
-        for a in self._anchors:
-            r = by_name.get(a['name'])
-            a['state'] = r['state'] if r else 'ok'
-            a['residual'] = r['residual'] if r else None
-            a['used_as'] = r.get('used_as', a['name']) if r else a['name']
-
     def _set_status(self, title: str, body: str, tone: str) -> None:
         colour = _TONE_COLOURS.get(tone, '')
         self._status_title.setStyleSheet(f"color: {colour};" if colour else "")
@@ -516,39 +541,41 @@ class GuidedCalibrationDialog(QDialog):
     def _on_zoom_changed(self, zoom: float) -> None:
         self._zoom_lbl.setText("Whole frame" if zoom <= 1.0 else f"{zoom:.1f}×")
 
-    @staticmethod
-    def _label(a: dict) -> str:
-        used_as = a.get('used_as') or a['name']
-        return a['name'] if used_as == a['name'] else f"{a['name']} → {used_as}"
+    def _apply_stretch(self, strength: float) -> None:
+        if self._stretch is None:
+            return
+        self._canvas.replace_image(
+            self._pil_to_pixmap(self._stretch.render(strength)))
+        self.display_stretch_changed.emit(strength)
 
-    @staticmethod
-    def _row_text(a: dict) -> str:
-        text = GuidedCalibrationDialog._label(a)
-        if a.get('state') == 'excluded':
-            return f"{text}  — left out"
-        residual = a.get('residual')
-        if residual is not None:
-            off = "off image" if residual == float('inf') else f"{residual:.0f} px off"
-            return f"{text}  — {off}"
-        return f"{text}  {'✓' if a.get('snapped') else '⚠ unsnapped'}"
+    def _refresh_exclude_button(self) -> None:
+        i = self._list.currentRow()
+        selected = self._anchors[i] if 0 <= i < len(self._anchors) else None
+        self._exclude_btn.setEnabled(
+            self._state == _STATE_COLLECT and selected is not None)
+        self._exclude_btn.setText(
+            "Include selected"
+            if selected is not None and not anchors.is_included(selected)
+            else "Exclude selected")
 
     def _refresh(self):
         selected = self._list.currentRow()
         self._list.blockSignals(True)
         self._list.clear()
         for a in self._anchors:
-            self._list.addItem(self._row_text(a))
-            colour = _ROW_COLOURS.get(a.get('state'))
+            self._list.addItem(anchors.row_text(a))
+            colour = anchors.row_colour(a)
             if colour is not None:
                 self._list.item(self._list.count() - 1).setForeground(colour)
         if 0 <= selected < self._list.count():
             self._list.setCurrentRow(selected)
         self._list.blockSignals(False)
+        self._refresh_exclude_button()
 
         collecting = self._state == _STATE_COLLECT
         reviewing = self._state == _STATE_REVIEW
-        markers = [CanvasMarker(a['px'], a['py'], self._label(a),
-                                a.get('state') or 'ok') for a in self._anchors]
+        markers = [CanvasMarker(a['px'], a['py'], anchors.label(a),
+                                anchors.marker_state(a)) for a in self._anchors]
         self._canvas.set_overlays(
             markers, self._predicted if reviewing else self._hints,
             self._pending if collecting else None)
@@ -560,7 +587,7 @@ class GuidedCalibrationDialog(QDialog):
         self._cancel_btn.setEnabled(self._state != _STATE_SOLVING)
         self._back_btn.setVisible(reviewing)
 
-        n = len(self._anchors)
+        n = len(anchors.included(self._anchors))
         if reviewing:
             self._solve_btn.setText("Save calibration")
             self._solve_btn.setEnabled(True)
