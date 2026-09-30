@@ -68,7 +68,6 @@ class ImageProcessorWorker(QThread):
         super().__init__(parent)
         self._queue = queue.Queue(maxsize=10)
         self._running = False
-        self._weather_service = None
         self._main_window = None  # Reference to main window for camera access
         self._calibration_service = None  # Background calibration accumulation
         self._frame_count = 0
@@ -87,10 +86,6 @@ class ImageProcessorWorker(QThread):
         from services.ascom_safety_fsm import RoofSafetyFSM, UNSAFE_RESULT
         self._safety_fsm = RoofSafetyFSM(on_failure=self._on_safety_write_failure)
         self._unsafe_result = UNSAFE_RESULT
-
-    def set_weather_service(self, weather_service):
-        """Set weather service for overlay tokens"""
-        self._weather_service = weather_service
 
     def set_calibration_service(self, service):
         """Set calibration service for background accumulation"""
@@ -460,9 +455,14 @@ class ImageProcessorWorker(QThread):
             # what reaches processing_complete's output_img slot and what
             # watch-mode caches for "Calibrate Now". It must stay clean
             # regardless of the burn-in flags below.
+            #
+            # The weather service is read per frame, never copied at start-up:
+            # the main window rebuilds it on every settings edit (units, key,
+            # location).
+            weather = getattr(self._main_window, 'weather_service', None)
             output_img = add_overlays(img, overlays, metadata,
                                       image_cache=self._overlay_image_cache,
-                                      weather_service=self._weather_service)
+                                      weather_service=weather)
 
             # Overlaid render, computed once — GUI preview always uses it, and
             # it is reused (never re-rendered) for any destination opted into
@@ -635,10 +635,6 @@ class ImageProcessor(QObject):
 
         # Pass main window to worker for camera access
         self._worker.set_main_window(main_window)
-
-        # Pass weather service to worker
-        if hasattr(main_window, 'weather_service'):
-            self._worker.set_weather_service(main_window.weather_service)
 
     def set_calibration_service(self, service):
         """Pass calibration service to worker for background accumulation"""

@@ -286,6 +286,11 @@ class _MainWindowSettingsMixin:
         except Exception as e:
             app_logger.error(f"Failed to initialize weather service: {e}")
             self.weather_service = None
+        # A running watcher copied the previous instance at start; hand it the
+        # rebuilt one so an edit reaches the next frame, not the next restart.
+        watcher = getattr(getattr(self, 'watch_controller', None), 'watcher', None)
+        if watcher is not None:
+            watcher.set_weather_service(self.weather_service)
 
     def _update_service_status(self):
         output_config = self.config.get('output', {})
