@@ -1,5 +1,8 @@
 # Camera Disconnect Recovery Improvements
 
+> Windows only. There is no USB reset on macOS or Linux, by decision — see
+> [ZWO_SDK_PLATFORMS.md](ZWO_SDK_PLATFORMS.md#usb-recovery-off-windows).
+
 ## Problem Statement
 
 After 12-18 hours of continuous operation, ZWO ASI676MC cameras can fail with `ASI_EXP_FAILED` error. After this failure:

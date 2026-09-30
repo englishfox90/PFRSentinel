@@ -1,0 +1,16 @@
+# udev rule for ZWO ASI cameras (USB vendor id 03c3). Same two settings as the
+# asi.rules file in ZWO's Linux SDK.
+#
+# Install:
+#   sudo install -m 644 installer/linux/asi.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   (then unplug and replug the camera)
+#
+# 1. Raise the kernel's usbfs buffer from its 16 MB default when a ZWO device is
+#    plugged in. Without this, long or full-resolution exposures time out or
+#    return broken frames.
+ACTION=="add", ATTR{idVendor}=="03c3", RUN+="/bin/sh -c '/bin/echo 200 >/sys/module/usbcore/parameters/usbfs_memory_mb'"
+
+# 2. Let non-root users open the camera. Without this the SDK lists the camera
+#    but every open fails unless PFR Sentinel runs as root.
+SUBSYSTEMS=="usb", ATTR{idVendor}=="03c3", MODE="0666"

@@ -22,9 +22,6 @@ LOG_FILE = "sentinel.log"
 # Default paths
 DEFAULT_OUTPUT_SUBFOLDER = "Images"
 
-# SDK/Driver info (keep ASI reference - it's the actual SDK name)
-ZWO_SDK_DLL = "ASICamera2.dll"
-
 # Build identifiers - New GUID for renamed app
 INNO_SETUP_APP_ID = "{{7F8E9A0B-1C2D-3E4F-5A6B-7C8D9E0F1A2B}"
 

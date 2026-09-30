@@ -231,7 +231,6 @@ except Exception as e:
 # ============================================================================
 
 added_files = [
-    ('ASICamera2.dll', '.'),
     ('version.py', '.'),
     ('assets/app_icon.ico', 'assets'),
     ('assets/app_icon.png', 'assets'),
@@ -259,6 +258,22 @@ added_files = [
     ('scripts/nina/sentinel-capture-stop.bat', 'scripts/nina'),
     ('scripts/nina/README.md', 'scripts/nina'),
 ]
+
+# ZWO ASI SDK. Windows bundles the committed DLL and treats its absence as a
+# build error. The macOS/Linux libraries are not in git (ZWO ships one per CPU
+# architecture, ~10 MB together), so they are bundled only when the builder has
+# dropped the right one at the repo root; without it the app still runs and
+# finds a system or per-user copy at runtime (services/zwo_sdk_library.py).
+if IS_WINDOWS:
+    added_files.append(('ASICamera2.dll', '.'))
+else:
+    _zwo_sdk_name = 'libASICamera2.dylib' if sys.platform == 'darwin' else 'libASICamera2.so'
+    if os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(SPEC)), _zwo_sdk_name)):
+        added_files.append((_zwo_sdk_name, '.'))
+        print(f"[OK] ZWO SDK: bundled {_zwo_sdk_name}")
+    else:
+        print(f"[WARN] {_zwo_sdk_name} not found at the repo root "
+              "- building WITHOUT a bundled ZWO SDK")
 
 # NINA plugin DLL — built by build_sentinel.bat from nina-plugin/ and staged
 # here. Conditional: PyInstaller aborts the whole build on a datas entry whose

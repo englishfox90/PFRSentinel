@@ -6,7 +6,8 @@ installs automatically. `DEFAULT_CAMERA_PROFILE` seeds camera_profiles entries.
 Pure data — behaviour lives in services/config.py.
 """
 import os
-from .utils_paths import resource_path, get_app_data_dir
+from .utils_paths import get_app_data_dir
+from .zwo_sdk_library import default_library_path
 from .dev_mode_config import is_dev_mode_available
 from .app_config import DEFAULT_OUTPUT_SUBFOLDER
 from .output_crop import DEFAULT_OUTPUT_CROP
@@ -76,7 +77,7 @@ DEFAULT_CONFIG = {
     },
     
     # ZWO Camera settings
-    "zwo_sdk_path": resource_path("ASICamera2.dll"),
+    "zwo_sdk_path": default_library_path(),
     "zwo_camera_index": 0,
     "zwo_camera_name": "",  # Last selected camera name
     "zwo_selected_camera": 0,  # Last selected camera index (transient — shifts on hot-plug)
