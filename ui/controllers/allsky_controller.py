@@ -317,6 +317,10 @@ class AllSkyController(QObject):
         allsky_cfg['guided_display_stretch'] = value
         self._mw.config.set('allsky_overlay', allsky_cfg)
         self._mw.config.save()
+        # The All-Sky panel writes the whole section back from its own loaded
+        # snapshot on its next edit; this refreshes that snapshot so the
+        # saved value is not reverted by an unrelated change.
+        self.settings_changed.emit()
 
     def begin_guided_session(self, prep: dict):
         """Open a solve session for the guided-calibration dialog.
