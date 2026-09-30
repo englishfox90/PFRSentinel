@@ -240,8 +240,10 @@ class AllSkyController(QObject):
             return None
 
         dt = self._frame_capture_time()
+        from services.allsky.display_stretch import (
+            DEFAULT_STRENGTH, DisplayStretch)
         from services.allsky.star_centroid import (
-            detect_stars, estimate_sky_circle, stretch_for_display)
+            detect_stars, estimate_sky_circle)
         from services.allsky.catalogs import get_bright_stars
         from services.allsky.coords import radec_to_altaz
         from services.allsky.render_stars import star_display_name
@@ -267,12 +269,14 @@ class AllSkyController(QObject):
         # A failed stretch must not cost the user the dialog itself — guided
         # calibration is often the only path that solves on a given rig, so
         # degrade to the (dark, but usable) linear frame rather than raising.
+        strength = self._display_stretch_strength(DEFAULT_STRENGTH)
         try:
-            display_image = stretch_for_display(image)
+            stretch = DisplayStretch(image)
+            display_image = stretch.render(strength)
         except Exception as e:
             log.warning(f"Guided calibration: display stretch failed, "
                         f"showing the linear frame instead: {e}")
-            display_image = image
+            stretch, display_image = None, image
 
         width = getattr(image, 'width', 0)
         height = getattr(image, 'height', 0)
@@ -288,12 +292,31 @@ class AllSkyController(QObject):
                  f"{', equipment map on' if is_sky else ''})")
         return {
             'image': image, 'display_image': display_image,
+            'display_stretch': stretch, 'display_strength': strength,
             'detections': detections,
             'sky_cx': sky_cx, 'sky_cy': sky_cy, 'sky_r': sky_r,
             'lat': lat, 'lon': lon, 'dt': dt, 'candidates': candidates,
             'image_width': width, 'image_height': height,
             'is_sky': is_sky,
         }
+
+    def _display_stretch_strength(self, default: float) -> float:
+        raw = self._mw.config.get('allsky_overlay', {}).get(
+            'guided_display_stretch', default)
+        try:
+            return min(max(float(raw), 0.0), 1.0)
+        except (TypeError, ValueError):
+            return default
+
+    def remember_display_stretch(self, strength: float) -> None:
+        """Persist the dialog's stretch slider so it opens the same next time."""
+        allsky_cfg = dict(self._mw.config.get('allsky_overlay', {}))
+        value = round(min(max(float(strength), 0.0), 1.0), 2)
+        if allsky_cfg.get('guided_display_stretch') == value:
+            return
+        allsky_cfg['guided_display_stretch'] = value
+        self._mw.config.set('allsky_overlay', allsky_cfg)
+        self._mw.config.save()
 
     def begin_guided_session(self, prep: dict):
         """Open a solve session for the guided-calibration dialog.

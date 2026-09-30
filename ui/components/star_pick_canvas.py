@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor, QFont, QPainter, QPainterPath, QPen, QPixmap)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 _ZOOM_STEP = 1.25
@@ -47,7 +48,15 @@ _COLOURS = {
 }
 _PENDING = QColor(255, 210, 60)
 _HINT = QColor(90, 200, 255)
-_HINT_UNSUPPORTED = QColor(90, 200, 255, 110)
+_HINT_UNSUPPORTED = QColor(90, 200, 255, 170)
+# Every ring and label sits on a dark halo. On a moonlit frame under the
+# display stretch the sky is mid-grey and a bare 1 px cyan ring with a
+# 1 pt-smaller label vanished into it (discussion #105).
+_HALO = QColor(0, 0, 0, 210)
+_HALO_TEXT_PX = 3.0
+_HALO_RING_PX = 2.0
+_HINT_FONT_DELTA = 1.0      # hint labels, relative to the widget font
+_MARKER_FONT_DELTA = 2.0    # identified stars: the ones the user must verify
 
 
 @dataclass
@@ -117,6 +126,20 @@ class StarPickCanvas(QWidget):
         self._full = pixmap
         self._snap_r = float(snap_radius_px)
         self.reset_view()
+
+    def replace_image(self, pixmap: QPixmap) -> None:
+        """Swap the frame for another rendering of the same pixels.
+
+        Zoom, pan and every overlay stay where they are — the display
+        stretch changed, not the picture — so a user comparing settings on a
+        faint star is not thrown back to the whole frame. A frame of another
+        size is a new picture and goes through set_image.
+        """
+        if self._full is None or pixmap.size() != self._full.size():
+            self.set_image(pixmap, self._snap_r)
+            return
+        self._full = pixmap
+        self._invalidate(smooth=True)
 
     def set_overlays(self, markers: List[CanvasMarker],
                      hints: List[CanvasHint],
@@ -308,32 +331,55 @@ class StarPickCanvas(QWidget):
         finally:
             p.end()
 
+    def _label_font(self, delta: float) -> QFont:
+        font = QFont(self.font())
+        font.setBold(True)
+        font.setPointSizeF(max(7.0, font.pointSizeF() + delta))
+        return font
+
+    @staticmethod
+    def _draw_ring(p: QPainter, pt: QPointF, r: float, pen: QPen) -> None:
+        halo = QPen(pen)
+        halo.setColor(_HALO)
+        halo.setWidthF(pen.widthF() + _HALO_RING_PX)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(halo)
+        p.drawEllipse(pt, r, r)
+        p.setPen(pen)
+        p.drawEllipse(pt, r, r)
+
+    @staticmethod
+    def _draw_label(p: QPainter, pos: QPointF, text: str, colour: QColor,
+                    font: QFont) -> None:
+        path = QPainterPath()
+        path.addText(pos, font, text)
+        p.strokePath(path, QPen(_HALO, _HALO_TEXT_PX, Qt.SolidLine,
+                                Qt.RoundCap, Qt.RoundJoin))
+        p.fillPath(path, colour)
+
     def _paint_hints(self, p: QPainter) -> None:
-        font = QFont(p.font())
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0))
+        font = self._label_font(_HINT_FONT_DELTA)
         for h in self._hints:
             pt = self.image_to_widget(h.x, h.y)
             if not self.rect().contains(pt.toPoint()):
                 continue
             colour = _HINT if (h.supported or h.emphasised) else _HINT_UNSUPPORTED
-            pen = QPen(colour, 2 if h.emphasised else 1)
+            pen = QPen(colour, 2)
             if not h.emphasised:
                 pen.setStyle(Qt.DashLine)
-            p.setPen(pen)
             r = 8 if h.emphasised else 7
-            p.drawEllipse(pt, r, r)
-            p.setFont(font)
-            p.drawText(QPointF(pt.x() + r + 3, pt.y() + 4), h.label)
+            self._draw_ring(p, pt, r, pen)
+            self._draw_label(p, QPointF(pt.x() + r + 4, pt.y() + 5),
+                             h.label, colour, font)
 
     def _paint_markers(self, p: QPainter) -> None:
-        font = QFont(p.font())
-        font.setBold(True)
-        p.setFont(font)
+        font = self._label_font(_MARKER_FONT_DELTA)
         for m in self._markers:
             pt = self.image_to_widget(m.x, m.y)
-            p.setPen(QPen(_COLOURS.get(m.state, _COLOURS['ok']), 2))
-            p.drawEllipse(pt, 9, 9)
-            p.drawText(QPointF(pt.x() + 12, pt.y() - 6), m.label)
+            colour = _COLOURS.get(m.state, _COLOURS['ok'])
+            self._draw_ring(p, pt, 9, QPen(colour, 2))
+            self._draw_label(p, QPointF(pt.x() + 12, pt.y() - 6),
+                             m.label, colour, font)
 
     def _paint_pending(self, p: QPainter) -> None:
         if self._pending is None:
@@ -350,15 +396,12 @@ class StarPickCanvas(QWidget):
         if self._drag_hint is None or self._drag_pos is None:
             return
         pt = self._drag_pos
-        p.setPen(QPen(_HINT, 2))
-        p.drawEllipse(pt, 9, 9)
+        self._draw_ring(p, pt, 9, QPen(_HINT, 2))
         p.setPen(QPen(_HINT, 1, Qt.DashLine))
         p.drawLine(self.image_to_widget(self._drag_hint.x, self._drag_hint.y), pt)
-        p.setPen(QPen(_HINT, 2))
-        font = QFont(p.font())
-        font.setBold(True)
-        p.setFont(font)
-        p.drawText(QPointF(pt.x() + 12, pt.y() - 6), self._drag_hint.label)
+        self._draw_label(p, QPointF(pt.x() + 12, pt.y() - 6),
+                         self._drag_hint.label, _HINT,
+                         self._label_font(_MARKER_FONT_DELTA))
 
     def _paint_loupe(self, p: QPainter) -> None:
         if (self._cursor is None or self._dragging or not self._interactive

@@ -376,3 +376,59 @@ class TestClosing:
         monkeypatch.setattr(dlg, '_confirm_abandon', lambda: True)
         dlg.reject()
         assert req['discard'] == 1
+
+
+# ----------------------------------------------------------------------
+# Display stretch slider (discussion #105)
+# ----------------------------------------------------------------------
+
+def _star_frame():
+    import numpy as np
+    rng = np.random.default_rng(1)
+    arr = rng.normal(6.0, 1.5, (FRAME, FRAME)).clip(0, 255)
+    for _ in range(300):
+        y, x = rng.integers(2, FRAME - 2, 2)
+        arr[y, x] = rng.uniform(40, 255)
+    return Image.fromarray(np.repeat(arr.astype(np.uint8)[..., None], 3, 2))
+
+
+def test_stretch_slider_is_hidden_without_a_stretch_in_the_prep(dialog):
+    dlg, _ = dialog
+    assert dlg._stretch_slider.isHidden()
+    assert dlg._stretch_lbl.isHidden()
+
+
+def test_stretch_slider_rerenders_the_frame_keeping_the_view_and_reports(qapp):
+    from services.allsky.display_stretch import DisplayStretch
+    prep = _prep()
+    prep['image'] = _star_frame()
+    stretch = DisplayStretch(prep['image'])
+    prep['display_image'] = stretch.render(0.5)
+    prep['display_stretch'] = stretch
+    prep['display_strength'] = 0.5
+    dlg = gd.GuidedCalibrationDialog(prep)
+    reported = []
+    dlg.display_stretch_changed.connect(reported.append)
+    dlg.show()
+    qapp.processEvents()
+    try:
+        assert not dlg._stretch_slider.isHidden()
+        assert dlg._stretch_slider.value() == 50
+        dlg._canvas.zoom_in()
+        zoom = dlg._canvas.zoom()
+        before = dlg._canvas._full.toImage()
+
+        dlg._stretch_slider.setValue(90)
+        assert reported == []                    # settles first
+        assert dlg._stretch_timer.isActive()
+        dlg._stretch_timer.stop()
+        dlg._apply_stretch()                     # what the settle timer does
+        qapp.processEvents()
+
+        after = dlg._canvas._full.toImage()
+        assert after != before
+        assert after.size() == before.size()
+        assert dlg._canvas.zoom() == pytest.approx(zoom)
+        assert reported == [pytest.approx(0.9)]
+    finally:
+        dlg.close()

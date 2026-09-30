@@ -215,6 +215,9 @@ The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be ma
 | Drag | Pan when zoomed in. |
 | Double-click, **0**, or the **Whole frame** button | Return to the whole frame. |
 | Hover | At whole-frame zoom a loupe follows the cursor with a near full-resolution close-up, so you can tell close pairs apart (for example Mizar and Alioth). The green circle in the loupe shows how close a click must be to snap to a star. The loupe switches off once you zoom in past full resolution. |
+| **Stretch** slider | How hard the frame is brightened. Left is softer (only the brightest star cores saturate, the sky stays dark), right is harder (faint stars come up, the sky washes out). The middle is what the star detector itself sees, which was the fixed setting before. It changes the display only — the solve is unaffected — and your choice is remembered for next time. |
+
+> **New in the next release** — not available in version 3.7.8 or earlier. The **Stretch** slider is new. So is the way circles and labels are drawn: every ring and name now sits on a dark halo, in a slightly larger bold face, so they stay readable on a bright moonlit frame instead of vanishing into it.
 
 ### Identifying stars
 

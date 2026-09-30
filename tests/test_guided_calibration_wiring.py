@@ -44,6 +44,9 @@ class _Controller:
         self.committed.append(model)
         return True, ""
 
+    def remember_display_stretch(self, strength):
+        self.stretches = getattr(self, 'stretches', []) + [strength]
+
 
 class _Window(_MainWindowSettingsMixin, QWidget):
     def __init__(self, controller):

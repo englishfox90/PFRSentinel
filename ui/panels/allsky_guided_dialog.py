@@ -15,7 +15,7 @@ emits requests and renders what comes back.
 import math
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import (
     QCompleter, QDialog, QHBoxLayout, QVBoxLayout, QWidget,
@@ -26,10 +26,12 @@ from qfluentwidgets import (
     ToolButton,
 )
 
+from ..components.cards import ClickSlider
 from ..components.star_pick_canvas import (
     CanvasHint, CanvasMarker, StarPickCanvas)
 from ..theme.icons import mdi
 from ..theme.tokens import Spacing
+from services.allsky.display_stretch import DEFAULT_STRENGTH
 from services.allsky.guided_calibration import MIN_ANCHORS
 
 # Snap radius within which a click locks onto a detected star. Expressed as a
@@ -46,6 +48,11 @@ _SCREEN_FRACTION = 0.92
 
 _STATE_COLLECT, _STATE_SOLVING, _STATE_REVIEW = 'collect', 'solving', 'review'
 
+# The stretch slider re-renders a 12 MP frame on the GUI thread; one render
+# after the slider settles, not one per tick of a drag.
+_STRETCH_SETTLE_MS = 40
+_STRETCH_SLIDER_MAX = 100
+
 _TONE_COLOURS = {'info': '', 'ok': '#3DD68C', 'warn': '#FFD166',
                  'error': '#FF6B6B'}
 _ROW_COLOURS = {'suspect': QColor(255, 107, 107),
@@ -61,12 +68,15 @@ class GuidedCalibrationDialog(QDialog):
         hints_requested(list): same shape; asks where the unnamed stars are.
         save_requested():      the reviewed result should be saved.
         discard_requested():   the reviewed result was abandoned.
+        display_stretch_changed(float): the user settled on a display
+                               stretch strength (0-1), for the config.
     """
 
     solve_requested = Signal(list)
     hints_requested = Signal(list)
     save_requested = Signal()
     discard_requested = Signal()
+    display_stretch_changed = Signal(float)
 
     def __init__(self, prep: dict, parent=None):
         super().__init__(parent)
@@ -85,9 +95,17 @@ class GuidedCalibrationDialog(QDialog):
         self._state = _STATE_COLLECT
         self.saved = False
 
-        # Display uses the pre-stretched copy (a raw all-sky frame is near-
-        # black, see issue #10) — detections/anchors still key off prep['image']
-        # coordinates, which stretch_for_display preserves pixel-for-pixel.
+        # Display uses a stretched copy (a raw all-sky frame is near-black,
+        # see issue #10) — detections/anchors still key off prep['image']
+        # coordinates, which the stretch preserves pixel-for-pixel. With a
+        # DisplayStretch in the prep the user can re-render it from a slider.
+        self._stretch = prep.get('display_stretch')
+        self._stretch_strength = float(
+            prep.get('display_strength', DEFAULT_STRENGTH))
+        self._stretch_timer = QTimer(self)
+        self._stretch_timer.setSingleShot(True)
+        self._stretch_timer.setInterval(_STRETCH_SETTLE_MS)
+        self._stretch_timer.timeout.connect(self._apply_stretch)
         self._build_ui(prep.get('display_image', prep['image']))
         self._fit_to_screen()
         self._on_zoom_changed(self._canvas.zoom())
@@ -125,6 +143,21 @@ class GuidedCalibrationDialog(QDialog):
         self._zoom_lbl = CaptionLabel("")
         bar.addWidget(self._zoom_lbl)
         bar.addStretch(1)
+        self._stretch_lbl = CaptionLabel("Stretch")
+        self._stretch_slider = ClickSlider(Qt.Horizontal)
+        self._stretch_slider.setRange(0, _STRETCH_SLIDER_MAX)
+        self._stretch_slider.setValue(
+            round(self._stretch_strength * _STRETCH_SLIDER_MAX))
+        self._stretch_slider.setFixedWidth(160)
+        self._stretch_slider.setToolTip(
+            "How hard the frame is brightened for display. Left is softer "
+            "(fewer pixels saturate), right is harder. The middle is what the "
+            "star detector sees. Display only — the solve is unaffected.")
+        self._stretch_slider.valueChanged.connect(self._on_stretch_moved)
+        for w in (self._stretch_lbl, self._stretch_slider):
+            w.setVisible(self._stretch is not None)
+            bar.addWidget(w)
+        bar.addSpacing(Spacing.base)
         bar.addWidget(CaptionLabel(
             "Scroll to zoom · drag to pan · hover to magnify"))
         left.addLayout(bar)
@@ -515,6 +548,17 @@ class GuidedCalibrationDialog(QDialog):
 
     def _on_zoom_changed(self, zoom: float) -> None:
         self._zoom_lbl.setText("Whole frame" if zoom <= 1.0 else f"{zoom:.1f}×")
+
+    def _on_stretch_moved(self, value: int) -> None:
+        self._stretch_strength = value / float(_STRETCH_SLIDER_MAX)
+        self._stretch_timer.start()
+
+    def _apply_stretch(self) -> None:
+        if self._stretch is None:
+            return
+        self._canvas.replace_image(
+            self._pil_to_pixmap(self._stretch.render(self._stretch_strength)))
+        self.display_stretch_changed.emit(self._stretch_strength)
 
     @staticmethod
     def _label(a: dict) -> str:
