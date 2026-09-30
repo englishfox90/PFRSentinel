@@ -194,8 +194,10 @@ class GuidedCalibrationDialog(QDialog):
         self._list.currentRowChanged.connect(self._on_row_selected)
         side.addWidget(self._list, 1)
 
-        edit_row = QHBoxLayout()
-        edit_row.setSpacing(Spacing.sm)
+        # Each of the two edit buttons gets the column's full width: side by
+        # side, "Remove selected" needs 175 px under Windows' Segoe UI and
+        # got 156 (the Windows test job caught it), the same clipping the
+        # Solve row below was widened for.
         self._remove_btn = PushButton("Remove selected")
         self._remove_btn.setCursor(Qt.PointingHandCursor)
         self._remove_btn.clicked.connect(self._on_remove)
@@ -206,9 +208,8 @@ class GuidedCalibrationDialog(QDialog):
             "way to test whether it is the one that does not fit. Select it "
             "again and click Include selected to put it back.")
         self._exclude_btn.clicked.connect(self._on_toggle_excluded)
-        edit_row.addWidget(self._remove_btn)
-        edit_row.addWidget(self._exclude_btn)
-        side.addLayout(edit_row)
+        side.addWidget(self._remove_btn)
+        side.addWidget(self._exclude_btn)
 
         # Outcome area: always in the same place, never a vanished window.
         self._status_title = StrongBodyLabel("")
