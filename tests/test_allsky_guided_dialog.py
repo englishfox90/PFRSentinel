@@ -350,6 +350,140 @@ class TestReview:
         assert len(dlg._anchors) == MIN_ANCHORS
 
 
+class TestExcluding:
+    """Issue #124: a doubtful star can be left out of the solve without
+    deleting it, and the solver's own verdict on every star is visible."""
+
+    @staticmethod
+    def _exclude(dlg, row):
+        dlg._list.setCurrentRow(row)
+        dlg._on_toggle_excluded()
+
+    def test_excluded_star_is_kept_but_left_out_of_solve_hints_and_count(self, dialog):
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        assert dlg._solve_btn.isEnabled()
+
+        self._exclude(dlg, 2)
+
+        assert [a['name'] for a in dlg._anchors] == \
+            [c['name'] for c in _candidates()[:MIN_ANCHORS]], "still listed"
+        assert 'excluded by you' in dlg._list.item(2).text()
+        assert dlg._list.item(2).foreground().color() == gd.anchors.row_colour(
+            {'name': 'x', 'state': 'excluded'})
+        assert [n for *_xy, n in req['hints'][-1]] == \
+            ['Vega', 'Deneb', 'Arcturus', 'Spica']
+        assert dlg._solve_btn.text() == f"Solve ({MIN_ANCHORS - 1}/{MIN_ANCHORS})"
+        assert not dlg._solve_btn.isEnabled()
+
+        _identify(dlg, 1, start=MIN_ANCHORS)
+        dlg._on_primary()
+        assert [n for *_xy, n in req['solve'][0]] == \
+            ['Vega', 'Deneb', 'Arcturus', 'Spica', 'Regulus']
+
+    def test_include_puts_the_star_back(self, dialog):
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        self._exclude(dlg, 2)
+        assert dlg._exclude_btn.text() == "Include selected"
+
+        dlg._on_toggle_excluded()
+
+        assert dlg._exclude_btn.text() == "Exclude selected"
+        assert '✓' in dlg._list.item(2).text()
+        assert len(req['hints'][-1]) == MIN_ANCHORS
+        assert dlg._solve_btn.isEnabled()
+
+    def test_toggle_button_follows_the_selection_and_fits_the_column(self, dialog, qapp):
+        dlg, _req = dialog
+        assert not dlg._exclude_btn.isEnabled(), "nothing selected"
+        _identify(dlg, 3)
+        self._exclude(dlg, 0)
+        dlg._list.setCurrentRow(1)
+        assert dlg._exclude_btn.text() == "Exclude selected"
+        dlg._list.setCurrentRow(0)
+        assert dlg._exclude_btn.text() == "Include selected"
+        qapp.processEvents()
+        for btn in (dlg._remove_btn, dlg._exclude_btn):
+            assert btn.width() >= btn.sizeHint().width(), btn.text()
+        dlg.show_solving()
+        assert not dlg._exclude_btn.isEnabled()
+
+    def test_exclusion_survives_edits_and_a_failed_solve(self, dialog):
+        dlg, _req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        self._exclude(dlg, 1)
+        _identify(dlg, 1, start=MIN_ANCHORS)          # _anchors_changed()
+        assert not gd.anchors.is_included(dlg._anchors[1])
+
+        dlg.show_failed(_failed('Altair'))
+        assert not gd.anchors.is_included(dlg._anchors[1])
+        assert 'excluded by you' in dlg._list.item(1).text()
+        assert dlg._anchors[2]['state'] == 'suspect'
+        assert dlg._list.currentRow() == 2
+
+    def test_result_rows_land_on_their_anchors_around_an_exclusion(self, dialog):
+        dlg, _req = dialog
+        _identify(dlg, MIN_ANCHORS + 1)
+        self._exclude(dlg, 2)                          # Altair, mid-list
+        submitted = [n for *_xy, n in gd.anchors.solve_tuples(dlg._anchors)]
+        rows = [{'name': n, 'used_as': n, 'residual': 1.0 + i, 'state': 'ok'}
+                for i, n in enumerate(submitted)]
+        result = dict(_solved(), anchors=rows, n_used=5, n_anchors=5)
+        result['predicted'].append({'name': 'Altair', 'x': 700.0, 'y': 700.0})
+
+        dlg.show_solved(result)
+
+        by_name = {a['name']: a for a in dlg._anchors}
+        for i, n in enumerate(submitted):
+            assert by_name[n]['residual'] == 1.0 + i, n
+            assert f"{1.0 + i:.0f} px off" in dlg._list.item(
+                [a['name'] for a in dlg._anchors].index(n)).text()
+        assert 'residual' not in by_name['Altair']
+        assert 'excluded by you' in dlg._list.item(2).text()
+        assert 'Altair' in [h.label for h in dlg._predicted], \
+            "the solve shows where it puts the excluded star"
+
+    def test_solver_verdicts_are_visible_per_row(self, dialog):
+        dlg, _req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        result = _solved(renamed='Sirius')
+        result['anchors'][2].update(residual=None, state='excluded')
+        dlg.show_solved(result)
+
+        texts = [dlg._list.item(i).text() for i in range(dlg._list.count())]
+        assert texts[0] == 'Vega → Sirius  — 3 px off'
+        assert texts[2] == 'Altair  — left out'
+        assert texts[1] == 'Deneb  — 3 px off'
+        orange = gd.anchors.row_colour({'name': 'x', 'state': 'excluded'})
+        assert dlg._list.item(0).foreground().color() == orange
+        assert dlg._list.item(2).foreground().color() == orange
+        assert dlg._list.item(1).foreground().color() != orange
+
+    def test_remove_still_works_on_an_excluded_row(self, dialog):
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        self._exclude(dlg, 2)
+        dlg._on_remove()
+        assert [a['name'] for a in dlg._anchors] == \
+            ['Vega', 'Deneb', 'Arcturus', 'Spica']
+        assert len(req['hints'][-1]) == 4
+
+    def test_dropping_an_excluded_stars_prediction_points_at_include(self, dialog):
+        dlg, req = dialog
+        _identify(dlg, MIN_ANCHORS)
+        self._exclude(dlg, 0)                          # Vega
+        result = _solved()
+        result['anchors'] = result['anchors'][1:]
+        dlg.show_solved(result)
+        assert 'Vega' in [h.label for h in dlg._predicted]
+
+        dlg._on_hint_dropped('Vega', 210.0, 300.0)
+
+        assert req['discard'] == 0 and dlg._state == 'review'
+        assert 'Include selected' in dlg._pending_lbl.text()
+
+
 class TestClosing:
 
     def test_closing_with_identified_stars_asks_first(self, dialog, monkeypatch):
@@ -394,8 +528,7 @@ def _star_frame():
 
 def test_stretch_slider_is_hidden_without_a_stretch_in_the_prep(dialog):
     dlg, _ = dialog
-    assert dlg._stretch_slider.isHidden()
-    assert dlg._stretch_lbl.isHidden()
+    assert dlg._stretch_ctl.isHidden()
 
 
 def test_stretch_slider_rerenders_the_frame_keeping_the_view_and_reports(qapp):
@@ -412,17 +545,16 @@ def test_stretch_slider_rerenders_the_frame_keeping_the_view_and_reports(qapp):
     dlg.show()
     qapp.processEvents()
     try:
-        assert not dlg._stretch_slider.isHidden()
-        assert dlg._stretch_slider.value() == 50
+        assert not dlg._stretch_ctl.isHidden()
+        assert dlg._stretch_ctl.slider.value() == 50
         dlg._canvas.zoom_in()
         zoom = dlg._canvas.zoom()
         before = dlg._canvas._full.toImage()
 
-        dlg._stretch_slider.setValue(90)
+        dlg._stretch_ctl.slider.setValue(90)
         assert reported == []                    # settles first
-        assert dlg._stretch_timer.isActive()
-        dlg._stretch_timer.stop()
-        dlg._apply_stretch()                     # what the settle timer does
+        assert dlg._stretch_ctl.settling
+        dlg._stretch_ctl.settle()                # what the settle timer does
         qapp.processEvents()
 
         after = dlg._canvas._full.toImage()
