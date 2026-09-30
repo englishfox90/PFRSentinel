@@ -194,7 +194,7 @@ class GuidedCalibrationDialog(QDialog):
         self._list.currentRowChanged.connect(self._on_row_selected)
         side.addWidget(self._list, 1)
 
-        edit_row = QHBoxLayout()
+        edit_row = QVBoxLayout()
         edit_row.setSpacing(Spacing.sm)
         self._remove_btn = PushButton("Remove selected")
         self._remove_btn.setCursor(Qt.PointingHandCursor)
