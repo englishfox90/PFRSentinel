@@ -59,6 +59,7 @@ Open **All-Sky** from the navigation rail (in the Image group).
 | All-Sky overlay enabled | Off | — | Master switch for the overlay. Automatic calibration also only runs while this is on. |
 | Max objects visible | 15 | 5–50 (steps of 5) | Maximum number of labelled bright stars, Messier objects, NGC/IC objects, and planets combined. The brightest visible objects win. Constellations do not count towards this limit. |
 | Label size | Large | Too small, Small, Normal, Large, Why so large | Size of every label on the overlay. **Large** is the size earlier versions always drew; each step down takes 2 px off every layer (at the 750 px reference size, so the step scales with your image), each step up adds 2 px. The layers keep their relative sizes: planets stay a little larger than star names, NGC labels a little smaller. New in the next release. |
+| Show labels behind equipment | Off | On / Off | Keeps names on where the pier, a telescope or other equipment blocks the sky, across the whole calibrated sky circle. Off: names only where the sky is actually seen (see [Equipment avoidance](#equipment-avoidance)). A closed roof or a frame that cannot show the night sky still hides every label. New in the next release. |
 
 ### Burn overlay into output
 
@@ -356,7 +357,10 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 ## Label Placement
 
 - Labels are only drawn for objects more than 10 degrees above the horizon, and only where the frame shows open sky. Open sky is worked out from where stars are detected.
-- Each label is tried in several positions around its object (right, left, below, above, then the diagonals) and never covers the object it names. A label that would overlap one already placed is dropped. Placement order is constellation abbreviations, then bright stars, Messier, NGC/IC, and planets.
+- Each label is tried in several positions around its object (right, left, below, above, then the diagonals) and never covers the object it names. A label that would overlap one already placed is dropped. Placement order is constellation abbreviations, then planets and the Moon, bright stars, Messier, and NGC/IC.
+- Planet and Moon names follow the same rule as star names: right of the object first, at the same distance. No label is placed over any star or planet.
+
+  > **New in the next release** — not available in version 3.7.8 or earlier. Planets used to be labelled last, so a star's name could take the place to a planet's right and push the planet's name to its left, or hide it.
 - **Max objects visible** picks the brightest visible objects.
 - Label text scales with the image size, so labels look the same at any resolution. **Label size** on the Enable Overlay card makes every label larger or smaller together.
 
@@ -373,6 +377,7 @@ From the next release the app also keeps an **equipment map**: a slow memory of 
 - **How it is used.** While the recent frames have a good view of the sky, a label needs both the recent frames and the map to agree that its spot is sky. When the recent frames lose the sky (cloud, the Moon), the map alone decides, so labels keep their places instead of disappearing. Before either exists — the first minutes of a first session — labels are placed anywhere inside the calibrated sky circle, so they may briefly sit on equipment.
 - **Resetting it.** **Reset Equipment Map…** on the Lens Calibration card forgets the map after a confirmation; use it after moving the camera or rearranging the rig. **Reset Calibration…** forgets it too. Changing the image size or the output crop starts a new map automatically.
 
+- **Labels behind equipment.** Turn on **Show labels behind equipment** on the Enable Overlay card to keep names on over the pier and the telescopes, for example to see where Polaris is when your pier hides it. Labels then cover the whole calibrated sky circle; the map keeps learning in the background, so turning the option off again picks up where it was. New in the next release.
 The map is saved in the app's data folder as `allsky_obstruction.npz`, at most every ten minutes and when capture stops. Like the calibration, it belongs to one installation: do not copy it to another rig.
 
 ### Stable labels from frame to frame

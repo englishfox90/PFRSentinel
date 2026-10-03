@@ -407,6 +407,10 @@ DEFAULT_CONFIG = {
         # One step for every layer's label_size below (services/allsky/label_size.py):
         # too_small / small / normal / large / why_so_large. 'large' is unchanged.
         "label_size_preset": "large",
+        # Draw labels across the whole calibrated sky disc, behind the pier
+        # and scopes too (services/allsky/sky_region.py). Off: labels only
+        # where the sky is actually seen.
+        "labels_behind_equipment": False,
         # Guided Calibration's display stretch slider, 0-1 (0.5 = what the
         # star detector sees). Display only; never touches the solve.
         "guided_display_stretch": 0.5,
