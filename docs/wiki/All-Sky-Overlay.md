@@ -136,6 +136,10 @@ Neither changes or deletes your calibration, and cloud causes both: a cloudy nig
 >
 > While the badge reads **Preliminary — check alignment** for this reason, three more things happen. The overlay is **not drawn**: a calibration that matches the stars no better than chance puts every label in the wrong place, and drawing them for hours is worse than drawing nothing. Automatic calibration **starts again from scratch** at the next opportunity instead of refining the doubted calibration, on the same schedule as a basin escape, and a fresh result that passes the checks replaces it. And a **notification** is sent, once, through Discord and Hermes if **Post Calibration** is on there (see [Hermes Notifications](Hermes-Notifications)). The calibration file is still not changed. The overlay returns as soon as a later run clears the doubt or a new calibration is saved. A Guided Calibration is never treated this way: its stars are ones you identified.
 
+> **New in the next release** — not available in version 3.7.8 or earlier.
+>
+> Two changes keep this check from firing on a calibration that is fine. First, it now only looks at frames taken once the Sun is at least 15° below the horizon. In twilight the camera still picks up hundreds of points of light, but few of them are stars, so every calibration — right or wrong — scores as chance; the dev builds before this change could hide the overlay at dusk and start re-calibrating a good model, which looked like the calibration had been lost. Until there are enough dark frames the check is skipped, not counted against the calibration. Second, the bar is now lower for doubting the saved calibration than for clearing it: it is doubted only when it matches fewer than one and a half times the stars chance would supply, and cleared once it matches twice as many. A calibration scoring close to twice chance therefore no longer flips between doubted and cleared through the night, taking the overlay with it.
+
 > **New in the next release** — not available in version 3.7.6 or earlier.
 >
 > A lens model has eight unknowns, so a fit over only a handful of stars can report a flattering RMS while being badly wrong. Automatic calibration now needs at least 8 matched stars to succeed at all, and a saved model below that is rated **Not calibrated** so a better one can replace it. Guided Calibration is unaffected — the stars there are ones you identified yourself, and five is enough.
@@ -196,6 +200,10 @@ A calibration built with **Guided Calibration** comes from stars you identified 
 ### Backup of the previous calibration
 
 Before an automatic calibration overwrites the saved one, the previous file is copied to `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.previous.json`. This keeps one step of history in case an automatic update makes the overlay worse. Results from **Calibrate Now** and **Guided Calibration**, which you asked for, are saved without making a backup.
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+>
+> That backup only goes back one step, so two automatic updates in a row can leave no copy of a Guided Calibration anywhere. Every Guided Calibration you save is now also kept as `allsky_calibration.guided.json` in the same folder, and automatic calibrations never overwrite it. To go back to it, close PFR Sentinel, copy it over `allsky_calibration.json`, and start PFR Sentinel again. [Export Diagnostics](Diagnostics-Export) includes it.
 
 ---
 
