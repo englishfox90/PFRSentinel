@@ -222,12 +222,54 @@ class TestIncumbentChanceStreak:
         s.record(_score(1.0))
         assert s.record(_score(1.2)) is False
 
-    def test_the_margin_is_the_chance_gates(self):
+    def test_a_strike_is_under_the_discredit_bar(self):
         s = ic.IncumbentChanceStreak()
-        s.record(_score(CHANCE_MARGIN))
+        s.record(_score(ic.DISCREDIT_RATIO))
         assert s.strikes == 0
-        s.record(_score(CHANCE_MARGIN - 0.01))
+        s.record(_score(ic.DISCREDIT_RATIO - 0.01))
         assert s.strikes == 1
+
+    def test_the_discredit_bar_is_under_the_fresh_fit_gate(self):
+        assert ic.DISCREDIT_RATIO < CHANCE_MARGIN
+
+    def test_the_reporters_sep29_night_is_never_discredited(self):
+        """Discussion #105: the joint fit on disk scored 1.81-2.33x over full
+        dark 60-frame buffers all night. With one bar at 2x it was discredited
+        at 22:47 and 00:51 and the overlay withheld for three hours; between
+        the bars those scores neither strike nor clear."""
+        night = [2.01, 2.04, 1.99, 1.99, 2.07, 2.14, 2.27, 2.22, 2.22, 2.22,
+                 2.19, 2.21, 2.21, 1.94, 2.22, 2.24, 2.33, 2.28, 2.21, 2.22,
+                 2.11, 2.02, 1.96, 1.84, 1.86, 1.81, 1.91, 1.99, 1.88, 2.05,
+                 1.89, 2.20, 2.22, 1.81]
+        s = ic.IncumbentChanceStreak()
+        for ratio in night:
+            assert s.record(_score(ratio)) is False
+            assert not s.discredited and s.strikes == 0
+
+    def test_a_score_between_the_bars_breaks_a_run_of_strikes(self):
+        s = ic.IncumbentChanceStreak()
+        s.record(_score(1.1))
+        s.record(_score(1.8))
+        s.record(_score(1.1))
+        assert not s.discredited and s.strikes == 1
+
+    def test_a_score_between_the_bars_does_not_clear_a_discredited_model(self):
+        s = ic.IncumbentChanceStreak()
+        s.record(_score(1.0))
+        s.record(_score(1.0))
+        assert s.record(_score(1.8)) is False
+        assert s.discredited
+        assert s.record(_score(CHANCE_MARGIN)) is True
+        assert not s.discredited
+
+    def test_wrong_basin_fits_are_still_discredited(self):
+        """#93's saved model (1.04x) and 2026-09-28's triangle fit on the
+        reference rig (1.15x, 1.13x, 1.01x from its log)."""
+        for ratios in ([1.04, 1.04], [1.15, 1.13, 1.01]):
+            s = ic.IncumbentChanceStreak()
+            for r in ratios:
+                s.record(_score(r))
+            assert s.discredited
 
     def test_guided_solve_is_never_discredited(self):
         s = ic.IncumbentChanceStreak()

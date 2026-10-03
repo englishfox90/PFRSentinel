@@ -20,6 +20,7 @@ from services.logger import app_logger as log
 
 from .calibration import calibrate, CalibrationError
 from .calibration_validate import median_frame_resolution, model_in_frame
+from .dark_sky_frames import dark_sky_frames
 from .incumbent_chance import score_incumbent, score_tolerance_px
 from .incumbent_evidence import corroborate_incumbent
 from .model_admission import (
@@ -64,9 +65,10 @@ class _RefineWorker(QThread):
 
     def __init__(self, frames, seed_model, n_images: int, span_min: float,
                  lat: float = 0.0, incumbent=None, pole_history=None,
-                 parent=None, ring=None, obstruction_map=None):
+                 parent=None, ring=None, obstruction_map=None, lon=None):
         super().__init__(parent)
         self._frames = frames
+        self._lon = lon                    # None: frames scored without a darkness filter
         self._seed = seed_model            # None = seedless (cold start / escape)
         self._incumbent = incumbent        # model the result would replace
         self._pole_history = pole_history or PoleHistory()
@@ -133,9 +135,13 @@ class _RefineWorker(QThread):
             # whole sky, its authority is the user's, and the anchor-health
             # caution already covers a moved camera. A joint fit descended
             # from it (same provenance stamp) is scored like any other.
+            # Twilight frames score every model at chance (dark_sky_frames),
+            # so only the dark part of the buffer judges it.
             if not is_user_anchored(self._incumbent):
                 self.incumbent_scored.emit(score_incumbent(
-                    self._incumbent, frames, score_tolerance_px(sky_r)))
+                    self._incumbent,
+                    dark_sky_frames(frames, self._lat, self._lon),
+                    score_tolerance_px(sky_r)))
 
             model = refine_from_detections(
                 frames,

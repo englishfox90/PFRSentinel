@@ -17,7 +17,10 @@ scores into a verdict the service can act on: two consecutive chance-level
 runs discredit the model (the "two strikes" of the independent all-sky
 solver's nightly self-check, ALLSKY_HOSTING_SITE_PLAN section 6), one
 credible run clears it, and a buffer too thin to judge by (cloud, a
-moon-washed sky) is skipped rather than counted either way. The guided
+moon-washed sky, twilight — dark_sky_frames) is skipped rather than counted
+either way. "Chance level" (DISCREDIT_RATIO) sits below "credible"
+(CHANCE_MARGIN, the fresh-fit gate) so a model scoring near the line is not
+discredited and cleared on alternate runs. The guided
 solve itself is exempt throughout (model_admission.is_user_anchored): a solve
 over a handful of user-named anchors is not expected to meet the joint fit's
 final tolerance across the whole sky, and its basin outranks every automatic
@@ -70,6 +73,19 @@ SCORE_MIN_DETECTIONS = 40
 # resets the failure count.
 CHANCE_STRIKES = 2
 
+# A strike needs a score under this; clearing needs CHANCE_MARGIN. The model
+# on disk already passed the 2x gate when it was saved, so it loses standing
+# only on a score that says it carries little orientation information, and
+# earns it back on one a fresh fit would pass. Between the two a score is
+# neither strike nor clearance. Measured: #93's saved model scored 1.04x and
+# 2026-09-28's wrong-basin triangle fit about 1x, both far under the bar; the
+# reporter's 2026-09-29 joint fit (discussion #105) scored 1.81-2.33x over
+# full 60-frame dark buffers — some 500 matches over a ~520 expectation, not
+# a coincidence — and with one bar at 2x it was discredited at 22:47 and
+# 00:51, the overlay withheld from 00:51 to 03:43 and two seedless escapes
+# run, on scores a hair either side of the line.
+DISCREDIT_RATIO = 1.5
+
 
 @dataclass(frozen=True)
 class IncumbentScore:
@@ -84,7 +100,13 @@ class IncumbentScore:
 
     @property
     def chance_level(self) -> bool:
-        return self.ratio < CHANCE_MARGIN
+        """A strike: under DISCREDIT_RATIO."""
+        return self.ratio < DISCREDIT_RATIO
+
+    @property
+    def credible(self) -> bool:
+        """Clears a discredited model: at least the fresh-fit gate."""
+        return self.ratio >= CHANCE_MARGIN
 
     def describe(self) -> str:
         return (f"{self.n_matches} matches vs {self.expected:.0f} expected by "
@@ -170,7 +192,9 @@ class IncumbentChanceStreak:
         if score.chance_level:
             self._strikes += 1
             self._discredited = self._strikes >= CHANCE_STRIKES
-        else:
+        elif score.credible or not self._discredited:
+            # A score between the bars breaks a run of strikes but does not
+            # clear a model that is already discredited.
             self._strikes = 0
             self._discredited = False
         if self._discredited and not before:
