@@ -63,14 +63,66 @@ class TestSkyMaskHistory:
         out = h.update(glitch)
         assert out[1, 1] == 0
 
-    def test_persistent_change_is_adopted_on_second_frame(self):
-        h = SkyMaskHistory(depth=3)
+    def test_single_threshold_adopts_a_change_on_the_second_frame(self):
+        h = SkyMaskHistory(depth=3, keep_fraction=0.5)
         for _ in range(3):
             h.update(_mask())
         blocked = _mask()
         blocked[3, 3] = 0
         assert h.update(blocked)[3, 3] == 255   # 1 of 3 frames: outvoted
         assert h.update(blocked)[3, 3] == 0     # 2 of 3 frames: adopted
+
+    def test_sky_stays_sky_down_to_the_keep_fraction(self):
+        """Schmitt trigger (discussion #105): sky at half the frames, but once
+        sky it stays so until under a quarter of them say so."""
+        h = SkyMaskHistory(depth=4)
+        for _ in range(4):
+            h.update(_mask())
+        blocked = _mask()
+        blocked[3, 3] = 0
+        assert h.update(blocked)[3, 3] == 255   # 3 of 4 sky
+        assert h.update(blocked)[3, 3] == 255   # 2 of 4
+        assert h.update(blocked)[3, 3] == 255   # 1 of 4: still at the keep line
+        assert h.update(blocked)[3, 3] == 0     # 0 of 4: dropped
+
+    def test_obstruction_needs_half_the_frames_to_become_sky(self):
+        h = SkyMaskHistory(depth=4)
+        for _ in range(4):
+            h.update(_mask(value=0))
+        opened = _mask(value=0)
+        opened[1, 1] = 255
+        assert h.update(opened)[1, 1] == 0      # 1 of 4
+        assert h.update(opened)[1, 1] == 255    # 2 of 4: half, adopted
+
+    def test_a_pixel_on_the_line_no_longer_flips_every_frame(self):
+        """The failure the keep fraction fixes: a pixel whose disc comes and
+        goes alternated sky / obstruction with the vote's parity."""
+        pattern = [255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0] * 2
+
+        def flips(h):
+            out, n = [], 0
+            for v in pattern:
+                frame = _mask(value=v)
+                out.append(h.update(frame)[0, 0])
+            for a, b in zip(out, out[1:]):
+                n += a != b
+            return n
+
+        assert flips(SkyMaskHistory(depth=15)) < flips(SkyMaskHistory(depth=15, keep_fraction=0.5))
+        assert flips(SkyMaskHistory(depth=15)) <= 1
+
+    def test_a_restart_after_a_stale_run_has_no_standing_sky(self):
+        """The stale vote is not evidence the fresh frames must out-vote, in
+        either direction: the first real mask after it is taken as is."""
+        h = SkyMaskHistory(depth=3, hold_frames=1)
+        for _ in range(3):
+            h.update(_mask())
+        h.update(None)
+        h.update(None)
+        assert h.is_stale
+        blocked = _mask()
+        blocked[2, 2] = 0
+        assert h.update(blocked)[2, 2] == 0
 
     def test_missing_frame_holds_last_vote(self):
         h = SkyMaskHistory(depth=3, hold_frames=2)
@@ -231,7 +283,7 @@ class TestSkyMaskHistory:
     def test_running_vote_matches_a_recount(self):
         """The vote is a running sum; it must not drift from the frames it holds."""
         rng = np.random.default_rng(7)
-        h = SkyMaskHistory(depth=4)
+        h = SkyMaskHistory(depth=4, keep_fraction=0.5)
         frames = [np.where(rng.random((6, 6)) > 0.5, 255, 0).astype(np.uint8)
                   for _ in range(11)]
         for i, frame in enumerate(frames):
@@ -279,16 +331,43 @@ class TestStickySelection:
         assert 'moon' in out
         assert out == {'moon', 'a', 'b'}
 
-    def test_invisible_incumbent_drops_and_slot_refills(self):
-        sel = StickySelection(rank_margin=3)
+    def test_invisible_incumbent_drops_and_slot_refills_without_a_hold(self):
+        sel = StickySelection(rank_margin=3, absent_hold=0)
         sel.select(['a', 'b', 'c', 'd'], 3)
         out = sel.select(['a', 'b', 'd'], 3)
         assert out == {'a', 'b', 'd'}
 
+    def test_invisible_incumbent_keeps_its_slot_for_the_hold(self):
+        """Discussion #105: a label that drops for a frame or two must not
+        hand its slot to the next object, which then flashes out again."""
+        sel = StickySelection(rank_margin=3, absent_hold=3)
+        sel.select(['a', 'b', 'c', 'd'], 3)
+        for _ in range(3):
+            assert sel.select(['a', 'b', 'd'], 3) == {'a', 'b', 'c'}
+        assert sel.select(['a', 'b', 'd'], 3) == {'a', 'b', 'd'}, "freed after the hold"
+
+    def test_a_returning_incumbent_restarts_its_hold(self):
+        sel = StickySelection(rank_margin=3, absent_hold=2)
+        sel.select(['a', 'b', 'c', 'd'], 3)
+        for _ in range(5):
+            assert sel.select(['a', 'b', 'd'], 3) == {'a', 'b', 'c'}
+            assert sel.select(['a', 'b', 'c', 'd'], 3) == {'a', 'b', 'c'}
+
+    def test_held_slots_never_exceed_the_budget(self):
+        sel = StickySelection(rank_margin=3, absent_hold=3)
+        sel.select(['a', 'b', 'c', 'd'], 4)
+        assert len(sel.select(['x'], 2)) == 2
+
+    def test_reset_forgets_held_slots(self):
+        sel = StickySelection(rank_margin=3, absent_hold=3)
+        sel.select(['a', 'b', 'c'], 3)
+        sel.reset()
+        assert sel.select(['a', 'b', 'd'], 3) == {'a', 'b', 'd'}
+
     def test_boundary_object_flicker_does_not_evict_the_replacement(self):
         """Regression for #31: object at the budget edge blinking in and out
         must not swap two labels every frame."""
-        sel = StickySelection(rank_margin=3)
+        sel = StickySelection(rank_margin=3, absent_hold=0)
         stable = ['a', 'b']
         sel.select(stable + ['x', 'y'], 3)          # x shown, y waits
         assert sel.select(stable + ['y'], 3) == {'a', 'b', 'y'}   # x vanishes
@@ -297,6 +376,16 @@ class TestStickySelection:
             shown.append(sel.select(stable + ['x', 'y'], 3))  # x back
             shown.append(sel.select(stable + ['y'], 3))       # x gone
         assert all(s == {'a', 'b', 'y'} for s in shown)
+
+    def test_with_the_hold_a_blinking_object_keeps_its_slot(self):
+        """Same blink, default hold: the shown set never changes at all."""
+        sel = StickySelection(rank_margin=3)
+        stable = ['a', 'b']
+        first = sel.select(stable + ['x', 'y'], 3)
+        assert first == {'a', 'b', 'x'}
+        for _ in range(5):
+            assert sel.select(stable + ['y'], 3) == first
+            assert sel.select(stable + ['x', 'y'], 3) == first
 
     def test_zero_budget_shows_everything(self):
         sel = StickySelection()

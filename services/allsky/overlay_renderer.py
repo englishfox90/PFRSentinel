@@ -34,6 +34,7 @@ from .render_stars import (
     bright_star_targets, render_bright_stars, star_label_px, star_uid,
     star_display_name,
 )
+from .star_sightings import apply_sightings, label_targets, sighting_tolerance
 from .sky_region import (  # sky_region pre-imports scipy for the worker thread
     FULL_MASK_MIN_DETECTIONS, detect_sky_evidence, visibility_plane,
 )
@@ -86,6 +87,7 @@ def render_allsky_overlay(
     model = _load_model(config)
     if model is None:
         return img  # Silently skip — not calibrated
+    calibration_a1 = float(model.a1)
 
     # --- Fit the model to the frame we are drawing on ---
     # An OUTPUT_CROP in the metadata means the caller cut a sub-rectangle out of
@@ -148,12 +150,25 @@ def render_allsky_overlay(
     # before either exists (sky_region). 255 = open sky, 0 = obstructed.
     # A reprocess of a capture already counted reads the vote without
     # advancing it; the map learns only from frames the observing gate passed.
+    advance = not metadata.get(SAME_CAPTURE_KEY, False)
+    evidence = detect_sky_evidence(img) if advance else None
+    obstruction_map = get_obstruction_map()
     gray = visibility_plane(
-        img, model, dt, lat, lon, stabilizer, get_obstruction_map(),
-        advance=not metadata.get(SAME_CAPTURE_KEY, False),
+        img, model, dt, lat, lon, stabilizer, obstruction_map,
+        advance=advance,
         frame_is_observable=bool(config.get('_frame_is_observable', False)),
         crop=_crop_stamp(crop), save_path=config.get('_obstruction_map_path'),
         behind_equipment=bool(config.get('labels_behind_equipment', False)),
+        evidence=evidence,
+    )
+    # A star detected at its own pixel is visible whatever the vote says
+    # (star_sightings); the equipment map still has the last word.
+    scale = float(model.a1) / calibration_a1 if calibration_a1 > 0 else 1.0
+    gray = apply_sightings(
+        gray, stabilizer.sightings, label_targets(model, config, lat, lon, dt),
+        evidence.points if evidence is not None else None,
+        sighting_tolerance(model.rms_residual, scale),
+        map_sky=obstruction_map.small_sky_mask(w, h, _crop_stamp(crop)),
     )
 
     # Layer order: grid first (background), then constellations, then objects

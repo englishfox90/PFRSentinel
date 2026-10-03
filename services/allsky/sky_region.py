@@ -104,6 +104,7 @@ class SkyEvidence:
     reach: Optional[np.ndarray]       # bool discs at NEGATIVE_REACH_RADII
     n_detections: int
     full_shape: Tuple[int, int]       # (height, width) the grid stands for
+    points: Optional[np.ndarray] = None  # (n, 2) detected centres, frame pixels
 
 
 def detect_sky_evidence(img: Image.Image, gray: Optional[np.ndarray] = None) -> SkyEvidence:
@@ -128,10 +129,9 @@ def detect_sky_evidence(img: Image.Image, gray: Optional[np.ndarray] = None) -> 
         return SkyEvidence(None, None, 0, full_shape)
 
     n = len(detections)
+    det_xy = np.array([(x, y) for x, y, _ in detections], dtype=float).reshape(-1, 2)
     if n < PARTIAL_MIN_DETECTIONS or _cdist is None:
-        return SkyEvidence(None, None, n, full_shape)
-
-    det_xy = np.array([(x, y) for x, y, _ in detections])
+        return SkyEvidence(None, None, n, full_shape, det_xy)
 
     # 2nd nearest neighbour distance (more robust than 1st to outliers)
     dists = _cdist(det_xy, det_xy)
@@ -167,7 +167,7 @@ def detect_sky_evidence(img: Image.Image, gray: Optional[np.ndarray] = None) -> 
 
     mask = grid_discs(full_shape, det_xy, radii)
     reach = grid_discs(full_shape, det_xy, radii * NEGATIVE_REACH_RADII) > 0
-    return SkyEvidence(mask, reach, n, full_shape)
+    return SkyEvidence(mask, reach, n, full_shape, det_xy)
 
 
 def grid_discs(full_shape, centres: Sequence, radii: Sequence) -> np.ndarray:
