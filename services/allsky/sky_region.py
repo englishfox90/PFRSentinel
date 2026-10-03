@@ -275,6 +275,7 @@ def visibility_plane(
     crop: Optional[Tuple[int, ...]] = None,
     save_path: Optional[str] = None,
     evidence: Optional[SkyEvidence] = None,
+    behind_equipment: bool = False,
 ) -> np.ndarray:
     """Return the 0/255 uint8 full-resolution plane the label tests read.
 
@@ -284,6 +285,12 @@ def visibility_plane(
     gates the map alone: the vote follows every rendered frame. ``evidence``
     lets a caller that already detected stars (or a timing test) skip the
     detection.
+
+    ``behind_equipment`` (``allsky_overlay.labels_behind_equipment``) returns
+    the model's whole sky disc, so labels stay on behind the pier and the
+    scopes. The vote and the map are still fed, so switching it off again
+    finds them current. Whether the frame is drawn at all is decided before
+    this (roof, observable-sky gate) and is unaffected.
     """
     w, h = img.size
     full_shape = (h, w)
@@ -304,6 +311,10 @@ def visibility_plane(
             )
             if changed and save_path:
                 obstruction_map.maybe_save(save_path)
+
+    if behind_equipment:
+        _log_source_change('model disc (labels behind equipment)')
+        return upsample(np.where(disc, 255, 0).astype(np.uint8), full_shape)
 
     vote, stale = stabilizer.current_small_vote()
     if vote is not None and vote.shape != disc.shape:

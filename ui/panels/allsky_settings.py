@@ -383,6 +383,14 @@ class AllSkySettingsPanel(QScrollArea):
         self._label_size.currentIndexChanged.connect(self._on_setting_changed)
         row.addWidget(self._label_size)
         vl.addLayout(row)
+        self._behind_equipment = LayerToggleRow(
+            "Show labels behind equipment", default=False)
+        self._behind_equipment.setToolTip(
+            "Keep star and planet names on where the pier or a telescope blocks "
+            "the sky. Off: names only where the sky is seen. A closed roof still "
+            "hides every label.")
+        self._behind_equipment.toggled.connect(self._on_setting_changed)
+        vl.addWidget(self._behind_equipment)
         self._layout.addWidget(card)
 
     def _build_gate_card(self):
@@ -547,6 +555,7 @@ class AllSkySettingsPanel(QScrollArea):
         preset = c.get(LABEL_SIZE_KEY, LABEL_SIZE_DEFAULT)
         self._label_size.setCurrentIndex(
             keys.index(preset if preset in keys else LABEL_SIZE_DEFAULT))
+        self._behind_equipment.set_checked(bool(c.get('labels_behind_equipment', False)))
 
         burn = c.get('burn_into_output', {})
         self._burn_saved_file.set_checked(burn.get('saved_file', False))
@@ -591,6 +600,7 @@ class AllSkySettingsPanel(QScrollArea):
         cfg['min_exposure_s'] = float(self._min_exposure.value())
         cfg['min_star_detections'] = int(self._min_stars.value())
         cfg[LABEL_SIZE_KEY] = preset_keys()[self._label_size.currentIndex()]
+        cfg['labels_behind_equipment'] = self._behind_equipment.is_checked()
         cfg['burn_into_output'].update({
             'saved_file': self._burn_saved_file.is_checked(),
             'web': self._burn_web.is_checked(),

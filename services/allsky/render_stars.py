@@ -9,12 +9,12 @@ names on the image.
 import numpy as np
 from PIL import Image, ImageDraw
 from datetime import datetime
-from typing import Optional, Set
+from typing import List, Optional, Set, Tuple
 
 from .fisheye import FisheyeModel
 from .catalogs import get_bright_stars
 from .coords import radec_to_altaz
-from .label_collision import LabelGrid, default_gap, estimate_text_size
+from .label_collision import LabelGrid, estimate_text_size, reserve_targets
 from .render_objects import _parse_color, _load_font, _is_sky_visible
 
 
@@ -40,34 +40,25 @@ def star_display_name(star: dict, use_bayer_fallback: bool) -> str:
     return bayer
 
 
-def render_bright_stars(
-    img: Image.Image,
+def star_label_px(img_size: Tuple[int, int], config: dict) -> int:
+    """Bright-star label height in pixels for an image of ``img_size``."""
+    return int(round(config.get('label_size', 11) * max(img_size) / 750.0))
+
+
+def bright_star_targets(
     model: FisheyeModel,
     config: dict,
     lat_deg: float,
     lon_deg: float,
     dt: datetime,
-    label_grid: LabelGrid,
+    gray: np.ndarray,
     allowed_ids: Optional[Set[str]] = None,
-    sky_gray: Optional[np.ndarray] = None,
-) -> Image.Image:
-    """Draw bright star name labels."""
+) -> List[Tuple[str, float, float, str]]:
+    """(display name, x, y, uid) of every bright star that gets a label."""
     if not config.get('enabled', False):
-        return img
-
-    img_scale  = max(img.width, img.height) / 750.0
-    color_str  = config.get('color', '#FFEEAA')
-    opacity    = int(config.get('opacity', 220))
-    label_size = int(round(config.get('label_size', 11) * img_scale))
-    max_mag    = float(config.get('max_magnitude', 2.5))
-    use_bayer  = bool(config.get('bayer_fallback', False))
-
-    label_color = _parse_color(color_str, opacity)
-    font = _load_font(label_size)
-    gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
-
-    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+        return []
+    max_mag   = float(config.get('max_magnitude', 2.5))
+    use_bayer = bool(config.get('bayer_fallback', False))
 
     visible = []
     for star in get_bright_stars(max_mag=max_mag):
@@ -92,15 +83,43 @@ def render_bright_stars(
         if not _is_sky_visible(gray, x, y):
             continue
         visible.append((display, float(x), float(y), star_uid(star)))
+    return visible
 
-    # Reserve every star before placing any label, so an early label cannot
-    # land on a star whose own label comes later. The radius stays under the
-    # placement gap, so a star never blocks its own label.
-    marker_r = default_gap(label_size * 1.2) * 0.75
-    for _, x, y, _ in visible:
-        label_grid.reserve_marker(x, y, marker_r)
 
-    for display, x, y, uid in visible:
+def render_bright_stars(
+    img: Image.Image,
+    model: FisheyeModel,
+    config: dict,
+    lat_deg: float,
+    lon_deg: float,
+    dt: datetime,
+    label_grid: LabelGrid,
+    allowed_ids: Optional[Set[str]] = None,
+    sky_gray: Optional[np.ndarray] = None,
+    targets: Optional[List[Tuple[str, float, float, str]]] = None,
+) -> Image.Image:
+    """Draw bright star name labels. ``targets`` from ``bright_star_targets``
+    lets the caller reserve the stars before other layers place anything."""
+    if not config.get('enabled', False):
+        return img
+
+    color_str  = config.get('color', '#FFEEAA')
+    opacity    = int(config.get('opacity', 220))
+    label_size = star_label_px(img.size, config)
+
+    if targets is None:
+        gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
+        targets = bright_star_targets(model, config, lat_deg, lon_deg, dt, gray, allowed_ids)
+    if not targets:
+        return img
+    reserve_targets(label_grid, targets, label_size)
+
+    label_color = _parse_color(color_str, opacity)
+    font = _load_font(label_size)
+    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    for display, x, y, uid in targets:
         tw, th = estimate_text_size(display, label_size)
         pos = label_grid.try_place(x, y, tw, th, key=uid)
         if pos is not None:

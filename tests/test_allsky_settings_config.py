@@ -54,7 +54,7 @@ def _customised():
     cfg = copy.deepcopy(DEFAULT_CONFIG['allsky_overlay'])
     cfg.update(enabled=True, calibration_file='cal.json', top_n=20,
                utc_offset_hours=5, min_exposure_s=1.25, min_star_detections=40,
-               label_size_preset='small')
+               label_size_preset='small', labels_behind_equipment=True)
     cfg['constellations'].update(enabled=False, lines=False, labels=False, color='#112233',
                                  line_width=7, label_size=21, opacity=99, edge_fade_px=123)
     cfg['bright_stars'].update(enabled=True, max_magnitude=4.0, bayer_fallback=True,
@@ -156,3 +156,22 @@ def test_an_unknown_label_size_preset_loads_as_large(panel):
     panel.load_from_config(loaded)
     assert preset_keys()[panel._label_size.currentIndex()] == 'large'
     assert panel.get_config()['label_size_preset'] == 'large'
+
+
+def test_the_behind_equipment_toggle_loads_and_emits(panel, qapp):
+    loaded = _customised()
+    panel.load_from_config(loaded)
+    assert panel._behind_equipment.is_checked() is True
+
+    emitted = []
+    panel.settings_changed.connect(emitted.append)
+    panel._behind_equipment.set_checked(False)
+    qapp.processEvents()
+    assert emitted[-1]['labels_behind_equipment'] is False
+
+
+def test_an_old_config_shows_labels_only_on_seen_sky(panel):
+    old = _customised()
+    del old['labels_behind_equipment']
+    panel.load_from_config(old)
+    assert panel.get_config()['labels_behind_equipment'] is False

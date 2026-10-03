@@ -3,7 +3,7 @@ Main all-sky overlay entry point.
 
 render_allsky_overlay(img, config, metadata) → PIL.Image
 
-Orchestrates: grid → constellations → Messier → NGC → planets.
+Orchestrates: grid → constellations → planets → bright stars → Messier → NGC.
 All layers share a single LabelGrid for collision avoidance.
 Fails silently if model not calibrated or any layer errors.
 """
@@ -20,14 +20,20 @@ from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
 
 from .discredit_policy import overlay_withheld
 from .fisheye import FisheyeModel
-from .label_collision import LabelGrid
+from .label_collision import LabelGrid, reserve_targets
 from .label_size import apply_label_size_preset
 from .label_stability import get_label_stabilizer, upsample
 from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
-from .render_objects import render_messier, render_ngc, render_planets, _is_sky_visible
-from .render_stars import render_bright_stars, star_uid, star_display_name
+from .render_objects import (
+    planet_label_px, planet_targets, render_messier, render_ngc, render_planets,
+    _is_sky_visible,
+)
+from .render_stars import (
+    bright_star_targets, render_bright_stars, star_label_px, star_uid,
+    star_display_name,
+)
 from .sky_region import (  # sky_region pre-imports scipy for the worker thread
     FULL_MASK_MIN_DETECTIONS, detect_sky_evidence, visibility_plane,
 )
@@ -147,6 +153,7 @@ def render_allsky_overlay(
         advance=not metadata.get(SAME_CAPTURE_KEY, False),
         frame_is_observable=bool(config.get('_frame_is_observable', False)),
         crop=_crop_stamp(crop), save_path=config.get('_obstruction_map_path'),
+        behind_equipment=bool(config.get('labels_behind_equipment', False)),
     )
 
     # Layer order: grid first (background), then constellations, then objects
@@ -167,10 +174,25 @@ def render_allsky_overlay(
     # Uses the ORIGINAL gray (no overlays) for accurate equipment detection
     allowed_ids = _compute_allowed_ids(config, model, lat, lon, dt, gray)
 
+    # Stars and planets are all reserved before any of their labels goes
+    # down, and planets are named first: labelled last, a planet found the
+    # slot right of it taken by a star's name and its own went to the far
+    # side (discussion #105, Saturn).
+    stars_config = config.get('bright_stars', {})
+    planet_config = config.get('planets', {})
+    star_targets, planet_targets_ = _reserve_point_objects(
+        img.size, model, stars_config, planet_config, lat, lon, dt, gray,
+        allowed_ids, grid_cfg)
+
     try:
-        stars_config = config.get('bright_stars', {})
+        img = render_planets(img, model, planet_config, lat, lon, dt, grid_cfg,
+                             allowed_ids, sky_gray=gray, targets=planet_targets_)
+    except Exception as e:
+        log.warning(f"allsky planet render failed: {e}")
+
+    try:
         img = render_bright_stars(img, model, stars_config, lat, lon, dt, grid_cfg,
-                                  allowed_ids, sky_gray=gray)
+                                  allowed_ids, sky_gray=gray, targets=star_targets)
     except Exception as e:
         log.warning(f"allsky bright stars render failed: {e}")
 
@@ -187,13 +209,6 @@ def render_allsky_overlay(
                          allowed_ids, sky_gray=gray)
     except Exception as e:
         log.warning(f"allsky NGC render failed: {e}")
-
-    try:
-        planet_config = config.get('planets', {})
-        img = render_planets(img, model, planet_config, lat, lon, dt, grid_cfg,
-                             allowed_ids, sky_gray=gray)
-    except Exception as e:
-        log.warning(f"allsky planet render failed: {e}")
 
     # Restore original mode
     if original_mode != 'RGBA':
@@ -248,6 +263,24 @@ def render_allsky_for_preview(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _reserve_point_objects(img_size, model, stars_config, planet_config,
+                           lat, lon, dt, gray, allowed_ids, grid):
+    """Bright-star and planet targets, each reserved on ``grid``. A layer
+    that fails here is left to its own renderer, which recomputes."""
+    stars = planets = None
+    try:
+        stars = bright_star_targets(model, stars_config, lat, lon, dt, gray, allowed_ids)
+        reserve_targets(grid, stars, star_label_px(img_size, stars_config))
+    except Exception as e:
+        log.debug(f"allsky: bright-star reservation skipped: {e}")
+    try:
+        planets = planet_targets(model, planet_config, lat, lon, dt, gray, allowed_ids)
+        reserve_targets(grid, planets, planet_label_px(img_size, planet_config))
+    except Exception as e:
+        log.debug(f"allsky: planet reservation skipped: {e}")
+    return stars, planets
+
 
 def _crop_stamp(crop: Optional[CropBox]) -> Optional[tuple]:
     """The OUTPUT_CROP as the equipment map's stamp: a moved or resized crop

@@ -16,7 +16,7 @@ from .fisheye import FisheyeModel
 from .catalogs import get_messier_objects, get_ngc_objects
 from .planets import get_all_positions
 from .coords import radec_to_altaz
-from .label_collision import LabelGrid, estimate_text_size
+from .label_collision import LabelGrid, estimate_text_size, reserve_targets
 
 
 def _parse_color(hex_str: str, opacity: int) -> Tuple[int, int, int, int]:
@@ -58,36 +58,25 @@ def _is_sky_visible(
 # Planets and Moon
 # ---------------------------------------------------------------------------
 
-def render_planets(
-    img: Image.Image,
+def planet_label_px(img_size: Tuple[int, int], config: dict) -> int:
+    """Planet label height in pixels for an image of ``img_size``."""
+    return int(round(config.get('label_size', 14) * max(img_size) / 750.0))
+
+
+def planet_targets(
     model: FisheyeModel,
     config: dict,
     lat_deg: float,
     lon_deg: float,
     dt: datetime,
-    label_grid: LabelGrid,
+    gray: np.ndarray,
     allowed_ids: Optional[Set[str]] = None,
-    sky_gray: Optional[np.ndarray] = None,
-) -> Image.Image:
-    """Draw planet and Moon name labels (no marker shapes)."""
+) -> List[Tuple[str, float, float, str]]:
+    """(name, x, y, uid) of every planet and the Moon that gets a label."""
     if not config.get('enabled', True):
-        return img
-
-    img_scale    = max(img.width, img.height) / 750.0
-    label_size   = int(round(config.get('label_size', 14) * img_scale))
-    opacity      = int(config.get('opacity', 255))
-    single_color = config.get('color', '')
-    colors       = config.get('colors', {})
-
-    font = _load_font(label_size)
-    gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
-
-    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    positions = get_all_positions(dt, lat_deg, lon_deg)
-
-    for name, (ra, dec) in positions.items():
+        return []
+    targets = []
+    for name, (ra, dec) in get_all_positions(dt, lat_deg, lon_deg).items():
         if name == 'Sun':
             continue
         uid = f'planet:{name}'
@@ -106,12 +95,54 @@ def render_planets(
         x, y = int(xy[0]), int(xy[1])
         if not _is_sky_visible(gray, x, y):
             continue
+        targets.append((name, float(x), float(y), uid))
+    return targets
 
+
+def render_planets(
+    img: Image.Image,
+    model: FisheyeModel,
+    config: dict,
+    lat_deg: float,
+    lon_deg: float,
+    dt: datetime,
+    label_grid: LabelGrid,
+    allowed_ids: Optional[Set[str]] = None,
+    sky_gray: Optional[np.ndarray] = None,
+    targets: Optional[List[Tuple[str, float, float, str]]] = None,
+) -> Image.Image:
+    """Draw planet and Moon name labels (no marker shapes).
+
+    Placed exactly as bright-star names are: every planet is reserved as a
+    marker first, then each label takes the first free slot from the shared
+    order (right of the planet first). ``targets`` from ``planet_targets``
+    lets the caller reserve them before other layers place anything.
+    """
+    if not config.get('enabled', True):
+        return img
+
+    label_size   = planet_label_px(img.size, config)
+    opacity      = int(config.get('opacity', 255))
+    single_color = config.get('color', '')
+    colors       = config.get('colors', {})
+
+    if targets is None:
+        gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
+        targets = planet_targets(model, config, lat_deg, lon_deg, dt, gray, allowed_ids)
+    if not targets:
+        return img
+    reserve_targets(label_grid, targets, label_size)
+
+    font = _load_font(label_size)
+    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    for name, x, y, uid in targets:
         hex_color  = single_color if single_color else colors.get(name, '#FFFFFF')
         text_color = _parse_color(hex_color, opacity)
 
         tw, th = estimate_text_size(name, label_size)
-        pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
+        pos = label_grid.try_place(x, y, tw, th, key=uid)
         if pos is not None:
             draw.text(pos, name, fill=text_color, font=font)
 
