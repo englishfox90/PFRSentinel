@@ -400,7 +400,7 @@ In version 3.7.7, open sky is combined over only 3 frames, and "open sky" is jud
 
 From the next release:
 
-- Open sky is combined over the last **15 frames** (about 7 minutes at 30-second exposures), and the last good result is kept for up to 15 frames when too few stars are detected. Labels ride through an exposure change instead of following it. A lasting change, such as a telescope parked across the view, is still picked up, after about 8 frames.
+- Open sky is combined over the last **15 frames** (about 7 minutes at 30-second exposures), and the last good result is kept for up to 15 frames when too few stars are detected. Labels ride through an exposure change instead of following it. A lasting change, such as a telescope parked across the view, is still picked up, after about 8 frames (about 12 from the next release, see [Labels that come and go through the night](#labels-that-come-and-go-through-the-night)).
 - Open sky is judged against **each frame's own sky brightness**, so a darker or brighter frame of the same sky gives the same result.
 - The combined result is **never thrown away** for lack of stars. After 15 frames without a usable view it is set aside and the [equipment map](#equipment-avoidance) takes over; the first good frame afterwards starts afresh rather than being outvoted by old frames. In 3.7.7, a long run of starless frames wiped the result and labels were placed from the raw image brightness instead.
 - Frames with only **3 to 9 detected stars** still count: they mark the sky around their stars as open and say nothing about the rest. In 3.7.7 such frames were ignored entirely.
@@ -408,6 +408,18 @@ From the next release:
 - Label memory is cleared when capture starts and whenever the calibration changes, and a frame that is re-processed after a settings change is not counted twice.
 
 On a recorded sequence with a simulated exposure ramp, this cut label changes from 62 to 18 over 40 frames, most of the remainder being real changes in the scene.
+
+#### Labels that come and go through the night
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+On some rigs, labels still blinked on and off during the night while their stars stayed in plain view. This happened mostly in the gaps between detected stars and at the edge of the open sky. From the next release:
+
+- **Once a spot counts as open sky, it stays that way until most recent frames disagree.** A spot only becomes open sky when half the recent frames agree, but once it is open, it is only given up when fewer than a quarter still see sky there. A telescope parked across the view still loses its labels, about four frames later than before.
+- **A star the app can see keeps its label.** When a bright star or planet is detected right where the calibration places it on two frames in a row, its label is shown whatever the rest of the frame says, and stays for three or four frames after the star was last seen. This only works with a good calibration, and it never overrides the [equipment map](#equipment-avoidance).
+- **A label that drops out for a frame or two keeps its place** in **Max objects visible**, so the next object in line does not flash on and off in its spot.
+
+None of this changes when the overlay is drawn: a closed roof, an overcast sky or twilight still hide every label straight away (see [When the overlay is drawn](#when-the-overlay-is-drawn)).
 
 ---
 
