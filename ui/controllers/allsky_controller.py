@@ -494,6 +494,7 @@ class AllSkyController(QObject):
 
     def _on_calibration_done(self, model) -> bool:
         """Admit, save and announce a manual result; True once it is on disk."""
+        from services.allsky.calibration_store import keep_guided_copy
         from services.app_config import get_calibration_path
 
         # Pole check: the background service measures the celestial pole from
@@ -520,6 +521,7 @@ class AllSkyController(QObject):
             log.error(f"Failed to save calibration: {e}")
             self.status_changed.emit(f"Calibration save failed: {e}")
             return False
+        keep_guided_copy(model, cal_path)
 
         self._model = model
         info = self.get_calibration_info()

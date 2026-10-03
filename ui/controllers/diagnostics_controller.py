@@ -163,6 +163,7 @@ class DiagnosticsController(QObject):
         files = {
             'allsky/allsky_calibration.json': app_config.get_calibration_path(),
             'allsky/allsky_calibration.previous.json': app_config.get_calibration_backup_path(),
+            'allsky/allsky_calibration.guided.json': app_config.get_guided_calibration_path(),
         }
         custom = (config_data.get('allsky_overlay') or {}).get('calibration_file')
         if custom and os.path.abspath(custom) != os.path.abspath(files['allsky/allsky_calibration.json']):

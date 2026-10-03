@@ -70,6 +70,17 @@ def get_calibration_backup_path() -> str:
     return os.path.join(get_app_data_dir(), 'allsky_calibration.previous.json')
 
 
+GUIDED_CALIBRATION_FILENAME = 'allsky_calibration.guided.json'
+
+
+def get_guided_calibration_path() -> str:
+    """A copy of the newest Guided Calibration solve, beside the calibration
+    file. Automatic saves never write it, so the user's anchored model
+    survives any number of automatic replacements (the one-step backup does
+    not)."""
+    return os.path.join(get_app_data_dir(), GUIDED_CALIBRATION_FILENAME)
+
+
 def get_allsky_buffer_dir(create: bool = True) -> str:
     """Where calibration buffer dumps go: ``<app-data>/allsky/``.
 

@@ -372,6 +372,16 @@ class TestControllerCommit:
         ok, _msg = controller.commit_guided_calibration(self._guided())
         assert ok and self.cal.exists()
 
+    def test_commit_keeps_a_guided_copy_beside_the_file(self, controller):
+        """Discussion #105: automatic saves overwrote the guided solve and
+        its one-step backup within 30 minutes; the copy survives them."""
+        model = self._guided()
+        assert model.provenance == 'guided' and model.n_images <= 1
+        ok, _msg = controller.commit_guided_calibration(model)
+        copy = self.cal.parent / 'allsky_calibration.guided.json'
+        assert ok and copy.exists()
+        assert FisheyeModel.load(str(copy)).a1 == pytest.approx(model.a1)
+
     def test_commit_reports_failure_when_the_file_cannot_be_written(
             self, controller, monkeypatch):
         """It used to log the error and announce 'saved' regardless."""
