@@ -157,6 +157,60 @@ class TestGuidedIncumbentIsNeverScored:
         svc.deleteLater()
 
 
+def _at(frames, start, step_s):
+    from datetime import timedelta
+    for i, f in enumerate(frames):
+        f['dt'] = start + timedelta(seconds=i * step_s)
+    return frames
+
+
+class TestTwilightFramesAreNotScored:
+    """Discussion #105, 2026-09-30: the gate opened at sun -8 deg and two
+    scores over the twilight buffer (1.10x, 1.13x) discredited the model."""
+
+    REPORTER_SITE = (36.58, -116.6)
+
+    def _site_service(self, frames):
+        svc = _service(frames=frames)
+        svc._lat, svc._lon = self.REPORTER_SITE
+        return svc
+
+    def test_dusk_buffer_reaches_the_scorer_empty(self, qapp, fast_refine, scored):
+        from datetime import datetime, timezone
+        from tests.test_calibration_service_workers import _frames
+        dusk = _at(_frames(n=10), datetime(2026, 10, 1, 2, 6, 55,
+                                           tzinfo=timezone.utc), 120)
+        svc = self._site_service(dusk)
+        _run_one_refinement(svc)
+        assert scored['calls'][-1][1] == []
+
+    def test_real_scorer_gives_no_verdict_and_no_strike_at_dusk(
+            self, qapp, fast_refine):
+        from datetime import datetime, timezone
+        from tests.test_calibration_service_workers import _frames
+        dusk = _at(_frames(n=10), datetime(2026, 10, 1, 2, 6, 55,
+                                           tzinfo=timezone.utc), 120)
+        svc = self._site_service(dusk)
+        seen = []
+        svc._on_incumbent_scored = seen.append
+        _run_one_refinement(svc)
+        assert seen == [None]
+
+    def test_dark_buffer_is_scored_whole(self, qapp, fast_refine, scored):
+        from datetime import datetime, timezone
+        from tests.test_calibration_service_workers import _frames
+        dark = _at(_frames(n=10), datetime(2026, 10, 1, 5, 0,
+                                           tzinfo=timezone.utc), 120)
+        svc = self._site_service(dark)
+        _run_one_refinement(svc)
+        assert scored['calls'][-1][1] is fast_refine[-1]
+
+    def test_no_site_scores_every_frame(self, qapp, fast_refine, scored):
+        svc = _service()
+        _run_one_refinement(svc)
+        assert scored['calls'][-1][1] is fast_refine[-1]
+
+
 class TestServiceChanceStreak:
 
     @pytest.fixture

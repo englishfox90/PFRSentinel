@@ -491,6 +491,7 @@ class CalibrationService(QObject):
             lat=self._lat, incumbent=self._model,
             pole_history=self._pole_history, ring=self._ring.frames(),
             obstruction_map=get_obstruction_map(),
+            lon=None if (self._lat, self._lon) == (0.0, 0.0) else self._lon,
         )
         self._refine_worker.result_ready.connect(self._on_refine_done)
         self._refine_worker.failed.connect(self._on_refine_failed)
