@@ -11,7 +11,8 @@ of state that lets consecutive frames agree:
   * ``SkyMaskHistory`` — majority vote over recent detection masks, plus a
     hold-over for frames that produce no usable mask (too few detections), so
     neither a noisy frame nor a run of them — an exposure change lasts many
-    frames, not one — can flip a region between sky and obstruction. The vote
+    frames, not one — can flip a region between sky and obstruction, with a
+    lower threshold to stay sky than to become it. The vote
     is never thrown away for lack of frames: after the hold it is *stale*,
     and the caller (``sky_region``) lets the persisted equipment map take
     over until real detections return.
@@ -20,6 +21,9 @@ of state that lets consecutive frames agree:
     an incumbent only when it out-ranks it by more than that margin.
   * ``slot_memory`` — the placement slot a label used last frame is tried
     first, so a new neighbour does not flip it to the other side of its star.
+  * ``sightings`` (``star_sightings.StarSightings``) — a star detected at
+    its own predicted pixel keeps its label whatever the vote says, held a
+    few frames past the last sighting.
 
 State is keyed by nothing: the renderer serves one live frame stream, and a
 recalibration or size change is handled inside each piece.
@@ -30,6 +34,8 @@ from collections import deque
 from typing import Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
+
+from .star_sightings import StarSightings
 
 # What counts as open sky is a property of the installation — the pier, the
 # walls, the scopes — and changes slowly. A 3-frame vote absorbed a single
@@ -42,6 +48,25 @@ import numpy as np
 MASK_VOTE_DEPTH = 15      # frames in the majority vote
 MASK_HOLD_FRAMES = 15     # frames to reuse the last vote when detection fails
 RANK_MARGIN = 3           # incumbents survive up to this far past the budget
+
+# A pixel becomes sky at half the frames that could judge it, but once sky it
+# stays sky until fewer than a quarter of them say so. With one threshold, a
+# pixel whose detection discs come and go — the gaps between stars, the edge
+# of the open sky — sat on the line and flipped every frame or two, and the
+# label over it with it. Discussion #105's 2026-09-30 calibration buffer (48
+# frames) replayed through the vote: 111 label visibility flips, 16 of 70
+# named stars flipping three times or more, often on alternate frames; with
+# the keep fraction 65 and 7, and the flips left are runs, not alternation.
+# Two thresholds make it a Schmitt trigger: a lasting obstruction still
+# clears the label, a few frames later than before.
+MASK_KEEP_FRACTION = 0.25
+
+# An object on screen that drops out of the visible set keeps its slot in
+# the top-N budget for this many frames. It is not drawn while invisible —
+# the renderers test visibility again — but the next-ranked object does not
+# flash into its slot for the frame or two the drop lasts and flash out again
+# when it returns. A lasting drop frees the slot after the hold.
+ABSENT_HOLD_FRAMES = 3
 
 # The vote is kept at reduced resolution. Fifteen full-resolution masks of a
 # 3552 px frame are ~190 MB; the mask is made of circles no smaller than 15 px
@@ -92,9 +117,14 @@ class SkyMaskHistory:
     """
 
     def __init__(self, depth: int = MASK_VOTE_DEPTH,
-                 hold_frames: int = MASK_HOLD_FRAMES):
+                 hold_frames: int = MASK_HOLD_FRAMES,
+                 keep_fraction: float = MASK_KEEP_FRACTION):
         self._depth = max(1, min(255, int(depth)))   # votes are summed in uint8
         self._hold = max(0, int(hold_frames))
+        # Integer form of the keep threshold: sky stays sky while
+        # votes * _keep_den >= counts * _keep_num. 0.5 is the single threshold.
+        keep = min(0.5, max(0.0, float(keep_fraction)))
+        self._keep_num, self._keep_den = round(keep * 100), 100
         self._frames: Deque[tuple] = deque()         # (sky, counted), on the grid
         self._votes: Optional[np.ndarray] = None     # running sum of sky
         self._counts: Optional[np.ndarray] = None    # running sum of counted
@@ -193,6 +223,11 @@ class SkyMaskHistory:
         elif self.is_stale:
             self._clear_frames()
         self._shape = full_shape
+        # What was sky before this frame, for the keep threshold. A history
+        # just started or restarted after a stale run has no standing sky:
+        # the stale vote is not evidence the new frames must out-vote.
+        previous = (self._small > 0) if (self._small is not None
+                                         and self._votes is not None) else None
         sky = np.ascontiguousarray(to_grid(mask, full_shape) > 0)
         if counted is None:
             seen = np.ones(sky.shape, dtype=bool)
@@ -217,17 +252,25 @@ class SkyMaskHistory:
         # "Sky in at least half the frames that could tell, rounding up": one
         # frame is itself, two frames is either, three frames needs two. A
         # pixel no frame could judge is sky here; the equipment map decides.
-        self._small = np.where(self._votes.astype(np.uint16) * 2 >= self._counts,
-                               255, 0).astype(np.uint8)
+        # Already sky, it stays so down to the keep fraction (MASK_KEEP_FRACTION).
+        votes = self._votes.astype(np.uint16)
+        counts = self._counts.astype(np.uint16)
+        sky_now = votes * 2 >= counts
+        if previous is not None and previous.shape == sky_now.shape:
+            sky_now |= previous & (votes * self._keep_den >= counts * self._keep_num)
+        self._small = np.where(sky_now, 255, 0).astype(np.uint8)
         self._full = None
 
 
 class StickySelection:
     """Top-N selection with hysteresis for objects already on screen."""
 
-    def __init__(self, rank_margin: int = RANK_MARGIN):
+    def __init__(self, rank_margin: int = RANK_MARGIN,
+                 absent_hold: int = ABSENT_HOLD_FRAMES):
         self._margin = max(0, int(rank_margin))
+        self._absent_hold = max(0, int(absent_hold))
         self._shown: Set[str] = set()
+        self._absent: Dict[str, int] = {}   # held incumbent -> frames missing
 
     @property
     def shown(self) -> Set[str]:
@@ -235,19 +278,37 @@ class StickySelection:
 
     def reset(self) -> None:
         self._shown.clear()
+        self._absent.clear()
 
     def select(self, ranked: List[str], top_n: int) -> Set[str]:
         """Pick up to ``top_n`` UIDs from ``ranked`` (brightest first).
 
         An incumbent stays eligible while its rank is under ``top_n + margin``
         and competes with a ``margin``-rank bonus, so a newcomer has to
-        out-rank it by more than the margin to take its slot. Objects absent
-        from ``ranked`` (invisible this frame) drop out immediately; the mask
-        vote upstream is what stops a single frame from doing that.
+        out-rank it by more than the margin to take its slot. An incumbent
+        absent from ``ranked`` (invisible this frame) keeps its slot for
+        ``absent_hold`` frames (ABSENT_HOLD_FRAMES) and is returned with the
+        chosen set — the renderers do not draw what they find invisible —
+        then drops out.
         """
         if top_n <= 0:
             self._shown = set(ranked)
+            self._absent.clear()
             return set(ranked)
+
+        present = set(ranked)
+        held = []
+        absent: Dict[str, int] = {}
+        for uid in self._shown:
+            if uid in present:
+                continue
+            missing = self._absent.get(uid, 0) + 1
+            if missing <= self._absent_hold:
+                held.append(uid)
+                absent[uid] = missing
+
+        held = sorted(held)[:top_n]
+        absent = {uid: absent[uid] for uid in held}
 
         entries = []
         for rank, uid in enumerate(ranked):
@@ -257,8 +318,10 @@ class StickySelection:
             elif rank < top_n:
                 entries.append((rank, rank, uid))
         entries.sort()
-        chosen = {uid for _, _, uid in entries[:top_n]}
+        free = max(0, top_n - len(held))
+        chosen = {uid for _, _, uid in entries[:free]} | set(held)
         self._shown = chosen
+        self._absent = absent
         return set(chosen)
 
 
@@ -268,6 +331,7 @@ class LabelStabilizer:
     def __init__(self):
         self.masks = SkyMaskHistory()
         self.selection = StickySelection()
+        self.sightings = StarSightings()
         self.slot_memory: Dict[str, int] = {}
         self._lock = threading.Lock()
 
@@ -300,6 +364,7 @@ class LabelStabilizer:
             self.masks.reset()
             self.selection.reset()
             self.slot_memory.clear()
+        self.sightings.reset()
 
 
 _stabilizer = LabelStabilizer()

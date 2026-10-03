@@ -17,6 +17,7 @@ services/allsky/
 ├── star_centroid.py       OpenCV blob detection + weighted-moment sub-pixel centroids
 ├── label_collision.py     Edge-anchored label placement (no overlaps, off the stars)
 ├── label_stability.py     Frame-to-frame hysteresis: mask vote, sticky top-N, slot memory
+├── star_sightings.py      A star detected at its own pixel keeps its label (decaying hold)
 ├── render_grid.py         AltAz grid, horizon circle, cardinal labels
 ├── render_constellations.py  IAU/Dien constellation lines + abbreviation labels
 ├── render_objects.py      Planet circles, Messier diamonds, NGC crosses
@@ -116,12 +117,22 @@ renderer serves one live frame stream; `reset_label_stability()` clears it.
 
 | Piece | What it does | Constant |
 |---|---|---|
-| `SkyMaskHistory` | Majority vote over the last N detection masks; a frame with no usable mask reuses the last vote for up to M frames, after which the vote is `is_stale` and the equipment map takes over. Frames with 3–9 detections vote sky inside their discs only (`add_partial`); the Moon's glare disc is left out of the denominator | `MASK_VOTE_DEPTH = 15`, `MASK_HOLD_FRAMES = 15` |
-| `StickySelection` | An object already on screen stays eligible up to `top_n + margin` and competes with a `margin`-rank bonus, so a newcomer must out-rank it by more than the margin (a rising Moon still displaces it) | `RANK_MARGIN = 3` |
+| `SkyMaskHistory` | Vote over the last N detection masks with two thresholds (a Schmitt trigger): a pixel becomes sky at half the frames that could judge it and stays sky down to `MASK_KEEP_FRACTION` of them. A frame with no usable mask reuses the last vote for up to M frames, after which the vote is `is_stale` and the equipment map takes over. Frames with 3–9 detections vote sky inside their discs only (`add_partial`); the Moon's glare disc is left out of the denominator | `MASK_VOTE_DEPTH = 15`, `MASK_HOLD_FRAMES = 15`, `MASK_KEEP_FRACTION = 0.25` |
+| `StickySelection` | An object already on screen stays eligible up to `top_n + margin` and competes with a `margin`-rank bonus, so a newcomer must out-rank it by more than the margin (a rising Moon still displaces it). An incumbent that drops out of the visible set keeps its slot for `ABSENT_HOLD_FRAMES` (not drawn meanwhile), so the next object does not flash in and out | `RANK_MARGIN = 3`, `ABSENT_HOLD_FRAMES = 3` |
 | `LabelGrid(slot_memory=…)` | The candidate slot a label used last frame is tried first, so a new neighbour does not flip it to the other side of its star | — |
+| `star_sightings.StarSightings` | A labellable star or planet detected within `sighting_tolerance` (2 × model RMS, 10–25 calibration px) of its predicted pixel raises a decaying confidence; two sightings in a row mark a patch around it as sky on the plane, held 3–4 frames after the last. Overrides the vote, never the equipment map | `SIGHTING_DECAY = 0.6`, `SIGHTING_SHOW = 1.5`, `SIGHTING_KEEP = 0.3` |
 
-A lasting change (a telescope parked across the field) is adopted after about
-eight frames. A sustained detection failure never wipes the vote: it goes stale,
+The single 50 % threshold the vote used to have made pixels at the margin of
+the open sky, or in the gaps between detection discs, flip on alternate frames
+(discussion #105). Replaying that rig's 2026-09-30 calibration buffer (48
+frames) through the vote: 111 visibility flips with one threshold, 65 with the
+keep fraction; shown-set changes 56 → 30 with the absent hold; star-frames
+where the star was detected at its own pixel yet unlabelled 54 → 17 with
+sightings.
+
+A lasting change (a telescope parked across the field) is adopted once fewer
+than a quarter of the voting frames see sky there — about twelve frames from a
+fully open start. A sustained detection failure never wipes the vote: it goes stale,
 and the first real mask afterwards replaces the history rather than being
 out-voted by it. The stabilizer is reset at capture start and whenever the
 calibration model is set or cleared; a reprocess of the same capture
