@@ -9,8 +9,10 @@ automatic save destroyed the only copy of a correct model.
 That backup is one step deep. On 2026-09-29 (discussion #105) a Guided
 Calibration solve was replaced by an automatic refinement at 22:27 and the
 backup holding it by the next one at 22:57, so nothing on disk still had the
-model the user had anchored. keep_guided_copy writes a guided solve to its own
-file as well, which save_with_backup never touches.
+model the user had anchored. Every save now also lands in the bounded
+calibration history (calibration_history), which the UI restores from;
+keep_guided_copy still writes the newest guided solve to its own file, the
+fixed name the wiki tells users to copy back by hand.
 """
 import os
 import shutil
@@ -19,22 +21,31 @@ from typing import Optional
 
 from services.logger import app_logger as log
 
+from . import calibration_history
 from .fisheye import FisheyeModel
 from .model_admission import is_user_anchored
 
 
-def save_with_backup(model: FisheyeModel, stamp_time: bool = True) -> Optional[str]:
+def save_with_backup(model: FisheyeModel, stamp_time: bool = True,
+                     source: Optional[str] = None,
+                     backup: Optional[bool] = None,
+                     restored_from: str = '') -> Optional[str]:
     """Save `model` to the calibration path; return an error string or None.
 
     `stamp_time=False` re-saves the same model (a provenance stamp) without
     moving its calibration timestamp, and without a backup — the file being
-    overwritten is this model.
+    overwritten is this model. `backup` overrides that for a restore, which
+    keeps the restored model's own timestamp but replaces a different model.
+    `source` (calibration_history.SOURCE_*) records the save in the history;
+    None records nothing, which is what a re-stamp wants.
     """
+    do_backup = stamp_time if backup is None else backup
     try:
         from services.app_config import (
             get_calibration_backup_path, get_calibration_path)
         cal_path = get_calibration_path()
-        if stamp_time and os.path.isfile(cal_path):
+        replaced = FisheyeModel.try_load(cal_path) if source else None
+        if do_backup and os.path.isfile(cal_path):
             try:
                 shutil.copyfile(cal_path, get_calibration_backup_path())
             except OSError as e:
@@ -43,10 +54,13 @@ def save_with_backup(model: FisheyeModel, stamp_time: bool = True) -> Optional[s
             model.calibrated_at = datetime.now(timezone.utc).isoformat()
         model.save(cal_path)
         log.info(f"Calibration saved to {cal_path}")
-        return None
     except Exception as e:
         log.error(f"Failed to save calibration: {e}")
         return str(e)
+    if source:
+        calibration_history.record(model, source, replaced=replaced,
+                                   restored_from=restored_from)
+    return None
 
 
 def keep_guided_copy(model: FisheyeModel, cal_path: str) -> Optional[str]:
