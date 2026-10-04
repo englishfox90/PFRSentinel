@@ -81,7 +81,7 @@ class _FakeMainWindow:
 def controller(qapp, map_path):
     from ui.controllers.allsky_controller import AllSkyController
     ctrl = AllSkyController(_FakeMainWindow())
-    ctrl._cal_service._save_model = lambda m: None
+    ctrl._cal_service._save_model = lambda m, **kw: None
     yield ctrl
     ctrl.deleteLater()
     qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -173,7 +173,7 @@ class TestLabelStateResets:
     def test_set_model_forgets_label_memory(self):
         from services.allsky.calibration_service import CalibrationService
         svc = CalibrationService()
-        svc._save_model = lambda m: None
+        svc._save_model = lambda m, **kw: None
         self._dirty_labels()
         svc.set_model(_model())
         stab = get_label_stabilizer()

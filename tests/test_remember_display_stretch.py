@@ -53,7 +53,7 @@ def controller(qapp, tmp_path, monkeypatch):
                         lambda: str(tmp_path / "allsky_calibration.json"))
     from ui.controllers.allsky_controller import AllSkyController
     ctrl = AllSkyController(_FakeMainWindow())
-    ctrl._cal_service._save_model = lambda m: None
+    ctrl._cal_service._save_model = lambda m, **kw: None
     yield ctrl
     ctrl.deleteLater()
     qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
