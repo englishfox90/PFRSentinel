@@ -17,7 +17,7 @@ anyway (.claude/rules/allsky.md).
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 
 from services.allsky import calibration_history
 from services.allsky.calibration_history import HistoryEntry
@@ -35,6 +35,8 @@ def describe_saved_at(entry: HistoryEntry) -> str:
 class CalibrationHistoryController(QObject):
     """List and restore history entries for the All-Sky page."""
 
+    restore_finished = Signal(bool, str)   # ok, message for the user
+
     def __init__(self, allsky_controller, parent=None):
         super().__init__(parent)
         self._allsky = allsky_controller
@@ -46,7 +48,13 @@ class CalibrationHistoryController(QObject):
         return calibration_history.newest_guided(self.entries())
 
     def restore(self, entry_id: str) -> Tuple[bool, str]:
-        """Make the entry the live calibration; (ok, message for the user)."""
+        """Make the entry the live calibration; (ok, message for the user),
+        also announced on `restore_finished`."""
+        ok, msg = self._restore(entry_id)
+        self.restore_finished.emit(ok, msg)
+        return ok, msg
+
+    def _restore(self, entry_id: str) -> Tuple[bool, str]:
         from services.allsky.calibration_store import keep_guided_copy, save_with_backup
         from services.app_config import get_calibration_path
 

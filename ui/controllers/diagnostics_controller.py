@@ -18,7 +18,8 @@ from PySide6.QtCore import QObject, Signal
 
 from services import app_config
 from services.diagnostics_bundle import (
-    allsky_buffer_dump_files, build_bundle, default_bundle_path, environment_info)
+    allsky_buffer_dump_files, allsky_calibration_history_files, build_bundle,
+    default_bundle_path, environment_info)
 from services.logger import app_logger
 from services.raw_frame_export import export_raw_frame
 from services.reveal_in_file_manager import reveal_path
@@ -169,6 +170,7 @@ class DiagnosticsController(QObject):
         if custom and os.path.abspath(custom) != os.path.abspath(files['allsky/allsky_calibration.json']):
             files[f'allsky/custom_{os.path.basename(custom)}'] = custom
         files.update(allsky_buffer_dump_files(app_config.get_allsky_buffer_dir(create=False)))
+        files.update(allsky_calibration_history_files())
         return files
 
     def _summary(self, config_data, notes) -> dict:

@@ -109,6 +109,18 @@ def allsky_buffer_dump_files(dump_dir) -> dict:
     return {f'allsky/{newest.name}': str(newest)}
 
 
+def allsky_calibration_history_files() -> dict:
+    """``{arcname: path}`` for every calibration history entry
+    (allsky/calibration_history.py): which model was live when, and what
+    replaced it — the question a "my calibration is gone" report asks.
+    Retention bounds the count to a few dozen ~2 KB files."""
+    from .allsky.calibration_history import bundle_files
+    try:
+        return bundle_files()
+    except Exception:
+        return {}
+
+
 def default_bundle_path(base_dir) -> Path:
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     return Path(base_dir) / f'{BUNDLE_PREFIX}_{stamp}.zip'
