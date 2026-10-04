@@ -26,9 +26,10 @@ from .label_stability import get_label_stabilizer, upsample
 from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
+from .moon_label import measure_moon_glare
 from .render_objects import (
     planet_label_px, planet_targets, render_messier, render_ngc, render_planets,
-    _is_sky_visible,
+    reserve_moon_glare, _is_sky_visible,
 )
 from .render_stars import (
     bright_star_targets, render_bright_stars, star_label_px, star_uid,
@@ -170,6 +171,10 @@ def render_allsky_overlay(
         sighting_tolerance(model.rms_residual, scale),
         map_sky=obstruction_map.small_sky_mask(w, h, _crop_stamp(crop)),
     )
+    # Measured on the frame before any layer draws on it (moon_label).
+    planet_config = config.get('planets', {})
+    moon_glare = (measure_moon_glare(img, model, dt, lat, lon)
+                  if planet_config.get('enabled', True) else None)
 
     # Layer order: grid first (background), then constellations, then objects
     try:
@@ -187,21 +192,22 @@ def render_allsky_overlay(
 
     # Pre-compute global allowed object set (top_n across all types combined)
     # Uses the ORIGINAL gray (no overlays) for accurate equipment detection
-    allowed_ids = _compute_allowed_ids(config, model, lat, lon, dt, gray)
+    allowed_ids = _compute_allowed_ids(config, model, lat, lon, dt, gray,
+                                       moon_seen=moon_glare is not None)
 
     # Stars and planets are all reserved before any of their labels goes
     # down, and planets are named first: labelled last, a planet found the
     # slot right of it taken by a star's name and its own went to the far
     # side (discussion #105, Saturn).
     stars_config = config.get('bright_stars', {})
-    planet_config = config.get('planets', {})
     star_targets, planet_targets_ = _reserve_point_objects(
         img.size, model, stars_config, planet_config, lat, lon, dt, gray,
-        allowed_ids, grid_cfg)
+        allowed_ids, grid_cfg, moon_glare)
 
     try:
         img = render_planets(img, model, planet_config, lat, lon, dt, grid_cfg,
-                             allowed_ids, sky_gray=gray, targets=planet_targets_)
+                             allowed_ids, sky_gray=gray, targets=planet_targets_,
+                             moon_glare=moon_glare)
     except Exception as e:
         log.warning(f"allsky planet render failed: {e}")
 
@@ -280,17 +286,20 @@ def render_allsky_for_preview(
 # ---------------------------------------------------------------------------
 
 def _reserve_point_objects(img_size, model, stars_config, planet_config,
-                           lat, lon, dt, gray, allowed_ids, grid):
-    """Bright-star and planet targets, each reserved on ``grid``. A layer
-    that fails here is left to its own renderer, which recomputes."""
+                           lat, lon, dt, gray, allowed_ids, grid, moon_glare=None):
+    """Bright-star and planet targets, each reserved on ``grid``, and the
+    Moon's glare kept clear of every label. A layer that fails here is left
+    to its own renderer, which recomputes."""
     stars = planets = None
+    reserve_moon_glare(grid, moon_glare)
     try:
         stars = bright_star_targets(model, stars_config, lat, lon, dt, gray, allowed_ids)
         reserve_targets(grid, stars, star_label_px(img_size, stars_config))
     except Exception as e:
         log.debug(f"allsky: bright-star reservation skipped: {e}")
     try:
-        planets = planet_targets(model, planet_config, lat, lon, dt, gray, allowed_ids)
+        planets = planet_targets(model, planet_config, lat, lon, dt, gray, allowed_ids,
+                                 moon_glare)
         reserve_targets(grid, planets, planet_label_px(img_size, planet_config))
     except Exception as e:
         log.debug(f"allsky: planet reservation skipped: {e}")
@@ -354,6 +363,7 @@ def _compute_allowed_ids(
     lon: float,
     dt: datetime,
     gray: Optional['np.ndarray'] = None,
+    moon_seen: bool = False,
 ) -> Optional[set]:
     """
     Rank all visible objects (planets + Messier + NGC) by brightness and
@@ -418,7 +428,9 @@ def _compute_allowed_ids(
         if float(alt) < -1.0:
             continue
         xy = model.altaz_to_pixel(float(alt), float(az))
-        if not _visible(xy):
+        # A measured glare core is the Moon in view (moon_label); the plane
+        # has no say inside the glare.
+        if not (name == 'Moon' and moon_seen) and not _visible(xy):
             continue
         candidates.append((_PLANET_MAG.get(name, 0.0), f'planet:{name}'))
 
