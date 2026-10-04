@@ -17,6 +17,7 @@ from .catalogs import get_messier_objects, get_ngc_objects
 from .planets import get_all_positions
 from .coords import radec_to_altaz
 from .label_collision import LabelGrid, estimate_text_size, reserve_targets
+from .moon_label import MoonGlare, label_gap, text_halo
 
 
 def _parse_color(hex_str: str, opacity: int) -> Tuple[int, int, int, int]:
@@ -71,8 +72,15 @@ def planet_targets(
     dt: datetime,
     gray: np.ndarray,
     allowed_ids: Optional[Set[str]] = None,
+    moon_glare: Optional[MoonGlare] = None,
 ) -> List[Tuple[str, float, float, str]]:
-    """(name, x, y, uid) of every planet and the Moon that gets a label."""
+    """(name, x, y, uid) of every planet and the Moon that gets a label.
+
+    With ``moon_glare`` (moon_label.measure_moon_glare) the Moon is placed at
+    the measured centre of its glare and needs no visibility test: the
+    saturated core is the proof it is in view, and the glare blanks the
+    detections the visibility plane is built from.
+    """
     if not config.get('enabled', True):
         return []
     targets = []
@@ -92,11 +100,20 @@ def planet_targets(
         if xy is None:
             continue
 
+        if name == 'Moon' and moon_glare is not None:
+            targets.append((name, moon_glare.x, moon_glare.y, uid))
+            continue
         x, y = int(xy[0]), int(xy[1])
         if not _is_sky_visible(gray, x, y):
             continue
         targets.append((name, float(x), float(y), uid))
     return targets
+
+
+def reserve_moon_glare(label_grid: LabelGrid, moon_glare: Optional[MoonGlare]) -> None:
+    """Keep every label out of the Moon's glare, where it cannot be read."""
+    if moon_glare is not None:
+        label_grid.reserve_marker(moon_glare.x, moon_glare.y, moon_glare.radius)
 
 
 def render_planets(
@@ -110,6 +127,7 @@ def render_planets(
     allowed_ids: Optional[Set[str]] = None,
     sky_gray: Optional[np.ndarray] = None,
     targets: Optional[List[Tuple[str, float, float, str]]] = None,
+    moon_glare: Optional[MoonGlare] = None,
 ) -> Image.Image:
     """Draw planet and Moon name labels (no marker shapes).
 
@@ -117,6 +135,9 @@ def render_planets(
     marker first, then each label takes the first free slot from the shared
     order (right of the planet first). ``targets`` from ``planet_targets``
     lets the caller reserve them before other layers place anything.
+
+    The Moon's name is set just outside its measured glare (``moon_glare``)
+    when there is one, and always carries a dark outline.
     """
     if not config.get('enabled', True):
         return img
@@ -128,10 +149,12 @@ def render_planets(
 
     if targets is None:
         gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
-        targets = planet_targets(model, config, lat_deg, lon_deg, dt, gray, allowed_ids)
+        targets = planet_targets(model, config, lat_deg, lon_deg, dt, gray,
+                                 allowed_ids, moon_glare)
     if not targets:
         return img
     reserve_targets(label_grid, targets, label_size)
+    reserve_moon_glare(label_grid, moon_glare)
 
     font = _load_font(label_size)
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
@@ -142,9 +165,16 @@ def render_planets(
         text_color = _parse_color(hex_color, opacity)
 
         tw, th = estimate_text_size(name, label_size)
-        pos = label_grid.try_place(x, y, tw, th, key=uid)
+        if name != 'Moon':
+            pos = label_grid.try_place(x, y, tw, th, key=uid)
+            if pos is not None:
+                draw.text(pos, name, fill=text_color, font=font)
+            continue
+        gap = label_gap(moon_glare, th) if moon_glare is not None else None
+        pos = label_grid.try_place(x, y, tw, th, gap=gap, key=uid)
         if pos is not None:
-            draw.text(pos, name, fill=text_color, font=font)
+            draw.text(pos, name, fill=text_color, font=font,
+                      **text_halo(label_size, opacity))
 
     return Image.alpha_composite(img, overlay)
 

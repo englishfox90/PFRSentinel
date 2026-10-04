@@ -382,6 +382,9 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 - Planet and Moon names follow the same rule as star names: right of the object first, at the same distance. No label is placed over any star or planet.
 
   > **New in the next release** — not available in version 3.7.8 or earlier. Planets used to be labelled last, so a star's name could take the place to a planet's right and push the planet's name to its left, or hide it.
+- **The Moon's label sits outside its glare.** When the Moon is bright enough to saturate the image, the app measures how far its glare reaches and puts the name just beyond it, centred on the Moon as it appears in the frame (even when the calibration is a little off there). The name has a dark outline so it reads on a bright moonlit sky, and no other label is drawn inside the glare. A Moon that saturates the frame is shown even where the recent frames could not judge the sky, because its glare hides every star around it. A Moon behind the pier or in thick cloud is labelled like a planet.
+
+  > **New in the next release** — not available in version 3.7.8 or earlier. The Moon's name used to sit a few pixels from its centre, inside the glare, where it could not be read.
 - **Max objects visible** picks the brightest visible objects.
 - Label text scales with the image size, so labels look the same at any resolution. **Label size** on the Enable Overlay card makes every label larger or smaller together.
 
