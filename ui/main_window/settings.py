@@ -157,6 +157,9 @@ class _MainWindowSettingsMixin:
         if cfg.get('_action') == 'guided_calibrate':
             self._open_guided_calibration()
             return
+        if cfg.get('_action') == 'calibration_history':
+            self._open_calibration_history()
+            return
         if cfg.get('_action') == 'reset_calibration':
             self.allsky_controller.reset_calibration()
             return
@@ -206,6 +209,29 @@ class _MainWindowSettingsMixin:
         finally:
             if session is not None:
                 session.close()
+            if dlg is not None:
+                dlg.deleteLater()
+
+    def _open_calibration_history(self) -> None:
+        """Open the calibration history; a restore goes through its controller."""
+        dlg = None
+        try:
+            from ui.controllers.calibration_history_controller import (
+                CalibrationHistoryController)
+            from ui.panels.allsky_calibration_history_dialog import (
+                CalibrationHistoryDialog)
+            history = CalibrationHistoryController(self.allsky_controller)
+            dlg = CalibrationHistoryDialog(history.entries(), parent=self)
+            # Bound methods only: a closure over dlg on its own signal is a
+            # cycle the GC cannot see through Qt (see the guided dialog).
+            dlg.restore_requested.connect(history.restore)
+            history.restore_finished.connect(dlg.show_result)
+            if dlg.exec() and dlg.restored:
+                self._notify("Calibration restored — the all-sky overlay now "
+                             "uses it.", 'info')
+        except Exception as e:
+            app_logger.error(f"Calibration history dialog failed: {e}")
+        finally:
             if dlg is not None:
                 dlg.deleteLater()
 

@@ -494,7 +494,9 @@ class AllSkyController(QObject):
 
     def _on_calibration_done(self, model) -> bool:
         """Admit, save and announce a manual result; True once it is on disk."""
+        from services.allsky import calibration_history
         from services.allsky.calibration_store import keep_guided_copy
+        from services.allsky.fisheye import FisheyeModel
         from services.app_config import get_calibration_path
 
         # Pole check: the background service measures the celestial pole from
@@ -510,30 +512,21 @@ class AllSkyController(QObject):
         # announced as the calibration: it would draw until the next restart
         # and then silently give way to the old file.
         cal_path = get_calibration_path()
+        replaced = FisheyeModel.try_load(cal_path)
         try:
             model.save(cal_path)
-            # Update config with new calibration path
-            allsky_cfg = dict(self._mw.config.get('allsky_overlay', {}))
-            allsky_cfg['calibration_file'] = cal_path
-            self._mw.config.set('allsky_overlay', allsky_cfg)
-            self._mw.config.save()
+            self.remember_calibration_file(cal_path)
         except Exception as e:
             log.error(f"Failed to save calibration: {e}")
             self.status_changed.emit(f"Calibration save failed: {e}")
             return False
         keep_guided_copy(model, cal_path)
-
-        self._model = model
-        info = self.get_calibration_info()
-
-        # Notify the background service so it uses this model as its seed
-        # and resets its frame buffer for fresh accumulation.
-        self._cal_service.set_model(model)
-
-        from services.allsky.calibration_service import model_quality
-        quality = model_quality(model, model.n_images, model.span_minutes)
+        calibration_history.record(
+            model, calibration_history.source_for_model(model), replaced=replaced)
 
         from services.allsky.model_admission import is_guided
+        from services.allsky.calibration_service import model_quality
+        quality = model_quality(model, model.n_images, model.span_minutes)
         if is_guided(model):
             # 'preliminary' alone undersells it: the orientation is pinned by
             # stars the user named; only the fine lens terms are still rough.
@@ -548,13 +541,30 @@ class AllSkyController(QObject):
         note = getattr(model, 'guided_note', None)
         if note:
             msg += f" — {note}"
-        self.status_changed.emit(msg)
-        self._publish_quality(quality, model)
+        self._notify_calibration_done(self.adopt_model(model, msg))
+        return True
+
+    def remember_calibration_file(self, cal_path: str) -> None:
+        """Point allsky_overlay.calibration_file at `cal_path`."""
+        allsky_cfg = dict(self._mw.config.get('allsky_overlay', {}))
+        allsky_cfg['calibration_file'] = cal_path
+        self._mw.config.set('allsky_overlay', allsky_cfg)
+        self._mw.config.save()
+
+    def adopt_model(self, model, status: str) -> Optional[dict]:
+        """Make `model`, already on disk, the live calibration: the service
+        seeds from it and starts a fresh buffer, the panel hears about it.
+        Shared by a manual/guided result and a history restore."""
+        from services.allsky.calibration_service import model_quality
+        self._model = model
+        info = self.get_calibration_info()
+        self._cal_service.set_model(model)
+        self.status_changed.emit(status)
+        self._publish_quality(
+            model_quality(model, model.n_images, model.span_minutes), model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
-
-        self._notify_calibration_done(info)
-        return True
+        return info
 
     def _on_calibration_failed(self, error_msg: str) -> None:
         log.warning(f"All-sky calibration failed: {error_msg}")

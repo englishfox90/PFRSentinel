@@ -42,6 +42,7 @@ from .buffer_dump import BufferDumpTrigger
 from .calibration_attention import calibration_attention
 from .calibration_fit_merit import credibility_note
 from .calibration_quality import CalibrationQuality, model_quality  # re-exported for existing callers
+from .calibration_history import SOURCE_COLD_START, SOURCE_ESCAPE, SOURCE_REFINEMENT
 from .calibration_store import save_with_backup
 from .calibration_validate import median_frame_resolution
 from .calibration_workers import (  # re-exported for existing callers
@@ -626,7 +627,7 @@ class CalibrationService(QObject):
         model.span_minutes = 0.0
 
         self._quality = model_quality(model, 1, 0.0)
-        self._save_model(model)
+        self._save_model(model, source=SOURCE_COLD_START)
 
         log.info(f"Initial calibration succeeded: {model}, "
                  f"quality={self._quality}")
@@ -684,7 +685,7 @@ class CalibrationService(QObject):
             self._model = model
             self._quality = new_q
             self._chance_streak.reset()
-            self._save_model(model)
+            self._save_model(model, source=SOURCE_ESCAPE if was_escape else SOURCE_REFINEMENT)
 
             log.info(f"Calibration refined: {model}, quality={new_q}")
             self.status_changed.emit(
@@ -735,8 +736,9 @@ class CalibrationService(QObject):
     # Persistence
     # ------------------------------------------------------------------
 
-    def _save_model(self, model: FisheyeModel, stamp_time: bool = True) -> None:
+    def _save_model(self, model: FisheyeModel, stamp_time: bool = True,
+                    source: str = None) -> None:
         """Save to the production calibration file (calibration_store)."""
-        error = save_with_backup(model, stamp_time=stamp_time)
+        error = save_with_backup(model, stamp_time=stamp_time, source=source)
         if error:
             self.status_changed.emit(f"Calibration save failed: {error}")

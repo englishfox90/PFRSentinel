@@ -142,7 +142,7 @@ class TestWorkerLifetime:
     def test_initial_worker_releases_its_image_copy(self, qapp, monkeypatch):
         monkeypatch.setattr(cw, 'calibrate', lambda *a, **k: _model())
         svc = cs.CalibrationService()
-        svc._save_model = lambda m: None
+        svc._save_model = lambda m, **kw: None
         svc.validate_against_pole = lambda m: (True, 'ok')
         image = object()
         svc._pending_initial = (image, datetime.now(timezone.utc), 51.0, -1.0)
@@ -252,7 +252,7 @@ class TestRefineBackoff:
 
     def test_user_reset_clears_the_back_off(self):
         svc = cs.CalibrationService()
-        svc._save_model = lambda m: None
+        svc._save_model = lambda m, **kw: None
         svc._model = _model()
         svc._refine_backoff_failures = 4
         svc.clear_model()

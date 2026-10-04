@@ -348,6 +348,13 @@ class AllSkySettingsPanel(QScrollArea):
 
         # Escape hatch for a bad saved calibration (a wrong model seeds every
         # background refinement, so deleting it beats keeping it).
+        # Every calibration that went live is kept; this restores one
+        # (a guided solve replaced by automatic refinement, discussion #105).
+        self._history_btn = PushButton("Calibration History…", icon=mdi('history'))
+        self._history_btn.clicked.connect(
+            lambda: self.settings_changed.emit({'_action': 'calibration_history'}))
+        vl.addWidget(self._history_btn)
+
         self._reset_btn = PushButton("Reset Calibration…", icon=mdi('delete'))
         self._reset_btn.clicked.connect(self._on_reset_clicked)
         vl.addWidget(self._reset_btn)

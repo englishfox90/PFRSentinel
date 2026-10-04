@@ -85,12 +85,13 @@ The calibration is saved to `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.json`
 
 ### Lens Calibration card
 
-The **Lens Calibration** card shows a coloured quality badge (hover it for a description), a status line such as "Calibrated: 142 stars, RMS=6.20px (good)", and five buttons:
+The **Lens Calibration** card shows a coloured quality badge (hover it for a description), a status line such as "Calibrated: 142 stars, RMS=6.20px (good)", and these buttons:
 
 | Button | What it does |
 |--------|--------------|
 | **Calibrate Now** | Runs an immediate single-frame calibration on the most recent clean frame. The button reads **Calibrating…** while it works. Needs a frame, so start capture first. |
 | **Guided Calibration…** | Opens a dialog where you identify bright stars by hand. The dependable option for obstructed, tilted, or hazy views where automatic calibration cannot work out the orientation. See [Guided Calibration](#guided-calibration). |
+| **Calibration History…** | Lists every calibration that has been in use and lets you put an earlier one back. New in the next release. See [Calibration history](#calibration-history). |
 | **Reset Calibration…** | Deletes the saved calibration after a confirmation prompt. See [Reset Calibration](#reset-calibration). |
 | **Dump calibration buffer** | Saves the star positions automatic calibration has collected to a small file for a bug report. See [Dump calibration buffer](#dump-calibration-buffer). |
 | **Reset Equipment Map…** | Forgets where the app has learned that telescopes, mounts and other equipment sit in the frame, after a confirmation prompt. New in the next release. See [Equipment avoidance](#equipment-avoidance). |
@@ -204,7 +205,19 @@ Before an automatic calibration overwrites the saved one, the previous file is c
 
 > **New in the next release** — not available in version 3.7.8 or earlier.
 >
-> That backup only goes back one step, so two automatic updates in a row can leave no copy of a Guided Calibration anywhere. Every Guided Calibration you save is now also kept as `allsky_calibration.guided.json` in the same folder, and automatic calibrations never overwrite it. To go back to it, close PFR Sentinel, copy it over `allsky_calibration.json`, and start PFR Sentinel again. [Export Diagnostics](Diagnostics-Export) includes it.
+> That backup only goes back one step, so two automatic updates in a row can leave no copy of a Guided Calibration anywhere. Every Guided Calibration you save is now also kept as `allsky_calibration.guided.json` in the same folder, and automatic calibrations never overwrite it. To go back to it, close PFR Sentinel, copy it over `allsky_calibration.json`, and start PFR Sentinel again. [Export Diagnostics](Diagnostics-Export) includes it. The [calibration history](#calibration-history) does the same from inside the app.
+
+### Calibration history
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+Every calibration that becomes the one in use is kept: automatic ones, **Calibrate Now**, **Guided Calibration**, and restores. **Calibration History…** on the Lens Calibration card lists them, newest first, with when each one was saved, where it came from, its quality, RMS and number of stars. Guided Calibrations are marked with ★.
+
+- **Restore selected** puts the chosen calibration back in use after a confirmation. Automatic refinement then starts again from it, exactly as after a new Guided Calibration.
+- **Restore last guided** picks your newest Guided Calibration — the usual choice when automatic updates have made the overlay worse.
+- The calibration a restore replaces stays in the list, so a restore can always be undone.
+
+The newest 10 Guided Calibrations and the newest 30 of everything else are kept in `%LOCALAPPDATA%\PFRSentinel\allsky\calibration_history\`, a few kilobytes each, so automatic updates can never push your Guided Calibrations out. [Export Diagnostics](Diagnostics-Export) includes them, which shows which calibration was in use when.
 
 ---
 
