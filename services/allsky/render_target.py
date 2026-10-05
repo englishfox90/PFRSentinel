@@ -27,11 +27,14 @@ fisheye at 750 px gives ~4 px per degree), so the outline is only drawn once
 its bounding box reaches ``MIN_FOV_PX``; below that the reticle stands in.
 """
 import math
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import List, Optional, Tuple
 
 from PIL import Image, ImageDraw
+
+from services.logger import app_logger as log
 
 from .coords import precess_from_j2000, radec_to_altaz
 from .fisheye import FisheyeModel
@@ -47,6 +50,50 @@ _DEFAULT_COLOR = '#FF66AA'
 _TICK_INNER = 1.4  # tick span, in ring radii
 _TICK_OUTER = 2.2
 _CROSS_OF_BOX = 0.35  # centre-cross half-length cap, in box shorter sides
+_HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
+
+STALE_MIN_S = 30
+STALE_MAX_S = 3600
+STALE_DEFAULT_S = 120
+
+_bad_colors_logged: set = set()
+
+
+def _number(layer_cfg: dict, key: str, default: float) -> float:
+    """A numeric setting, or ``default`` when a hand-edited config holds
+    something unusable — a bad value must not fail every frame."""
+    try:
+        value = float(layer_cfg.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
+    return value if math.isfinite(value) else float(default)
+
+
+def layer_config(layer_cfg) -> dict:
+    """``allsky_overlay.nina_target`` as a dict; a null or garbage block
+    reads as the defaults."""
+    return layer_cfg if isinstance(layer_cfg, dict) else {}
+
+
+def stale_after_seconds(layer_cfg) -> float:
+    """How long a target stays drawn without a fresh report, clamped to
+    the range the settings card offers; unusable values read as the
+    default. NaN would otherwise never go stale and 0 never show."""
+    value = _number(layer_config(layer_cfg), 'stale_after_s', STALE_DEFAULT_S)
+    return float(min(STALE_MAX_S, max(STALE_MIN_S, value)))
+
+
+def target_color(layer_cfg: dict, opacity: int) -> Tuple[int, int, int, int]:
+    """RGBA for the layer's ``color``; anything but ``#RRGGBB`` falls back to
+    the default, logged once per distinct value."""
+    value = layer_cfg.get('color')
+    if not isinstance(value, str) or not _HEX_COLOR.match(value):
+        if repr(value) not in _bad_colors_logged:
+            _bad_colors_logged.add(repr(value))
+            log.debug(f"allsky NINA target: colour {value!r} is not #RRGGBB, "
+                      f"using {_DEFAULT_COLOR}")
+        value = _DEFAULT_COLOR
+    return _parse_color(value, opacity)
 
 
 @dataclass(frozen=True)
@@ -62,11 +109,11 @@ class TargetPlacement:
 
 def target_label_px(img_size: Tuple[int, int], layer_cfg: dict) -> int:
     """Target label height in pixels for an image of ``img_size``."""
-    return int(round(float(layer_cfg.get('label_size', 13)) * max(img_size) / 750.0))
+    return max(1, int(round(_number(layer_cfg, 'label_size', 13) * max(img_size) / 750.0)))
 
 
 def _marker_r(img_size: Tuple[int, int], layer_cfg: dict) -> float:
-    return max(3.0, float(layer_cfg.get('marker_size', 10)) * max(img_size) / 750.0)
+    return max(3.0, _number(layer_cfg, 'marker_size', 10) * max(img_size) / 750.0)
 
 
 def fov_corners_radec(
@@ -145,6 +192,7 @@ def place_target(
     """Where the target and its field of view land on the frame, or None
     when there is no target, the layer is off, or the target is below the
     horizon or off the image."""
+    layer_cfg = layer_config(layer_cfg)
     if not target or not layer_cfg.get('enabled', True):
         return None
     ra, dec = precess_from_j2000(float(target['ra_deg']), float(target['dec_deg']), dt)
@@ -209,14 +257,15 @@ def render_target(img: Image.Image, layer_cfg: dict,
                   placement: Optional[TargetPlacement]) -> Image.Image:
     """Draw the field-of-view box with a centre cross, or the ring and ticks
     when there is no box, and the name."""
+    layer_cfg = layer_config(layer_cfg)
     if placement is None or not layer_cfg.get('enabled', True):
         return img
     original_mode = img.mode
     if original_mode != 'RGBA':
         img = img.convert('RGBA')
-    opacity = int(layer_cfg.get('opacity', 230))
-    color = _parse_color(str(layer_cfg.get('color') or _DEFAULT_COLOR), opacity)
-    width = max(1, int(layer_cfg.get('line_width', 2)))
+    opacity = int(max(0, min(255, _number(layer_cfg, 'opacity', 230))))
+    color = target_color(layer_cfg, opacity)
+    width = max(1, int(_number(layer_cfg, 'line_width', 2)))
 
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)

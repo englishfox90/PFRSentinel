@@ -29,7 +29,9 @@ from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
 from .moon_label import measure_moon_glare
-from .render_target import place_target, render_target, reserve_target
+from .render_target import (
+    layer_config, place_target, render_target, reserve_target, stale_after_seconds,
+)
 from .render_objects import (
     planet_label_px, planet_targets, render_messier, render_ngc, render_planets,
     reserve_moon_glare, _is_sky_visible,
@@ -180,10 +182,12 @@ def render_allsky_overlay(
                   if planet_config.get('enabled', True) else None)
 
     # Placed before any other layer touches the grid, so the target's name
-    # gets first pick and every later label works around it.
-    target_cfg = config.get('nina_target', {})
+    # gets first pick and every later label works around it; only the Moon's
+    # glare, where no name can be read, is kept clear before it.
+    target_cfg = layer_config(config.get('nina_target'))
     target_placement = None
     try:
+        reserve_moon_glare(grid_cfg, moon_glare)
         target_placement = place_target(img.size, model, target_cfg,
                                         config.get('_nina_target'), lat, lon, dt)
         if target_placement is not None:
@@ -290,9 +294,7 @@ def render_allsky_for_preview(
         cfg['_lon'] = float(weather_cfg.get('longitude', 0) or 0)
         cfg['_elevation'] = float(weather_cfg.get('elevation', 0) or 0)
         cfg['_obs_utc'] = datetime.now(timezone.utc).isoformat()
-        stale_after_s = float(allsky_cfg.get('nina_target', {}).get('stale_after_s', 120))
-        target = get_nina_target_store().current(stale_after_s)
-        cfg['_nina_target'] = target.as_dict() if target is not None else None
+        cfg['_nina_target'] = _current_nina_target(allsky_cfg)
         # The render only happens past the observing-window check, so this
         # frame is one the equipment map may learn from. Package 2's
         # observable-sky gate will supply the verdict here.
@@ -308,6 +310,18 @@ def render_allsky_for_preview(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _current_nina_target(allsky_cfg: dict) -> Optional[dict]:
+    """The target NINA last pushed, while fresh. Its own guard: a bad
+    setting or a failing store loses the target, never the overlay."""
+    try:
+        stale_after_s = stale_after_seconds(allsky_cfg.get('nina_target'))
+        target = get_nina_target_store().current(stale_after_s)
+        return target.as_dict() if target is not None else None
+    except Exception as e:
+        log.debug(f"allsky: NINA target unavailable: {e}")
+        return None
+
 
 def _reserve_point_objects(img_size, model, stars_config, planet_config,
                            lat, lon, dt, gray, allowed_ids, grid, moon_glare=None):

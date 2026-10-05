@@ -22,9 +22,12 @@ from services.allsky.label_collision import LabelGrid, estimate_text_size
 from services.allsky.label_size import CONFIG_KEY, apply_label_size_preset
 from services.allsky.label_stability import get_label_stabilizer, reset_label_stability
 from services.allsky.render_stars import render_bright_stars
+from services.allsky import render_target as render_target_module
+from services.allsky.moon_label import MoonGlare
 from services.allsky.render_target import (
     MIN_FOV_PX, TARGET_UID, TargetPlacement, cross_half_length, fov_corners_radec,
-    marker_reach, place_target, render_target, reserve_target, target_label_px,
+    layer_config, marker_reach, place_target, render_target, reserve_target,
+    stale_after_seconds, target_label_px,
 )
 from services.config_defaults import DEFAULT_CONFIG
 
@@ -393,9 +396,109 @@ class TestOverlayRenderer:
             raise RuntimeError('boom')
 
         monkeypatch.setattr(overlay_renderer, 'place_target', boom)
+        _one_star(monkeypatch, 420.0, 375.0)
         out = overlay_renderer.render_allsky_overlay(
             _img(), _overlay_config(cal_path, _target()), {})
-        assert out.size == IMG_SIZE and _count_target_pixels(out) == 0
+        assert _count_target_pixels(out) == 0
+        assert get_label_stabilizer().slot_memory.get(STAR_UID) is not None
+        assert _count_star_pixels(out) > 10
+
+    def test_a_star_in_the_targets_slot_yields_to_the_target(self, cal_path, monkeypatch):
+        """A bright star below-right of the target, whose own right-hand
+        name would cover the target's: the target is named first and keeps
+        the right; the star's name moves to another side."""
+        _one_star(monkeypatch, 400.0, 392.0)
+        out = overlay_renderer.render_allsky_overlay(
+            _img(), _overlay_config(cal_path, _target()), {})
+        memory = get_label_stabilizer().slot_memory
+        assert memory[TARGET_UID] == 0
+        assert memory.get(STAR_UID) not in (None, 0)
+        assert _count_star_pixels(out) > 10
+
+    def test_without_the_target_that_star_is_named_on_the_right(self, cal_path, monkeypatch):
+        _one_star(monkeypatch, 400.0, 392.0)
+        overlay_renderer.render_allsky_overlay(_img(), _overlay_config(cal_path, None), {})
+        assert get_label_stabilizer().slot_memory.get(STAR_UID) == 0
+
+    def test_the_targets_name_stays_out_of_the_moon_glare(self, cal_path, monkeypatch):
+        glare = MoonGlare(x=410.0, y=375.0, core_r=6.0, radius=25.0)
+        monkeypatch.setattr(overlay_renderer, 'measure_moon_glare', lambda *a, **kw: glare)
+        placed = {}
+        real = overlay_renderer.render_target
+
+        def spy(img, cfg, placement):
+            placed['p'] = placement
+            return real(img, cfg, placement)
+
+        monkeypatch.setattr(overlay_renderer, 'render_target', spy)
+        cfg = _overlay_config(cal_path, _target())
+        cfg['planets'] = {'enabled': True, 'colors': {}}
+        overlay_renderer.render_allsky_overlay(_img(), cfg, {})
+        lx, ly = placed['p'].label_pos
+        tw, th = estimate_text_size('M31', placed['p'].label_px)
+        nx, ny = min(max(glare.x, lx), lx + tw), min(max(glare.y, ly), ly + th)
+        assert math.hypot(nx - glare.x, ny - glare.y) >= glare.radius
+        assert get_label_stabilizer().slot_memory[TARGET_UID] != 0
+
+
+STAR_UID = 'star:HR7001'
+
+
+def _one_star(monkeypatch, x, y):
+    monkeypatch.setattr(overlay_renderer, 'bright_star_targets',
+                        lambda *a, **kw: [('Vega', x, y, STAR_UID)])
+
+
+def _count_star_pixels(img):
+    """The bright-star layer's default #FFEEAA: green high, unlike the target."""
+    a = np.asarray(img.convert('RGB')).astype(int)
+    return int(((a[..., 0] > 180) & (a[..., 1] > 180) & (a[..., 2] > 100)).sum())
+
+
+# ---------------------------------------------------------------------------
+# Hand-edited settings
+# ---------------------------------------------------------------------------
+
+class TestSettings:
+    @pytest.mark.parametrize('value, expected', [
+        (120, 120.0), (600, 600.0), (None, 120.0), ('2m', 120.0), ('300', 300.0),
+        (float('nan'), 120.0), (float('inf'), 120.0), (0, 30.0), (-5, 30.0),
+        (1e9, 3600.0),
+    ])
+    def test_stale_after_seconds_is_clamped_and_defaulted(self, value, expected):
+        assert stale_after_seconds({'stale_after_s': value}) == expected
+
+    @pytest.mark.parametrize('layer', [None, 'off', [], {}])
+    def test_a_missing_or_garbage_block_reads_as_the_default(self, layer):
+        assert stale_after_seconds(layer) == 120.0
+        assert layer_config(layer) == (layer if isinstance(layer, dict) else {})
+
+    @pytest.mark.parametrize('color', ['red', '#abc', '#GGGGGG', None, 123, 'FF66AA'])
+    def test_an_unusable_colour_draws_in_the_default(self, color, monkeypatch):
+        monkeypatch.setattr(render_target_module, '_bad_colors_logged', set())
+        out = render_target(_img(), dict(LAYER, color=color), TestReserveAndRender()._placement())
+        assert out.getpixel((310, 300))[:3] == (0xFF, 0x66, 0xAA)
+
+    def test_a_bad_colour_is_logged_once_not_every_frame(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(render_target_module, '_bad_colors_logged', set())
+        monkeypatch.setattr(render_target_module.log, 'debug', calls.append)
+        monkeypatch.setattr(render_target_module.log, 'warning', calls.append)
+        for _ in range(3):
+            render_target(_img(), dict(LAYER, color='red'), TestReserveAndRender()._placement())
+        assert len(calls) == 1
+
+    def test_garbage_sizes_fall_back_to_the_defaults(self):
+        layer = dict(LAYER, marker_size='big', label_size=None, line_width='x',
+                     opacity=float('nan'))
+        p = _place(layer=layer)
+        assert p.marker_r == pytest.approx(10.0) and p.label_px == 13
+        assert _is_target_colour(render_target(_img(), layer, p).getpixel((379, 375)))
+
+    def test_a_null_layer_block_draws_with_the_defaults(self):
+        p = place_target(IMG_SIZE, _model(), None, _target(), LAT, LON, DT)
+        assert p is not None and p.fov_polygon is not None
+        assert _is_target_colour(render_target(_img(), None, p).getpixel((379, 375)))
 
 
 def test_the_label_size_preset_moves_the_target_label():

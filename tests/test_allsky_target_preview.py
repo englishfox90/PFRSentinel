@@ -111,3 +111,41 @@ def test_the_callers_config_is_not_written(seen):
     overlay_renderer.render_allsky_for_preview(
         Image.new('RGB', (32, 32)), allsky, {'weather': {}}, {})
     assert '_nina_target' not in allsky
+
+
+@pytest.mark.parametrize('stale_after_s, kept_at, dropped_at', [
+    (None, 119.0, 121.0),
+    ('2m', 119.0, 121.0),
+    (float('nan'), 119.0, 121.0),
+    (0, 29.0, 31.0),
+    (-5, 29.0, 31.0),
+    (1e9, 3599.0, 3601.0),
+])
+def test_an_unusable_stale_after_s_is_clamped_not_fatal(seen, clocked_store,
+                                                        stale_after_s, kept_at, dropped_at):
+    store, clock = clocked_store
+    store.set(TARGET)
+    start = clock.t
+    clock.t = start + kept_at
+    _preview({'nina_target': {'stale_after_s': stale_after_s}})
+    assert seen['cfg']['_nina_target'] == TARGET.as_dict()
+    clock.t = start + dropped_at
+    _preview({'nina_target': {'stale_after_s': stale_after_s}})
+    assert seen['cfg']['_nina_target'] is None
+
+
+def test_a_null_layer_block_still_renders_the_overlay(seen):
+    get_nina_target_store().set(TARGET)
+    _preview({'nina_target': None})
+    assert seen['cfg']['_nina_target'] == TARGET.as_dict()
+
+
+def test_a_failing_store_loses_the_target_not_the_overlay(seen, monkeypatch):
+    class _Broken:
+        def current(self, max_age_s):
+            raise RuntimeError('store broke')
+
+    monkeypatch.setattr(overlay_renderer, 'get_nina_target_store', lambda: _Broken())
+    _preview()
+    assert 'cfg' in seen
+    assert seen['cfg']['_nina_target'] is None
