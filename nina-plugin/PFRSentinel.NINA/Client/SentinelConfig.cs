@@ -111,6 +111,12 @@ public sealed class SentinelConfig
     /// <summary>Sentinel's default image path (<c>output.webserver_path</c>).</summary>
     public const string DefaultImagePath = "/latest";
 
+    /// <summary>
+    /// Path of the target push (<c>api_target.TARGET_PATH</c>). Fixed, not configurable,
+    /// and deliberately not under the control path.
+    /// </summary>
+    public const string TargetPath = "/nina/target";
+
     // Bind addresses that name no reachable host. Mirrors _WILDCARD_BINDS in
     // services/api_auth.py — a wildcard is an address to listen on, never one to
     // connect to, and http://0.0.0.0:8080 simply does not resolve.
@@ -197,6 +203,9 @@ public sealed class SentinelConfig
 
     /// <summary>Absolute URI of <c>GET /latest</c>.</summary>
     public Uri ImageUri => new(BaseUrl + ImagePath);
+
+    /// <summary>Absolute URI of <c>POST /nina/target</c>.</summary>
+    public Uri TargetUri => new(BaseUrl + TargetPath);
 
     /// <summary>The default location of Sentinel's config.json.</summary>
     public static string DefaultConfigPath => Path.Combine(

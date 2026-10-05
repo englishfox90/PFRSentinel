@@ -36,6 +36,26 @@
                 This overrides the address only. The capture control token still comes from the local config.json, so a
                 remote Sentinel will show frames and health but may refuse Start/Stop.
             </TextBlock>
+            <!--
+                Two-way by default on IsChecked. Bound straight to the manifest property:
+                no StaticResource lookups inside this template (a missing key throws at
+                load and the options page silently never appears).
+            -->
+            <CheckBox
+                Margin="0,14,0,0"
+                Content="Send the current sequencer target to Sentinel"
+                IsChecked="{Binding ReportTargetToSentinel}"
+                ToolTip="Marks the running target and your camera's field of view on Sentinel's all-sky overlay." />
+            <TextBlock
+                Margin="0,4,0,0"
+                MaxWidth="520"
+                HorizontalAlignment="Left"
+                Foreground="#FF8A8A8A"
+                TextWrapping="Wrap">
+                While a target is running, its name, J2000 position, field of view and position angle are sent when they
+                change and every 30 seconds, using the same capture control token as Start/Stop. Turning this off clears
+                the marker.
+            </TextBlock>
         </StackPanel>
     </DataTemplate>
 </ResourceDictionary>
