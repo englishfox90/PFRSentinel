@@ -9,6 +9,7 @@ import re
 from PySide6.QtCore import Signal
 from qfluentwidgets import CaptionLabel
 
+from services.allsky.render_target import STALE_DEFAULT_S, STALE_MAX_S, STALE_MIN_S
 from services.config_defaults import DEFAULT_CONFIG
 from ..components.cards import CollapsibleCard
 from ..components.scroll_safe_spinbox import SpinBox
@@ -19,8 +20,6 @@ _DEFAULTS = DEFAULT_CONFIG['allsky_overlay']['nina_target']
 
 _HEX_COLOR = re.compile(r'#[0-9A-Fa-f]{6}')
 
-STALE_MIN_S = 30
-STALE_MAX_S = 3600
 STALE_STEP_S = 10
 
 
@@ -45,7 +44,7 @@ class NinaTargetCard(CollapsibleCard):
         self._stale = SpinBox()
         self._stale.setRange(STALE_MIN_S, STALE_MAX_S)
         self._stale.setSingleStep(STALE_STEP_S)
-        self._stale.setValue(int(_DEFAULTS['stale_after_s']))
+        self._stale.setValue(STALE_DEFAULT_S)
 
         for row in (self._enabled, self._show_fov):
             row.toggled.connect(self._emit_changed)
@@ -93,5 +92,5 @@ def _stale_seconds(value) -> int:
     try:
         seconds = int(round(float(value)))
     except (TypeError, ValueError, OverflowError):
-        return int(_DEFAULTS['stale_after_s'])
+        return STALE_DEFAULT_S
     return max(STALE_MIN_S, min(STALE_MAX_S, seconds))
