@@ -3,7 +3,8 @@ Main all-sky overlay entry point.
 
 render_allsky_overlay(img, config, metadata) → PIL.Image
 
-Orchestrates: grid → constellations → planets → bright stars → Messier → NGC.
+Orchestrates: grid → constellations → planets → bright stars → Messier → NGC
+→ NINA target (whose name is placed before any other label).
 All layers share a single LabelGrid for collision avoidance.
 Fails silently if model not calibrated or any layer errors.
 """
@@ -15,6 +16,7 @@ import numpy as np
 from PIL import Image
 
 from services.logger import app_logger as log
+from services.nina_target_store import get_nina_target_store
 from services.observing_window import SAME_CAPTURE_KEY
 from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
 
@@ -27,6 +29,7 @@ from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
 from .moon_label import measure_moon_glare
+from .render_target import place_target, render_target, reserve_target
 from .render_objects import (
     planet_label_px, planet_targets, render_messier, render_ngc, render_planets,
     reserve_moon_glare, _is_sky_visible,
@@ -176,6 +179,19 @@ def render_allsky_overlay(
     moon_glare = (measure_moon_glare(img, model, dt, lat, lon)
                   if planet_config.get('enabled', True) else None)
 
+    # Placed before any other layer touches the grid, so the target's name
+    # gets first pick and every later label works around it.
+    target_cfg = config.get('nina_target', {})
+    target_placement = None
+    try:
+        target_placement = place_target(img.size, model, target_cfg,
+                                        config.get('_nina_target'), lat, lon, dt)
+        if target_placement is not None:
+            target_placement = reserve_target(
+                grid_cfg, target_placement, bool(target_cfg.get('show_label', True)))
+    except Exception as e:
+        log.warning(f"allsky NINA target placement failed: {e}")
+
     # Layer order: grid first (background), then constellations, then objects
     try:
         grid_config = config.get('grid', {})
@@ -231,6 +247,11 @@ def render_allsky_overlay(
     except Exception as e:
         log.warning(f"allsky NGC render failed: {e}")
 
+    try:
+        img = render_target(img, target_cfg, target_placement)
+    except Exception as e:
+        log.warning(f"allsky NINA target render failed: {e}")
+
     # Restore original mode
     if original_mode != 'RGBA':
         img = img.convert(original_mode)
@@ -269,6 +290,9 @@ def render_allsky_for_preview(
         cfg['_lon'] = float(weather_cfg.get('longitude', 0) or 0)
         cfg['_elevation'] = float(weather_cfg.get('elevation', 0) or 0)
         cfg['_obs_utc'] = datetime.now(timezone.utc).isoformat()
+        stale_after_s = float(allsky_cfg.get('nina_target', {}).get('stale_after_s', 120))
+        target = get_nina_target_store().current(stale_after_s)
+        cfg['_nina_target'] = target.as_dict() if target is not None else None
         # The render only happens past the observing-window check, so this
         # frame is one the equipment map may learn from. Package 2's
         # observable-sky gate will supply the verdict here.
