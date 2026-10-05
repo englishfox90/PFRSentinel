@@ -375,16 +375,43 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 
 ---
 
+## NINA Target
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+Marks where NINA is imaging: the outline of your imaging camera's field of view, turned to the camera's rotation, with a small cross at its centre, and the target's name beside it. When there is no field of view to draw, a reticle (a ring with four ticks) marks the target instead. The target, its coordinates and the field of view come from the [NINA plugin](NINA-Integration) with target reporting turned on; nothing is drawn until it has sent a target.
+
+| Setting | Default | Range | Description |
+|---------|---------|-------|-------------|
+| Show NINA target | On | On / Off | Draw the target's marker and name. |
+| Show field of view | On | On / Off | Draw the imaging camera's field of view around the target. Off: the reticle is drawn instead. |
+| Color | Pink (#FF66AA) | Palette | Colour of the marker, the outline and the name. |
+| Hide after (s) | 120 | 30–3600 | The marker disappears when NINA has not reported a target for this long, so a closed NINA or a finished sequence does not leave it on the sky. |
+
+These settings are on the **NINA Target** card of the All-Sky page.
+
+- **Needs a calibrated lens.** The target is projected through the same lens calibration as every other label, so it only appears once the overlay is calibrated, and it is only as accurate as the calibration.
+- **The field of view is small.** A fisheye spreads the whole sky across the frame, so a telescope's field covers only a few pixels. The overlay is drawn once, on the output image after **Resize**, and the preview and every burned-in output use that same drawing, so the box's size depends on your output size: one degree is about 4 pixels on a 750-pixel image and about 19 on a 3552-pixel one, which makes a typical 2° × 1.5° field 8 × 6 or 38 × 28 pixels. A box smaller than 4 pixels is not drawn, in the preview and in the saved, web and timelapse images alike; the reticle takes its place. The preview may also be shown scaled down to fit the window, which makes the box look smaller still.
+- **Drawn even over equipment.** Unlike the catalogue labels, the target is shown where the pier or a telescope blocks the sky, so you can see where the scope is pointing. It does not count towards **Max objects visible**.
+- **Hidden below the horizon.** A target below the horizon is not drawn; a field of view that reaches below the horizon is left out and the reticle is shown instead.
+- **Follows the burn-in options.** The marker is part of the overlay, so it appears wherever the overlay does: the live preview, and the destinations ticked under [Burn overlay into output](#burn-overlay-into-output).
+- **Desktop app only.** Like the rest of the overlay, the marker is drawn by the app's window; the headless mode does not draw it.
+
+---
+
 ## Label Placement
 
-- Labels are only drawn for objects more than 10 degrees above the horizon, and only where the frame shows open sky. Open sky is worked out from where stars are detected. A label already on screen is kept for a few frames after its object drops out of view (see [Labels in a timelapse](#labels-in-a-timelapse)).
-- Each label is tried in several positions around its object (right, left, below, above, then the diagonals) and never covers the object it names. A label that would overlap one already placed is dropped. Placement order is constellation abbreviations, then planets and the Moon, bright stars, Messier, and NGC/IC.
+- Labels are only drawn for objects more than 10 degrees above the horizon, and only where the frame shows open sky. Open sky is worked out from where stars are detected.
+- Each label is tried in several positions around its object (right, left, below, above, then the diagonals) and never covers the object it names. A label that would overlap one already placed is dropped. Placement order is the NINA target's name, constellation abbreviations, then planets and the Moon, bright stars, Messier, and NGC/IC.
 - Planet and Moon names follow the same rule as star names: right of the object first, at the same distance. No label is placed over any star or planet.
 
   > **New in the next release** — not available in version 3.7.8 or earlier. Planets used to be labelled last, so a star's name could take the place to a planet's right and push the planet's name to its left, or hide it.
 - **The Moon's label sits outside its glare.** When the Moon is bright enough to saturate the image, the app measures how far its glare reaches and puts the name just beyond it, centred on the Moon as it appears in the frame (even when the calibration is a little off there). The name has a dark outline so it reads on a bright moonlit sky, and no other label is drawn inside the glare. A Moon that saturates the frame is shown even where the recent frames could not judge the sky, because its glare hides every star around it. A Moon behind the pier or in thick cloud is labelled like a planet.
 
   > **New in the next release** — not available in version 3.7.8 or earlier. The Moon's name used to sit a few pixels from its centre, inside the glare, where it could not be read.
+- **The NINA target's name is placed first**, before any constellation, star or planet, so it normally sits to the right of the target, and every other label keeps clear of the marker and the field-of-view box. Only the Moon's glare is kept clear before it. Near the edge of the image, or right beside the Moon, the name moves to another side, and it is left out if no side is free.
+
+  > **New in the next release** — not available in version 3.7.8 or earlier.
 - **Max objects visible** picks the brightest visible objects.
 - Label text scales with the image size, so labels look the same at any resolution. **Label size** on the Enable Overlay card makes every label larger or smaller together.
 
