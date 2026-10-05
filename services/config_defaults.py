@@ -310,7 +310,13 @@ DEFAULT_CONFIG = {
         "client_secrets_path": "",
         "privacy_status": "private",  # "private" | "unlisted" | "public"
         "title_template": "PFR Sentinel Timelapse {date}",
-        "description_template": "All-sky timelapse recorded by PFR Sentinel.",
+        # Kept equal to youtube_config.DEFAULT_DESCRIPTION_TEMPLATE (tested).
+        "description_template": (
+            "All-sky timelapse recorded by PFR Sentinel on {date}.\n"
+            "{recording}\n"
+            "\n"
+            "{night_summary}"
+        ),
         "tags": "astronomy, allsky, timelapse",
         "category_id": "22",
     },
