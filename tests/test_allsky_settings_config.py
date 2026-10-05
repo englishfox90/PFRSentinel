@@ -59,9 +59,10 @@ def _customised():
                                  line_width=7, label_size=21, opacity=99, edge_fade_px=123)
     cfg['bright_stars'].update(enabled=True, max_magnitude=4.0, bayer_fallback=True,
                                color='#223344', label_size=17, opacity=33)
-    cfg['messier'].update(enabled=False, color='#334455', marker_size=3, label_size=4, opacity=5)
+    cfg['messier'].update(enabled=False, color='#334455', marker_size=3, label_size=4, opacity=5,
+                          label_style='number')
     cfg['ngc'].update(enabled=True, min_magnitude=10.0, color='#445566',
-                      marker_size=2, label_size=3, opacity=4)
+                      marker_size=2, label_size=3, opacity=4, label_style='name_number')
     cfg['planets'].update(enabled=False, color='#556677', label_size=6, marker_size=7, opacity=8)
     cfg['planets']['colors'].update(Mars='#123456', Moon='#654321')
     cfg['grid'].update(enabled=True, horizon=True, altitude_rings=True, altitude_step=15,
@@ -175,3 +176,31 @@ def test_an_old_config_shows_labels_only_on_seen_sky(panel):
     del old['labels_behind_equipment']
     panel.load_from_config(old)
     assert panel.get_config()['labels_behind_equipment'] is False
+
+def test_the_label_text_combos_load_and_emit_each_layer_s_style(panel, qapp):
+    from services.allsky.object_label_text import style_keys
+
+    loaded = _customised()
+    panel.load_from_config(loaded)
+    assert style_keys()[panel._messier_style.currentIndex()] == 'number'
+    assert style_keys()[panel._ngc_style.currentIndex()] == 'name_number'
+
+    emitted = []
+    panel.settings_changed.connect(emitted.append)
+    panel._messier_style.setCurrentIndex(style_keys().index('name'))
+    qapp.processEvents()
+    assert emitted[-1]['messier']['label_style'] == 'name'
+    assert emitted[-1]['ngc']['label_style'] == 'name_number'
+    panel._ngc_style.setCurrentIndex(style_keys().index('number'))
+    qapp.processEvents()
+    assert emitted[-1]['ngc']['label_style'] == 'number'
+
+
+def test_an_old_or_unknown_label_style_reads_as_the_common_name(panel):
+    old = _customised()
+    del old['messier']['label_style']
+    old['ngc']['label_style'] = 'fancy'
+    panel.load_from_config(old)
+    out = panel.get_config()
+    assert out['messier']['label_style'] == 'name'
+    assert out['ngc']['label_style'] == 'name'

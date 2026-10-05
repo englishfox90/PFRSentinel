@@ -25,6 +25,10 @@ from services.allsky.label_size import (
     CONFIG_KEY as LABEL_SIZE_KEY, DEFAULT_PRESET as LABEL_SIZE_DEFAULT,
     preset_keys, preset_names,
 )
+from services.allsky.object_label_text import (
+    CONFIG_KEY as LABEL_STYLE_KEY, DEFAULT_STYLE as LABEL_STYLE_DEFAULT,
+    known_style, style_keys, style_names,
+)
 from services.config_defaults import DEFAULT_CONFIG
 from ..components.scroll_safe_spinbox import DoubleSpinBox, SpinBox
 
@@ -471,6 +475,7 @@ class AllSkySettingsPanel(QScrollArea):
         self._messier_enabled = LayerToggleRow("Show Messier objects", default=True)
         self._messier_enabled.toggled.connect(self._on_setting_changed)
         card.add_widget(self._messier_enabled)
+        self._messier_style = self._style_row_in(card)
         self._messier_color = ColorPaletteRow('#FF8844')
         self._messier_color.color_changed.connect(self._on_setting_changed)
         card.add_widget(self._messier_color)
@@ -482,6 +487,7 @@ class AllSkySettingsPanel(QScrollArea):
         self._ngc_enabled.toggled.connect(self._on_setting_changed)
         card.add_widget(self._ngc_enabled)
         self._ngc_max_mag = self._spin_row_in(card, "Max magnitude", 5, 12, 8, 1)
+        self._ngc_style = self._style_row_in(card)
         self._ngc_color = ColorPaletteRow('#88FF44')
         self._ngc_color.color_changed.connect(self._on_setting_changed)
         card.add_widget(self._ngc_color)
@@ -519,6 +525,14 @@ class AllSkySettingsPanel(QScrollArea):
         spin.valueChanged.connect(self._on_setting_changed)
         card.add_row(label, spin)
         return spin
+
+    def _style_row_in(self, card: CollapsibleCard) -> ComboBox:
+        combo = ComboBox()
+        combo.addItems(list(style_names()))
+        combo.setCurrentIndex(style_keys().index(LABEL_STYLE_DEFAULT))
+        combo.currentIndexChanged.connect(self._on_setting_changed)
+        card.add_row("Label text", combo)
+        return combo
 
     # ------------------------------------------------------------------
     # Public API (called by controller)
@@ -584,11 +598,15 @@ class AllSkySettingsPanel(QScrollArea):
         messier = c.get('messier', {})
         self._messier_enabled.set_checked(messier.get('enabled', True))
         self._messier_color.set_color(messier.get('color', '#FF8844'))
+        self._messier_style.setCurrentIndex(
+            style_keys().index(known_style(messier.get(LABEL_STYLE_KEY))))
 
         ngc = c.get('ngc', {})
         self._ngc_enabled.set_checked(ngc.get('enabled', False))
         self._ngc_max_mag.setValue(int(ngc.get('min_magnitude', 8)))
         self._ngc_color.set_color(ngc.get('color', '#88FF44'))
+        self._ngc_style.setCurrentIndex(
+            style_keys().index(known_style(ngc.get(LABEL_STYLE_KEY))))
 
         planets = c.get('planets', {})
         self._planets_enabled.set_checked(planets.get('enabled', True))
@@ -628,11 +646,13 @@ class AllSkySettingsPanel(QScrollArea):
         cfg['messier'].update({
             'enabled': self._messier_enabled.is_checked(),
             'color': self._messier_color.selected_color(),
+            LABEL_STYLE_KEY: style_keys()[self._messier_style.currentIndex()],
         })
         cfg['ngc'].update({
             'enabled': self._ngc_enabled.is_checked(),
             'min_magnitude': float(self._ngc_max_mag.value()),
             'color': self._ngc_color.selected_color(),
+            LABEL_STYLE_KEY: style_keys()[self._ngc_style.currentIndex()],
         })
         cfg['planets'].update({
             'enabled': self._planets_enabled.is_checked(),

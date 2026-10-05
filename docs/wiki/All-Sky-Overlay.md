@@ -339,12 +339,15 @@ Leave **Max magnitude** at 3 unless you have a reason to change it. Magnitude 2 
 
 ## Messier Objects
 
-Labels the 110 Messier objects (galaxies, nebulae, and star clusters), with the common name where there is one — for example "Andromeda Galaxy (M31)".
+Labels the 110 Messier objects (galaxies, nebulae, and star clusters). By default each label is the object's common name where it has one — for example "Andromeda Galaxy" — and its Messier number where it has none.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Show Messier objects | On | Show Messier object labels. |
+| Label text | Common name | **Common name** ("Andromeda Galaxy"), **Common name and number** ("Andromeda Galaxy (M31)") or **Catalogue number** ("M31"). An object without a common name always shows its number. |
 | Color | Orange | Label colour. |
+
+> **New in the next release** — not available in version 3.7.8 or earlier. **Label text** is new. Version 3.7.8 and earlier always show the common name and the number, as in "Andromeda Galaxy (M31)". Shorter labels also clash less often with their neighbours, so fewer of them are dropped for lack of room from one frame to the next. The label colour still tells Messier objects apart from the other layers.
 
 ---
 
@@ -356,6 +359,7 @@ Labels objects from the NGC and IC catalogues. The catalogue holds several thous
 |---------|---------|-------|-------------|
 | Show NGC objects (mag filtered) | Off | — | Show NGC/IC object labels. |
 | Max magnitude | 8 | 5–12 | Only label objects at least this bright. Lower values show fewer, brighter objects. |
+| Label text | Common name | — | As for Messier objects (an object listed under several names shows the first): **Common name** ("Owl Cluster"), **Common name and number** ("Owl Cluster (NGC0457)") or **Catalogue number** ("NGC0457"). New in the next release; 3.7.8 and earlier always show both. |
 | Color | Green | — | Label colour. |
 
 Objects that also have a Messier number are skipped, since the Messier layer already labels them.

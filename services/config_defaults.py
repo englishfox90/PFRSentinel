@@ -423,13 +423,17 @@ DEFAULT_CONFIG = {
             "enabled": False, "max_magnitude": 3, "bayer_fallback": False,
             "color": "#FFDD44", "label_size": 11, "opacity": 220,
         },
+        # label_style: name / name_number / number (services/allsky/object_label_text.py).
+        # The common name alone keeps timelapse labels short (issue #144).
         "messier": {
             "enabled": True, "color": "#FF8844",
             "marker_size": 8, "label_size": 10, "opacity": 200,
+            "label_style": "name",
         },
         "ngc": {
             "enabled": False, "min_magnitude": 8.0, "color": "#88FF44",
             "marker_size": 6, "label_size": 9, "opacity": 150,
+            "label_style": "name",
         },
         "planets": {
             "enabled": True, "color": "#FFFFCC",
