@@ -7,6 +7,7 @@ testable without Google dependencies installed.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from string import Formatter
@@ -215,6 +216,14 @@ def render_template(
         return str(template).format_map(context)
     except Exception:
         return str(template)
+
+
+_BLANK_LINE_RUN = re.compile(r"\n{3,}")
+
+
+def squeeze_blank_lines(text: str) -> str:
+    """Collapse runs of blank lines to one; an empty placeholder line leaves two."""
+    return _BLANK_LINE_RUN.sub("\n\n", str(text))
 
 
 def unknown_template_fields(template: str) -> set[str]:

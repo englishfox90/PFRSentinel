@@ -18,6 +18,7 @@ from .youtube_config import (
     normalize_youtube_config,
     parse_tags,
     render_template,
+    squeeze_blank_lines,
 )
 
 
@@ -144,7 +145,9 @@ class YouTubeUploadService:
 
             youtube = build("youtube", "v3", credentials=creds_result.credentials)
             title = render_template(cfg["title_template"], metadata, night_stats).strip()
-            description = render_template(cfg["description_template"], metadata, night_stats).strip()
+            description = squeeze_blank_lines(
+                render_template(cfg["description_template"], metadata, night_stats)
+            ).strip()
 
             body = {
                 "snippet": {
