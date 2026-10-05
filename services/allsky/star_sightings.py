@@ -119,17 +119,19 @@ def _seen(targets: Dict[str, Tuple[float, float]], detections, tol_px: float) ->
 def label_targets(model, config: dict, lat: float, lon: float, dt) -> Dict[str, Tuple[float, float]]:
     """Predicted frame pixel of every bright star and planet the overlay could
     label this frame, keyed by the renderers' UIDs. Same eligibility as the
-    renderers: the layer enabled, a displayable name, 10° above the horizon."""
+    renderers: the layer enabled, a displayable name, LABEL_MIN_ALT_DEG
+    above the horizon."""
     from .catalogs import get_bright_stars
     from .coords import radec_to_altaz
     from .planets import get_all_positions
+    from .render_objects import LABEL_MIN_ALT_DEG
     from .render_stars import star_display_name, star_uid
 
     targets: Dict[str, Tuple[float, float]] = {}
 
     def _add(uid, ra, dec):
         alt, az = radec_to_altaz(ra, dec, lat, lon, dt, refraction=True)
-        if float(alt) < 10.0:
+        if float(alt) < LABEL_MIN_ALT_DEG:
             return
         xy = model.altaz_to_pixel(float(alt), float(az))
         if xy is not None:

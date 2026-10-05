@@ -4,6 +4,13 @@ DSO (Messier/NGC) and planet/Moon label renderer for all-sky overlays.
 Objects are shown as text labels only — no circles or shapes are drawn.
 Labels are skipped if the projected position falls in a dark area of the
 image (equipment or mount blocking the sky at that point).
+
+Every layer takes an optional ``persisted`` mapping, uid -> alpha, from the
+drawn-label persistence (label_persistence). When it is given it is the
+whole answer to "which labels": exactly those UIDs are drawn, at their
+predicted pixel, with no visibility test (the overlay renderer has already
+made that test when it ranked the candidates), and each label's opacity is
+multiplied by its alpha. Without it a layer selects as it always has.
 """
 import numpy as np
 from PIL import Image, ImageDraw
@@ -19,11 +26,32 @@ from .coords import radec_to_altaz
 from .label_collision import LabelGrid, estimate_text_size, reserve_targets
 from .moon_label import MoonGlare, label_gap, text_halo
 
+# No label is ranked or drawn below this altitude. One constant for both
+# (label_candidates ranks, the layers draw): ranking used to count Messier
+# and NGC objects from 5 degrees and planets from -1 while every layer drew
+# from 10, so an object in between took a top-N slot and was never drawn,
+# then popped in already holding it once it climbed (issue #144).
+LABEL_MIN_ALT_DEG = 10.0
+
 
 def _parse_color(hex_str: str, opacity: int) -> Tuple[int, int, int, int]:
     h = hex_str.lstrip('#')
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return r, g, b, max(0, min(255, opacity))
+
+
+def faded(color: Tuple[int, int, int, int], alpha: float) -> Tuple[int, int, int, int]:
+    """``color`` with its opacity multiplied by a persistence ``alpha``."""
+    return color[0], color[1], color[2], int(round(color[3] * max(0.0, min(1.0, alpha))))
+
+
+def label_wanted(uid: str, allowed_ids: Optional[Set[str]],
+                 persisted: Optional[Dict[str, float]]) -> bool:
+    """Does this object get a label? The persisted set when there is one,
+    else the top-N budget (None = everything)."""
+    if persisted is not None:
+        return uid in persisted
+    return allowed_ids is None or uid in allowed_ids
 
 
 def _load_font(size: int):
@@ -73,6 +101,7 @@ def planet_targets(
     gray: np.ndarray,
     allowed_ids: Optional[Set[str]] = None,
     moon_glare: Optional[MoonGlare] = None,
+    persisted: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[str, float, float, str]]:
     """(name, x, y, uid) of every planet and the Moon that gets a label.
 
@@ -88,12 +117,12 @@ def planet_targets(
         if name == 'Sun':
             continue
         uid = f'planet:{name}'
-        if allowed_ids is not None and uid not in allowed_ids:
+        if not label_wanted(uid, allowed_ids, persisted):
             continue
 
         alt, az = radec_to_altaz(ra, dec, lat_deg, lon_deg, dt, refraction=True)
         alt, az = float(alt), float(az)
-        if alt < 10.0:
+        if alt < LABEL_MIN_ALT_DEG:
             continue
 
         xy = model.altaz_to_pixel(alt, az)
@@ -104,7 +133,7 @@ def planet_targets(
             targets.append((name, moon_glare.x, moon_glare.y, uid))
             continue
         x, y = int(xy[0]), int(xy[1])
-        if not _is_sky_visible(gray, x, y):
+        if persisted is None and not _is_sky_visible(gray, x, y):
             continue
         targets.append((name, float(x), float(y), uid))
     return targets
@@ -128,6 +157,7 @@ def render_planets(
     sky_gray: Optional[np.ndarray] = None,
     targets: Optional[List[Tuple[str, float, float, str]]] = None,
     moon_glare: Optional[MoonGlare] = None,
+    persisted: Optional[Dict[str, float]] = None,
 ) -> Image.Image:
     """Draw planet and Moon name labels (no marker shapes).
 
@@ -150,7 +180,7 @@ def render_planets(
     if targets is None:
         gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
         targets = planet_targets(model, config, lat_deg, lon_deg, dt, gray,
-                                 allowed_ids, moon_glare)
+                                 allowed_ids, moon_glare, persisted)
     if not targets:
         return img
     reserve_targets(label_grid, targets, label_size)
@@ -161,8 +191,9 @@ def render_planets(
     draw = ImageDraw.Draw(overlay)
 
     for name, x, y, uid in targets:
+        alpha = persisted.get(uid, 1.0) if persisted is not None else 1.0
         hex_color  = single_color if single_color else colors.get(name, '#FFFFFF')
-        text_color = _parse_color(hex_color, opacity)
+        text_color = faded(_parse_color(hex_color, opacity), alpha)
 
         tw, th = estimate_text_size(name, label_size)
         if name != 'Moon':
@@ -174,7 +205,7 @@ def render_planets(
         pos = label_grid.try_place(x, y, tw, th, gap=gap, key=uid)
         if pos is not None:
             draw.text(pos, name, fill=text_color, font=font,
-                      **text_halo(label_size, opacity))
+                      **text_halo(label_size, text_color[3]))
 
     return Image.alpha_composite(img, overlay)
 
@@ -193,6 +224,7 @@ def render_messier(
     label_grid: LabelGrid,
     allowed_ids: Optional[Set[str]] = None,
     sky_gray: Optional[np.ndarray] = None,
+    persisted: Optional[Dict[str, float]] = None,
 ) -> Image.Image:
     """Draw Messier object name labels (no marker shapes)."""
     if not config.get('enabled', True):
@@ -205,7 +237,9 @@ def render_messier(
 
     label_color = _parse_color(color_str, opacity)
     font = _load_font(label_size)
-    gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
+    gray = sky_gray
+    if gray is None and persisted is None:
+        gray = np.array(img.convert('L'))
 
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -215,14 +249,14 @@ def render_messier(
         if not label:
             continue
         uid = f'messier:{label}'
-        if allowed_ids is not None and uid not in allowed_ids:
+        if not label_wanted(uid, allowed_ids, persisted):
             continue
 
         alt, az = radec_to_altaz(
             obj['ra_deg'], obj['dec_deg'], lat_deg, lon_deg, dt, refraction=True
         )
         alt, az = float(alt), float(az)
-        if alt < 10.0:
+        if alt < LABEL_MIN_ALT_DEG:
             continue
 
         xy = model.altaz_to_pixel(alt, az)
@@ -230,7 +264,7 @@ def render_messier(
             continue
 
         x, y = int(xy[0]), int(xy[1])
-        if not _is_sky_visible(gray, x, y):
+        if persisted is None and not _is_sky_visible(gray, x, y):
             continue
 
         common = (obj.get('name') or '').strip()
@@ -238,7 +272,8 @@ def render_messier(
         tw, th = estimate_text_size(display, label_size)
         pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
-            draw.text(pos, display, fill=label_color, font=font)
+            alpha = persisted[uid] if persisted is not None else 1.0
+            draw.text(pos, display, fill=faded(label_color, alpha), font=font)
 
     return Image.alpha_composite(img, overlay)
 
@@ -257,6 +292,7 @@ def render_ngc(
     label_grid: LabelGrid,
     allowed_ids: Optional[Set[str]] = None,
     sky_gray: Optional[np.ndarray] = None,
+    persisted: Optional[Dict[str, float]] = None,
 ) -> Image.Image:
     """Draw NGC/IC object name labels (no marker shapes)."""
     if not config.get('enabled', False):
@@ -270,7 +306,9 @@ def render_ngc(
 
     label_color = _parse_color(color_str, opacity)
     font = _load_font(label_size)
-    gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
+    gray = sky_gray
+    if gray is None and persisted is None:
+        gray = np.array(img.convert('L'))
 
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -283,14 +321,14 @@ def render_ngc(
         if not oid:
             continue
         uid = f'ngc:{oid}'
-        if allowed_ids is not None and uid not in allowed_ids:
+        if not label_wanted(uid, allowed_ids, persisted):
             continue
 
         alt, az = radec_to_altaz(
             obj['ra_deg'], obj['dec_deg'], lat_deg, lon_deg, dt, refraction=True
         )
         alt, az = float(alt), float(az)
-        if alt < 10.0:
+        if alt < LABEL_MIN_ALT_DEG:
             continue
 
         xy = model.altaz_to_pixel(alt, az)
@@ -298,7 +336,7 @@ def render_ngc(
             continue
 
         x, y = int(xy[0]), int(xy[1])
-        if not _is_sky_visible(gray, x, y):
+        if persisted is None and not _is_sky_visible(gray, x, y):
             continue
 
         common = (obj.get('name') or '').strip()
@@ -306,6 +344,7 @@ def render_ngc(
         tw, th = estimate_text_size(display, label_size)
         pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
-            draw.text(pos, display, fill=label_color, font=font)
+            alpha = persisted[uid] if persisted is not None else 1.0
+            draw.text(pos, display, fill=faded(label_color, alpha), font=font)
 
     return Image.alpha_composite(img, overlay)

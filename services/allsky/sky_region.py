@@ -133,12 +133,6 @@ def detect_sky_evidence(img: Image.Image, gray: Optional[np.ndarray] = None) -> 
     if n < PARTIAL_MIN_DETECTIONS or _cdist is None:
         return SkyEvidence(None, None, n, full_shape, det_xy)
 
-    # 2nd nearest neighbour distance (more robust than 1st to outliers)
-    dists = _cdist(det_xy, det_xy)
-    np.fill_diagonal(dists, 1e9)
-    nn2_dist = np.sort(dists, axis=1)[:, 1]
-    base_radii = np.clip(nn2_dist * 0.8, 50, 250)
-
     # Brightness weight: detections in dim areas (near equipment) get 30% of
     # their base radius, detections in open sky get 100%.  This prevents
     # equipment-edge stars from claiming nearby obstructed regions.
@@ -163,7 +157,27 @@ def detect_sky_evidence(img: Image.Image, gray: Optional[np.ndarray] = None) -> 
     relative = brightness / sky_level
     weight = np.clip((relative - _DIM_FRACTION) / (_SKY_FRACTION - _DIM_FRACTION),
                      0.3, 1.0)
-    radii = base_radii * weight
+    return evidence_from_points(full_shape, det_xy, weight)
+
+
+def evidence_from_points(full_shape, det_xy: np.ndarray,
+                         weight: Optional[np.ndarray] = None) -> SkyEvidence:
+    """The evidence planes from detected centres alone. ``weight`` scales
+    each disc (0.3 beside dark equipment, 1.0 in open sky); None treats
+    every detection as open sky, which is what a replay without the images
+    (``scripts/dev/allsky/replay_labels.py``) can do."""
+    det_xy = np.asarray(det_xy, dtype=float).reshape(-1, 2)
+    n = len(det_xy)
+    if n < PARTIAL_MIN_DETECTIONS or _cdist is None:
+        return SkyEvidence(None, None, n, full_shape, det_xy)
+
+    # 2nd nearest neighbour distance (more robust than 1st to outliers)
+    dists = _cdist(det_xy, det_xy)
+    np.fill_diagonal(dists, 1e9)
+    nn2_dist = np.sort(dists, axis=1)[:, 1]
+    radii = np.clip(nn2_dist * 0.8, 50, 250)
+    if weight is not None:
+        radii = radii * weight
 
     mask = grid_discs(full_shape, det_xy, radii)
     reach = grid_discs(full_shape, det_xy, radii * NEGATIVE_REACH_RADII) > 0
