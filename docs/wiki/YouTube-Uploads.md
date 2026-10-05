@@ -162,7 +162,7 @@ Click **Show advanced settings** in the card to change how videos appear on YouT
 |---------|---------|-------------|
 | **Privacy** | Private | **Private**, **Unlisted** or **Public**. Private is safest for first tests and for unverified apps. |
 | **Title** | `PFR Sentinel Timelapse {date}` | Video title. Supports the placeholders below. |
-| **Description** | `All-sky timelapse recorded by PFR Sentinel.` | Video description. Supports the same placeholders. |
+| **Description** | `All-sky timelapse recorded by PFR Sentinel.` | Video description. Supports the same placeholders. The next release changes this default, see [Night statistics](#night-statistics). |
 | **Tags** | `astronomy, allsky, timelapse` | Comma-separated tags. Duplicates are removed, ignoring upper and lower case. |
 
 | Placeholder | Replaced with |
@@ -173,9 +173,45 @@ Click **Show advanced settings** in the card to change how videos appear on YouT
 | `{duration}` | Length of the recording session (`HH:MM:SS`). |
 | `{size_mb}` | File size in MB. |
 
-Any other text in braces is left as written. If the braces don't balance (for example, a `{` with no closing `}`), no placeholders in that field are replaced and the whole text is used as typed. For videos sent with **Upload latest video**, PFR Sentinel doesn't know the frame count or session length, so `{frame_count}` becomes `0` and `{duration}` becomes `00:00:00`. Avoid those two placeholders if you upload by hand.
+Any other text in braces is left as written. If the braces don't balance (for example, a `{` with no closing `}`), no placeholders in that field are replaced and the whole text is used as typed. For videos sent with **Upload latest video**, PFR Sentinel doesn't know the frame count or session length, so `{frame_count}` becomes `0` and `{duration}` becomes `00:00:00`. Avoid those two placeholders if you upload by hand. The [night statistics](#night-statistics) below don't have this problem.
 
 Videos are uploaded in YouTube's **People & Blogs** category.
+
+### Night statistics
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+The title and description can also carry statistics for the night the video covers. They come from the [Image Library](Image-Library), so the library must be turned on and must still hold that night's frames (it keeps 7 days by default). For an automatic upload only the frames recorded while the timelapse was running count. For **Upload latest video**, PFR Sentinel takes the night up to the time the video file was last written.
+
+Hover over the **Title** or **Description** box in the card to see the full list.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{night}` | The night, named after its evening (`YYYY-MM-DD`). A frame taken before midday belongs to the previous evening's night. |
+| `{start_time}` | Time of the first library frame in the video's span (`HH:MM`). |
+| `{end_time}` | Time of the last library frame in the video's span (`HH:MM`). |
+| `{min_temp}` | Lowest camera sensor temperature, in the weather [Units](Weather-Setup#units) you chose (for example `-3.2°C` or `26.2°F`). |
+| `{max_temp}` | Highest camera sensor temperature, in the same units. |
+| `{clear_pct}` | Percent of frames with a clear sky, as a number only, so write `{clear_pct}% clear`. |
+| `{max_stars}` | Most stars detected in a single frame. |
+| `{best_seeing}` | Best seeing of the night, for example `Good (FWHM 2.3 px)`. |
+| `{roof}` | `Open`, `Closed`, or `Open 80% of the night` when the roof did both. |
+| `{gaps}` | Breaks of more than an hour between frames: `none`, or for example `2 (longest 1h 12m)`. |
+| `{weather_summary}` | Cloud cover from the weather service across the night, for example `Cloud cover 5 to 40% (average 18%)`. |
+| `{night_summary}` | All of the above that are known, on one line. |
+
+The default description for a new installation is:
+
+```text
+All-sky timelapse recorded by PFR Sentinel on {date}.
+{frame_count} frames, {duration} of recording.
+
+{night_summary}
+```
+
+An existing description is not changed. To use the night line, add `{night_summary}` (or any of the placeholders above) to yours.
+
+Each statistic is left empty when PFR Sentinel doesn't have it: the library is off, the night's frames have been cleaned up, or the frames didn't record that value (for example, star counts need star detection). An empty statistic never stops the upload. `{weather_summary}` only uses the cloud cover saved with each library frame; PFR Sentinel doesn't contact the weather service when it uploads.
 
 ---
 

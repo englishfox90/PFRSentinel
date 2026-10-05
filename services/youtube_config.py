@@ -16,12 +16,53 @@ from typing import Any
 UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 VALID_PRIVACY_STATUSES = {"private", "unlisted", "public"}
 
+# The night line is last so that, when the library has nothing for the night,
+# the empty placeholder only leaves trailing whitespace, which the upload strips.
+DEFAULT_DESCRIPTION_TEMPLATE = (
+    "All-sky timelapse recorded by PFR Sentinel on {date}.\n"
+    "{frame_count} frames, {duration} of recording.\n"
+    "\n"
+    "{night_summary}"
+)
+
+BASE_PLACEHOLDERS = ("date", "filename", "frame_count", "duration", "size_mb")
+
+# Filled from the image library by services.youtube_night_stats; every one
+# renders as an empty string when the night has no library data.
+NIGHT_PLACEHOLDERS = (
+    "night", "start_time", "end_time", "min_temp", "max_temp", "clear_pct",
+    "max_stars", "best_seeing", "roof", "gaps", "weather_summary", "night_summary",
+)
+
+SUPPORTED_PLACEHOLDERS = frozenset(BASE_PLACEHOLDERS + NIGHT_PLACEHOLDERS)
+
+# Shown to the user beside the title and description fields.
+PLACEHOLDER_DESCRIPTIONS = (
+    ("date", "Date the upload was queued (YYYY-MM-DD)"),
+    ("filename", "Video file name"),
+    ("frame_count", "Frames in the timelapse"),
+    ("duration", "Length of the recording session (HH:MM:SS)"),
+    ("size_mb", "File size in MB"),
+    ("night", "Night the video covers (YYYY-MM-DD, the evening's date)"),
+    ("start_time", "First library frame in the video's span (HH:MM)"),
+    ("end_time", "Last library frame in the video's span (HH:MM)"),
+    ("min_temp", "Lowest camera sensor temperature, in your weather units"),
+    ("max_temp", "Highest camera sensor temperature, in your weather units"),
+    ("clear_pct", "Percent of frames with a clear sky (number only)"),
+    ("max_stars", "Most stars detected in one frame"),
+    ("best_seeing", "Best seeing, e.g. Good (FWHM 2.3 px)"),
+    ("roof", "Roof state: Open, Closed, or Open 80% of the night"),
+    ("gaps", "Capture gaps over an hour: none, or 2 (longest 1h 12m)"),
+    ("weather_summary", "Cloud cover from the weather service across the night"),
+    ("night_summary", "One line combining the night statistics"),
+)
+
 DEFAULT_YOUTUBE_CONFIG = {
     "enabled": False,
     "client_secrets_path": "",
     "privacy_status": "private",
     "title_template": "PFR Sentinel Timelapse {date}",
-    "description_template": "All-sky timelapse recorded by PFR Sentinel.",
+    "description_template": DEFAULT_DESCRIPTION_TEMPLATE,
     "tags": "astronomy, allsky, timelapse",
     "category_id": "22",
 }
@@ -130,19 +171,36 @@ class _SafeFormatDict(dict):
         return "{" + key + "}"
 
 
-def build_template_context(metadata: TimelapseUploadMetadata) -> dict[str, Any]:
-    return {
+def build_template_context(
+    metadata: TimelapseUploadMetadata,
+    night_stats: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Placeholder values for one upload.
+
+    ``night_stats`` comes from ``services.youtube_night_stats``; a night
+    placeholder it does not carry renders as an empty string, never as the
+    literal ``{name}``, so a missing library never leaks braces into YouTube.
+    """
+    context: dict[str, Any] = {
         "date": metadata.date,
         "filename": metadata.filename,
         "frame_count": metadata.frame_count,
         "duration": metadata.duration,
         "size_mb": metadata.size_mb,
     }
+    stats = night_stats or {}
+    for name in NIGHT_PLACEHOLDERS:
+        context[name] = str(stats.get(name) or "")
+    return context
 
 
-def render_template(template: str, metadata: TimelapseUploadMetadata) -> str:
+def render_template(
+    template: str,
+    metadata: TimelapseUploadMetadata,
+    night_stats: dict[str, str] | None = None,
+) -> str:
     """Render supported placeholders, leaving unknown placeholders intact."""
-    context = _SafeFormatDict(build_template_context(metadata))
+    context = _SafeFormatDict(build_template_context(metadata, night_stats))
     try:
         return str(template).format_map(context)
     except Exception:
@@ -151,7 +209,7 @@ def render_template(template: str, metadata: TimelapseUploadMetadata) -> str:
 
 def unknown_template_fields(template: str) -> set[str]:
     """Return placeholder names not supported by the template context."""
-    supported = {"date", "filename", "frame_count", "duration", "size_mb"}
+    supported = SUPPORTED_PLACEHOLDERS
     unknown = set()
     try:
         for _, field_name, _, _ in Formatter().parse(str(template)):

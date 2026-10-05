@@ -38,6 +38,7 @@ class TimelapseController(QObject):
             self._main_window.config,
             youtube_status_callback=self._emit_youtube_status,
             notifier=getattr(self._main_window, 'notifier', None),
+            library_index_provider=self._library_index,
         )
 
         # Status timer: update panel every 5 seconds while recording
@@ -205,6 +206,11 @@ class TimelapseController(QObject):
     # ------------------------------------------------------------------ #
     #  Helpers                                                             #
     # ------------------------------------------------------------------ #
+
+    def _library_index(self):
+        """The image library's index, or None when the library is off."""
+        library = getattr(self._main_window, 'image_library', None)
+        return getattr(library, 'index', None)
 
     def _get_timelapse_config(self) -> dict:
         cfg = dict(self._main_window.config.get('timelapse', {}))

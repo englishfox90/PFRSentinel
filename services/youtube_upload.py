@@ -118,8 +118,12 @@ class YouTubeUploadService:
         *,
         resumable_uri: str = "",
         progress_callback: Optional[Callable[[dict], None]] = None,
+        night_stats: Optional[dict] = None,
     ) -> YouTubeUploadResult:
-        """Upload one completed MP4 to YouTube."""
+        """Upload one completed MP4 to YouTube.
+
+        ``night_stats`` fills the night placeholders (``youtube_night_stats``).
+        """
         cfg = normalize_youtube_config(config)
         if not os.path.isfile(metadata.path):
             return YouTubeUploadResult(False, "validation_failed", "Video file was not found.")
@@ -139,8 +143,8 @@ class YouTubeUploadService:
             from googleapiclient.http import MediaFileUpload
 
             youtube = build("youtube", "v3", credentials=creds_result.credentials)
-            title = render_template(cfg["title_template"], metadata).strip()
-            description = render_template(cfg["description_template"], metadata).strip()
+            title = render_template(cfg["title_template"], metadata, night_stats).strip()
+            description = render_template(cfg["description_template"], metadata, night_stats).strip()
 
             body = {
                 "snippet": {
