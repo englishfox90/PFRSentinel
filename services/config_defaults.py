@@ -313,7 +313,7 @@ DEFAULT_CONFIG = {
         # Kept equal to youtube_config.DEFAULT_DESCRIPTION_TEMPLATE (tested).
         "description_template": (
             "All-sky timelapse recorded by PFR Sentinel on {date}.\n"
-            "{frame_count} frames, {duration} of recording.\n"
+            "{recording}\n"
             "\n"
             "{night_summary}"
         ),

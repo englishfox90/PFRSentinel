@@ -171,9 +171,10 @@ Click **Show advanced settings** in the card to change how videos appear on YouT
 | `{filename}` | The video's file name. |
 | `{frame_count}` | Number of frames in the timelapse. |
 | `{duration}` | Length of the recording session (`HH:MM:SS`). |
+| `{recording}` | `N frames, HH:MM:SS of recording`, or nothing when the frame count isn't known (**Upload latest video**). New in the next release. |
 | `{size_mb}` | File size in MB. |
 
-Any other text in braces is left as written. If the braces don't balance (for example, a `{` with no closing `}`), no placeholders in that field are replaced and the whole text is used as typed. For videos sent with **Upload latest video**, PFR Sentinel doesn't know the frame count or session length, so `{frame_count}` becomes `0` and `{duration}` becomes `00:00:00`. Avoid those two placeholders if you upload by hand. The [night statistics](#night-statistics) below don't have this problem.
+Any other text in braces is left as written. If the braces don't balance (for example, a `{` with no closing `}`), no placeholders in that field are replaced and the whole text is used as typed. For videos sent with **Upload latest video**, PFR Sentinel doesn't know the frame count or session length, so `{frame_count}` becomes `0` and `{duration}` becomes `00:00:00`. Avoid those two placeholders if you upload by hand: use `{recording}` instead, which is left out when they aren't known. The [night statistics](#night-statistics) below don't have this problem either.
 
 Videos are uploaded in YouTube's **People & Blogs** category.
 
@@ -204,10 +205,12 @@ The default description for a new installation is:
 
 ```text
 All-sky timelapse recorded by PFR Sentinel on {date}.
-{frame_count} frames, {duration} of recording.
+{recording}
 
 {night_summary}
 ```
+
+For **Upload latest video** with no library data for the night, only the first line is posted.
 
 An existing description is not changed. To use the night line, add `{night_summary}` (or any of the placeholders above) to yours.
 

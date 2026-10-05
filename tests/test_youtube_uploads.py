@@ -212,7 +212,34 @@ def test_default_description_matches_config_defaults_and_drops_empty_night_line(
 
     rendered = render_template(DEFAULT_YOUTUBE_CONFIG["description_template"], metadata).strip()
 
-    assert rendered.endswith("42 frames, 00:01:05 of recording.")
+    assert rendered.endswith("\n42 frames, 00:01:05 of recording")
+
+
+def test_recording_placeholder_for_automatic_and_manual_uploads(tmp_path):
+    video = tmp_path / "timelapse_20260619.mp4"
+    video.write_bytes(b"fake")
+    automatic = make_timelapse_metadata(str(video), frame_count=42, elapsed_seconds=3725)
+    manual = make_timelapse_metadata(str(video), frame_count=0, elapsed_seconds=0)
+
+    assert render_template("[{recording}]", automatic) == "[42 frames, 01:02:05 of recording]"
+    assert render_template("[{recording}]", manual) == "[]"
+    # The raw values stay available on their own.
+    assert render_template("{frame_count} {duration}", manual) == "0 00:00:00"
+    assert unknown_template_fields("{recording} {frame_count} {duration}") == set()
+
+
+def test_default_description_for_manual_upload_with_empty_night_is_one_line(tmp_path):
+    video = tmp_path / "timelapse_20260619.mp4"
+    video.write_bytes(b"fake")
+    metadata = make_timelapse_metadata(str(video), frame_count=0, elapsed_seconds=0)
+    metadata = metadata.__class__(
+        path=metadata.path, frame_count=0, elapsed_seconds=0,
+        file_size_bytes=metadata.file_size_bytes, queued_at=datetime(2026, 6, 19, 9, 0, 0),
+    )
+
+    rendered = render_template(DEFAULT_YOUTUBE_CONFIG["description_template"], metadata).strip()
+
+    assert rendered == "All-sky timelapse recorded by PFR Sentinel on 2026-06-19."
 
 
 def test_upload_state_claims_and_prevents_duplicate(tmp_path):
@@ -565,7 +592,7 @@ def test_youtube_card_lists_every_placeholder(tmp_path):
     try:
         tip = card.description_input.toolTip()
         assert card.title_input.toolTip() == tip
-        for name in ("date", "duration", *NIGHT_PLACEHOLDERS):
+        for name in ("date", "duration", "recording", *NIGHT_PLACEHOLDERS):
             assert "{" + name + "}" in tip
     finally:
         _dispose_widget(card)

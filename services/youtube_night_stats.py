@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .library.sessions import (
-    _NIGHT_CUTOFF_HOUR,
+    NIGHT_CUTOFF_HOUR,
     STATUS_UNKNOWN,
     night_key,
     roof_state,
@@ -48,8 +48,9 @@ def video_time_span(metadata: TimelapseUploadMetadata) -> tuple[int | None, int 
 
 
 def _night_start_epoch(key: str) -> int:
+    # Naive local time on purpose: night_key splits nights at local noon.
     day = datetime.strptime(key, "%Y-%m-%d")
-    return int((day + timedelta(hours=_NIGHT_CUTOFF_HOUR)).timestamp())
+    return int((day + timedelta(hours=NIGHT_CUTOFF_HOUR)).timestamp())
 
 
 class _WindowedIndex:
@@ -98,6 +99,7 @@ def format_temp(celsius: float | None, units: str) -> str:
 
 
 def _clock(epoch) -> str:
+    # Local wall-clock time, like night_key; the viewer reads the site's clock.
     return datetime.fromtimestamp(int(epoch)).strftime("%H:%M")
 
 

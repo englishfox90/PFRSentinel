@@ -16,16 +16,17 @@ from typing import Any
 UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 VALID_PRIVACY_STATUSES = {"private", "unlisted", "public"}
 
-# The night line is last so that, when the library has nothing for the night,
-# the empty placeholder only leaves trailing whitespace, which the upload strips.
+# {recording} and the night line come after the first line: either can be empty
+# (Upload latest video has no frame count; a night may have no library data),
+# and when both are the leftover whitespace is trailing, which the upload strips.
 DEFAULT_DESCRIPTION_TEMPLATE = (
     "All-sky timelapse recorded by PFR Sentinel on {date}.\n"
-    "{frame_count} frames, {duration} of recording.\n"
+    "{recording}\n"
     "\n"
     "{night_summary}"
 )
 
-BASE_PLACEHOLDERS = ("date", "filename", "frame_count", "duration", "size_mb")
+BASE_PLACEHOLDERS = ("date", "filename", "frame_count", "duration", "recording", "size_mb")
 
 # Filled from the image library by services.youtube_night_stats; every one
 # renders as an empty string when the night has no library data.
@@ -42,6 +43,7 @@ PLACEHOLDER_DESCRIPTIONS = (
     ("filename", "Video file name"),
     ("frame_count", "Frames in the timelapse"),
     ("duration", "Length of the recording session (HH:MM:SS)"),
+    ("recording", "\"N frames, HH:MM:SS of recording\", empty for Upload latest video"),
     ("size_mb", "File size in MB"),
     ("night", "Night the video covers (YYYY-MM-DD, the evening's date)"),
     ("start_time", "First library frame in the video's span (HH:MM)"),
@@ -91,6 +93,13 @@ class TimelapseUploadMetadata:
         h, rem = divmod(max(0, int(self.elapsed_seconds)), 3600)
         m, s = divmod(rem, 60)
         return f"{h:02d}:{m:02d}:{s:02d}"
+
+    @property
+    def recording(self) -> str:
+        """Frames and length, or '' when unknown (Upload latest video passes 0)."""
+        if int(self.frame_count or 0) <= 0:
+            return ""
+        return f"{self.frame_count} frames, {self.duration} of recording"
 
     @property
     def date(self) -> str:
@@ -186,6 +195,7 @@ def build_template_context(
         "filename": metadata.filename,
         "frame_count": metadata.frame_count,
         "duration": metadata.duration,
+        "recording": metadata.recording,
         "size_mb": metadata.size_mb,
     }
     stats = night_stats or {}
