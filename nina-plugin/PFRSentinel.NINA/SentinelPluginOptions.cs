@@ -29,6 +29,12 @@ namespace PFRSentinel.NINA {
         /// <summary>Setting name for the base URL override. Must match what the options page binds.</summary>
         public const string BaseUrlOverrideKey = "BaseUrlOverride";
 
+        /// <summary>Setting name for the target push switch. Must match what the options page binds.</summary>
+        public const string ReportTargetKey = "ReportTargetToSentinel";
+
+        /// <summary>The target push is on until the operator turns it off.</summary>
+        public const bool ReportTargetDefault = true;
+
         private static readonly Guid Id = ResolvePluginId();
 
         /// <summary>The plugin's identifier, as NINA derives it.</summary>
@@ -54,6 +60,37 @@ namespace PFRSentinel.NINA {
                 return accessor.GetValueString(BaseUrlOverrideKey, string.Empty) ?? string.Empty;
             } catch (Exception) {
                 return string.Empty;
+            }
+        }
+
+        /// <summary>Reads the target push switch, or its default when unset.</summary>
+        /// <remarks>Never throws: the reporter reads this from its loop on every tick.</remarks>
+        public static bool ReadReportTarget(IPluginOptionsAccessor? accessor) {
+            if (accessor is null) {
+                return ReportTargetDefault;
+            }
+
+            try {
+                // VERIFY: IPluginOptionsAccessor.GetValueBoolean(string, bool).
+                return accessor.GetValueBoolean(ReportTargetKey, ReportTargetDefault);
+            } catch (Exception) {
+                return ReportTargetDefault;
+            }
+        }
+
+        /// <summary>Saves the target push switch. Returns false when the write failed.</summary>
+        /// <remarks>Never throws: it runs from a WPF binding, where an exception is swallowed anyway.</remarks>
+        public static bool WriteReportTarget(IPluginOptionsAccessor? accessor, bool value) {
+            if (accessor is null) {
+                return false;
+            }
+
+            try {
+                // VERIFY: IPluginOptionsAccessor.SetValueBoolean(string, bool).
+                accessor.SetValueBoolean(ReportTargetKey, value);
+                return true;
+            } catch (Exception) {
+                return false;
             }
         }
 

@@ -7,13 +7,13 @@ using System.Runtime.InteropServices;
 [assembly: Guid("e2e840b9-b5e2-4f67-8699-0173b5f9dc0a")]
 
 // [MANDATORY] Assembly versioning - increment for each release build.
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 // [MANDATORY] AssemblyTitle is the name NINA shows in the plugin list, and is also the
 // prefix of the options DataTemplate key ("PFR Sentinel_Options" in Options.xaml).
 [assembly: AssemblyTitle("PFR Sentinel")]
-[assembly: AssemblyDescription("Live pier-camera frame, health, and capture start/stop for PFR Sentinel.")]
+[assembly: AssemblyDescription("Live pier-camera frame, health, and capture start/stop for PFR Sentinel, plus the running sequencer target sent to its all-sky overlay.")]
 
 [assembly: AssemblyCompany("Paul Fox-Reeks")]
 [assembly: AssemblyProduct("PFR Sentinel")]
@@ -41,7 +41,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyMetadata("FeaturedImageURL", "https://raw.githubusercontent.com/englishfox90/PFRSentinel/main/assets/app_icon.png")]
 [assembly: AssemblyMetadata("ScreenshotURL", "")]
 [assembly: AssemblyMetadata("AltScreenshotURL", "")]
-[assembly: AssemblyMetadata("LongDescription", @"Surfaces the PFR Sentinel pier camera inside N.I.N.A.: a live frame with a staleness indicator, the Sentinel health line, and Start/Stop capture driven by Sentinel's local capture-control HTTP API.")]
+[assembly: AssemblyMetadata("LongDescription", @"Surfaces the PFR Sentinel pier camera inside N.I.N.A.: a live frame with a staleness indicator, the Sentinel health line, and Start/Stop capture driven by Sentinel's local capture-control HTTP API. It also sends the running sequencer target (name, J2000 position, camera field of view and position angle) to Sentinel, which marks it on the all-sky overlay.")]
 
 [assembly: ComVisible(false)]
 [assembly: AssemblyConfiguration("")]

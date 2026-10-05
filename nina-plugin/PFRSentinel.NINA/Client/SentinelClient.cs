@@ -56,7 +56,7 @@ namespace PFRSentinel.Nina.Client;
 /// </item>
 /// </list>
 /// </remarks>
-public sealed class SentinelClient : IDisposable
+public sealed partial class SentinelClient : IDisposable
 {
     private readonly SentinelConfigProvider _config;
     private readonly HttpClient _http;
