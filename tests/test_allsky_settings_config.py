@@ -68,6 +68,9 @@ def _customised():
     cfg['grid'].update(enabled=True, horizon=True, altitude_rings=True, altitude_step=15,
                        azimuth_lines=True, cardinal_labels=True, color='#667788',
                        line_width=3, label_size=9, opacity=10)
+    cfg['nina_target'].update(enabled=False, show_fov=False, show_label=False,
+                              color='#778899', marker_size=4, line_width=3,
+                              label_size=5, opacity=7, stale_after_s=45)
     cfg['burn_into_output'].update(saved_file=True, web=True, timelapse=True)
     return cfg
 
@@ -204,3 +207,24 @@ def test_an_old_or_unknown_label_style_reads_as_the_common_name(panel):
     out = panel.get_config()
     assert out['messier']['label_style'] == 'name'
     assert out['ngc']['label_style'] == 'name'
+def test_the_nina_target_card_loads_and_emits(panel, qapp):
+    loaded = _customised()
+    panel.load_from_config(loaded)
+    assert panel._nina_card.values() == {
+        'enabled': False, 'show_fov': False, 'color': '#778899', 'stale_after_s': 45}
+
+    emitted = []
+    panel.settings_changed.connect(emitted.append)
+    panel._nina_card._enabled.set_checked(True)
+    panel._nina_card._stale.setValue(300)
+    qapp.processEvents()
+    out = emitted[-1]['nina_target']
+    assert out['enabled'] is True and out['stale_after_s'] == 300
+    assert out['show_label'] is False and out['opacity'] == 7
+
+
+def test_an_old_config_without_the_nina_target_block_gets_the_defaults(panel):
+    old = _customised()
+    del old['nina_target']
+    panel.load_from_config(old)
+    assert panel.get_config()['nina_target'] == DEFAULT_CONFIG['allsky_overlay']['nina_target']

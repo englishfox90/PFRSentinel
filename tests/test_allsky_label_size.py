@@ -15,7 +15,8 @@ from services.allsky.label_size import (
 )
 from services.config_defaults import DEFAULT_CONFIG
 
-LAYERS = ('constellations', 'bright_stars', 'messier', 'ngc', 'planets', 'grid')
+LAYERS = ('constellations', 'bright_stars', 'messier', 'ngc', 'planets', 'grid',
+          'nina_target')
 
 
 def _allsky():

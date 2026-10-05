@@ -2,7 +2,7 @@
 Label size presets for the all-sky overlay.
 
 Every layer has its own ``label_size`` in config (constellations 12, bright
-stars 11, Messier 10, NGC 9, planets 14, grid 14), in the renderers' base
+stars 11, Messier 10, NGC 9, planets 14, grid 14, NINA target 13), in the renderers' base
 units — pixels on a 750 px frame, scaled up with the image. One preset on
 the All-Sky page shifts all of them together, 2 base px per step, so the
 layers keep their relative sizes. 'large' is the size the app has always
@@ -25,7 +25,8 @@ PRESETS: Tuple[Tuple[str, str, int], ...] = (
     ('why_so_large', 'Why so large', 1),
 )
 
-_LAYERS = ('constellations', 'bright_stars', 'messier', 'ngc', 'planets', 'grid')
+_LAYERS = ('constellations', 'bright_stars', 'messier', 'ngc', 'planets', 'grid',
+           'nina_target')
 _OFFSETS = {key: steps * STEP_PX for key, _, steps in PRESETS}
 
 

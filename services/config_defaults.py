@@ -454,6 +454,15 @@ DEFAULT_CONFIG = {
             "altitude_step": 30, "azimuth_lines": False, "cardinal_labels": False,
             "color": "#336633", "line_width": 1, "label_size": 14, "opacity": 120,
         },
+        # The target NINA is imaging, pushed by the NINA plugin to POST /nina/target
+        # (services/api_target.py): a reticle at its sky position, its name, and the
+        # imaging camera's field of view. Not drawn once nothing has arrived for
+        # stale_after_s seconds, so a closed NINA leaves no marker up all night.
+        "nina_target": {
+            "enabled": True, "show_fov": True, "show_label": True,
+            "color": "#FF66AA", "marker_size": 10, "line_width": 2,
+            "label_size": 13, "opacity": 230, "stale_after_s": 120,
+        },
         # Per-destination burn-in; overlay stays preview-only unless opted in.
         "burn_into_output": {"saved_file": False, "web": False, "timelapse": False},
     },

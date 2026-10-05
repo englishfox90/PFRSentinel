@@ -75,8 +75,9 @@ The control routes live under `/capture` by default. The base path can be change
 | `POST` | `/capture/start` | Start capture in Sentinel's configured mode (camera or directory watch). |
 | `POST` | `/capture/stop` | Stop capture. |
 | `GET` | `/capture` | Current capture state plus a readiness flag, without issuing a command. |
+| `POST` | `/nina/target` | Report the target your imaging rig is on, for the all-sky overlay (see [below](#post-ninatarget)). Not available in version 3.7.8 or earlier. |
 
-All three need the `Authorization: Bearer <token>` header. A query string on the path is ignored on all three routes. A trailing slash is ignored only on the two `POST` routes, so `POST /capture/start/` works but `GET /capture/` returns `404`. A `POST` to any other path returns `404`.
+All of them need the `Authorization: Bearer <token>` header. A query string on the path is ignored on every route. A trailing slash is ignored only on the `POST` routes, so `POST /capture/start/` works but `GET /capture/` returns `404`. A `POST` to any other path returns `404`. `/nina/target` is a fixed path: it does not move with `webserver_control_path`.
 
 ---
 
@@ -167,6 +168,95 @@ Returns the current state without changing anything. Use it to pre-flight a clie
 
 ---
 
+## POST /nina/target
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+Tells Sentinel which target your main telescope is imaging, so the [All-Sky Overlay](All-Sky-Overlay) can mark it and label it with its name. When it can, the overlay draws the imaging camera's field of view as a box with a small cross at its centre; when it can't — no field of view sent, part of the box below the horizon, or the box under 4 pixels across at the output size — it draws a reticle on the target instead. The [NINA plugin](NINA-Integration) sends this for you from the running sequence; this section is for writing your own client.
+
+The route uses the same Host check, token and 4096-byte body limit as the capture routes, and like them it is refused with `control_disabled` while **Enable Capture Control API** is off. It does not start, stop or change capture.
+
+### Request
+
+The body is required and must be a JSON object with a `target` key:
+
+```json
+{
+  "target": {
+    "name": "M31",
+    "ra_deg": 10.6847,
+    "dec_deg": 41.2687,
+    "epoch": "J2000",
+    "fov_w_deg": 2.13,
+    "fov_h_deg": 1.42,
+    "rotation_deg": 15.0,
+    "source": "nina"
+  }
+}
+```
+
+Send `{"target": null}` to clear the target.
+
+| Field | Type | Required | Range | Description |
+|-------|------|----------|-------|-------------|
+| `name` | string | yes | — | Shown next to the marker. Control characters are removed, runs of spaces become one, and the name is cut to 64 characters. A name with no visible characters is rejected. |
+| `ra_deg` | number | yes | 0 to below 360 | Right ascension in decimal **degrees** (not hours), J2000. |
+| `dec_deg` | number | yes | −90 to 90 | Declination in decimal degrees, J2000. |
+| `epoch` | string | no | `J2000` | Only J2000 is accepted (any letter case). Anything else, such as `JNOW`, is rejected — convert to J2000 first. |
+| `fov_w_deg` | number | no | above 0, at most 60 | Field of view along the camera's width, in degrees. Send it together with `fov_h_deg`, or leave both out to draw the marker without a box. |
+| `fov_h_deg` | number | no | above 0, at most 60 | Field of view along the camera's height, in degrees. |
+| `rotation_deg` | number | no | any | Camera rotation as a sky position angle (below). Stored as 0 to below 360, so `370` becomes `10`. Leave it out for 0. |
+| `source` | string | no | up to 32 characters | Who sent the target. Defaults to `nina`. |
+
+Numbers must be real JSON numbers: strings, `true`/`false`, `NaN` and `Infinity` are rejected. Unknown fields are ignored.
+
+**Rotation convention.** `rotation_deg` is the position angle of the camera's "up" (the direction of its height axis) on the sky, in degrees east of north. At `0` the long side of a landscape sensor runs east–west and the short side north–south; at `90` it runs north–south. A position angle and the same angle plus 180° draw the same box.
+
+### Keep sending it
+
+Sentinel only keeps the target in memory, and stops drawing it once nothing has arrived for a while (120 seconds by default — the **Hide after (s)** setting for the NINA target on the [All-Sky Overlay](All-Sky-Overlay) settings), so a client that closes or crashes doesn't leave a stale marker up all night. Send the same target again every 30 seconds or so while it is current. A repeat is answered with `changed: false` and resets the timer. The target is also forgotten when Sentinel restarts.
+
+### Response
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `accepted` | boolean | Always `true` on a `200`. |
+| `changed` | boolean | Whether this target differs from the one already stored. `false` for a repeat. |
+| `target` | object | The stored target after the clean-up above (without `epoch`), or `null` when cleared. Optional fields left out of the request are `null`, except `source`, which reads `nina`. |
+| `age_s` | number | Seconds since the stored target was received — `0` on this response. |
+| `message` | string | `Target stored.`, `Target unchanged.` or `Target cleared.` |
+
+```json
+{
+  "accepted": true,
+  "changed": true,
+  "target": {
+    "name": "M31",
+    "ra_deg": 10.6847,
+    "dec_deg": 41.2687,
+    "fov_w_deg": 2.13,
+    "fov_h_deg": 1.42,
+    "rotation_deg": 15.0,
+    "source": "nina"
+  },
+  "age_s": 0.0,
+  "message": "Target stored."
+}
+```
+
+A rejected request leaves the stored target as it was. Errors use the same `code` values as the capture routes (see [Errors](#errors)).
+
+### Example
+
+```bash
+curl -X POST http://127.0.0.1:8080/nina/target \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"target": {"name": "M31", "ra_deg": 10.6847, "dec_deg": 41.2687, "fov_w_deg": 2.13, "fov_h_deg": 1.42, "rotation_deg": 15}}'
+```
+
+---
+
 ## Status Blocks
 
 These blocks appear in `GET /capture` and in the unauthenticated `GET /status` (see [Web Server](Web-Server) for the rest of `/status`).
@@ -230,12 +320,12 @@ Rejected requests return JSON with a machine-readable `code`. Branch on `code`, 
 
 | HTTP | `code` | Cause | Fix |
 |------|--------|-------|-----|
-| 400 | `bad_request` | Body is not valid UTF-8 JSON, not an object, `wait` is not a boolean, `timeout` is not a number between 1 and 300, or `Content-Length` is invalid. | Fix the request. |
-| 413 | `body_too_large` | Body larger than 4096 bytes. | Send only `wait` and `timeout`. |
+| 400 | `bad_request` | Body is not valid UTF-8 JSON, not an object, `wait` is not a boolean, `timeout` is not a number between 1 and 300, a `/nina/target` field is missing or out of range, or `Content-Length` is invalid. The `error` text names the field. | Fix the request. |
+| 413 | `body_too_large` | Body larger than 4096 bytes. | Send only the documented fields. |
 | 401 | `unauthorized` | Token missing, malformed (not `Bearer <token>`) or wrong. | Copy the current token from the Output tab. |
 | 403 | `host_not_allowed` | `Host` header not on the allow-list. | Call from the same machine, or see [Host allow-list](#host-allow-list). |
 | 503 | `control_disabled` | **Enable Capture Control API** is off. | Turn it on in the Output tab. |
-| 503 | `control_unavailable` | Control is on and the token is valid, but Sentinel's capture controls aren't connected to the server (this shouldn't happen). POST only. | Restart Sentinel. |
+| 503 | `control_unavailable` | Control is on and the token is valid, but Sentinel's capture controls aren't connected to the server (this shouldn't happen). Capture commands only; `/nina/target` never returns it. | Restart Sentinel. |
 | 500 | `internal_error` | Unexpected error inside Sentinel. | Check Sentinel's [Logs](Logs). |
 
 The two `503` codes need opposite fixes — enable a setting versus restart Sentinel — which is why they are separate. Checks run in order: Host, then token, then body, so a request from a disallowed host gets `403` even if control is switched off.
