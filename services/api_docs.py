@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import html as _html
 
+from . import api_target
 from .api_control import CONTROL_RESULT_FIELDS, CONTROL_ROUTES
 from .api_status import CAPTURE_FIELDS
 
@@ -401,6 +402,8 @@ def build_openapi_spec(*, image_path: str = "/latest", status_path: str = "/stat
     if control_path:
         spec["paths"].update(_control_paths(control_path))
         spec["components"]["schemas"].update(_control_schemas())
+        spec["paths"].update(api_target.openapi_paths())
+        spec["components"]["schemas"].update(api_target.openapi_schemas())
         spec["components"].setdefault("securitySchemes", {})["bearerAuth"] = {
             "type": "http", "scheme": "bearer",
             "description": (

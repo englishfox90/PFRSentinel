@@ -251,4 +251,9 @@ def route_post(handler, control_path: str) -> bool:
     if path == f"{control_path}/stop":
         serve_command(handler, api_control.COMMAND_STOP)
         return True
+
+    # Function-local: web_target reuses this module's auth and response helpers.
+    from . import web_target
+    if web_target.route_post(handler):
+        return True
     return False
