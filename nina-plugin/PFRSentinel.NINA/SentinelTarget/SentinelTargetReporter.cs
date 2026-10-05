@@ -19,7 +19,8 @@ namespace PFRSentinel.NINA.SentinelTarget {
     /// changed, or as a <see cref="DefaultHeartbeat"/> while one is set — Sentinel stops
     /// drawing a target it has not heard about for two minutes, which is what makes a
     /// closed or crashed NINA leave no marker behind. When the target goes away, or
-    /// reporting is switched off, it sends one clear and then stays quiet.
+    /// reporting is switched off, it sends one clear and then stays quiet. An unknown
+    /// reading (sequencer not initialised) sends nothing.
     /// </para>
     /// <para>
     /// Transport is the sequence items' shared <see cref="SentinelSequenceLink"/>, so the
@@ -28,7 +29,9 @@ namespace PFRSentinel.NINA.SentinelTarget {
     /// <para>
     /// The loop never throws, and an unreachable Sentinel is routine — NINA runs on
     /// nights Sentinel does not. Failures log one <c>Warning</c> per distinct message and
-    /// back off; nothing is logged at <c>Error</c>, and the token is never logged.
+    /// back off; nothing is logged at <c>Error</c>, and the token is never logged. A
+    /// rejected token or a disabled control API escalates its back-off, because each of
+    /// those requests also writes a warning into Sentinel's own log.
     /// </para>
     /// </remarks>
     internal sealed class SentinelTargetReporter : IDisposable {
@@ -39,13 +42,17 @@ namespace PFRSentinel.NINA.SentinelTarget {
         /// <summary>Resend period for an unchanged target. Well inside Sentinel's 120 s stale-out.</summary>
         public static readonly TimeSpan DefaultHeartbeat = TimeSpan.FromSeconds(30);
 
-        // After a failure, wait this long before trying again.
+        // NINA is still composing its view models right after plugin load; the first
+        // read waits for that rather than collecting a round of start-up faults.
+        private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(15);
+
         private static readonly TimeSpan FailureBackoff = TimeSpan.FromSeconds(30);
 
-        // A Sentinel without the route will not grow one until it is updated.
-        private static readonly TimeSpan MissingRouteBackoff = TimeSpan.FromMinutes(10);
+        // Ceiling for an escalating back-off, and the flat wait for a Sentinel without
+        // the route, which will not grow one until it is updated.
+        private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(10);
 
-        private readonly Func<SentinelTargetReport?> source;
+        private readonly Func<SentinelTargetReading> source;
         private readonly Func<bool> enabled;
         private readonly Func<string?> baseUrlOverrideSource;
         private readonly CancellationTokenSource cts = new();
@@ -53,21 +60,24 @@ namespace PFRSentinel.NINA.SentinelTarget {
 
         private Task? loop;
         private volatile bool disposed;
+        private volatile bool resetRequested;
 
         // Loop thread only from here down.
         private string? lastSentJson;
+        private string? rejectedJson;
         private long lastSentAtMs;
         private long retryAfterMs;
+        private int escalation;
         private bool reloadConfiguration = true;
         private bool lastEnabled = true;
         private string? lastWarning;
 
         /// <summary>Creates a reporter. Nothing is sent until <see cref="Start"/>.</summary>
-        /// <param name="source">The current target, or null for none. Expected never to throw.</param>
+        /// <param name="source">The current reading. Expected never to throw.</param>
         /// <param name="enabled">The options-page switch, re-read every tick.</param>
         /// <param name="baseUrlOverrideSource">The base URL override, re-read before every send.</param>
         public SentinelTargetReporter(
-            Func<SentinelTargetReport?> source,
+            Func<SentinelTargetReading> source,
             Func<bool> enabled,
             Func<string?> baseUrlOverrideSource) {
 
@@ -91,11 +101,20 @@ namespace PFRSentinel.NINA.SentinelTarget {
             loop = Task.Run(() => RunAsync(cts.Token));
         }
 
-        /// <summary>Runs the next tick now, e.g. after the options switch was flipped.</summary>
+        /// <summary>
+        /// Runs the next tick now and cuts any back-off, e.g. after an option changed.
+        /// </summary>
+        /// <remarks>
+        /// The operator flipping the switch or fixing the address is exactly when a
+        /// ten-minute back-off must not apply, so this also re-reads config.json and
+        /// forgets a body Sentinel rejected.
+        /// </remarks>
         public void RequestSendNow() {
             if (disposed) {
                 return;
             }
+
+            resetRequested = true;
 
             try {
                 if (wake.CurrentCount == 0) {
@@ -145,6 +164,12 @@ namespace PFRSentinel.NINA.SentinelTarget {
         }
 
         private async Task RunAsync(CancellationToken cancellationToken) {
+            try {
+                await Task.Delay(InitialDelay, cancellationToken).ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                return;
+            }
+
             while (!cancellationToken.IsCancellationRequested) {
                 try {
                     await TickAsync(cancellationToken).ConfigureAwait(false);
@@ -167,11 +192,28 @@ namespace PFRSentinel.NINA.SentinelTarget {
         }
 
         private async Task TickAsync(CancellationToken cancellationToken) {
-            SentinelTargetReport? report = ReadEnabled() ? ReadSource() : null;
+            if (resetRequested) {
+                resetRequested = false;
+                retryAfterMs = 0;
+                rejectedJson = null;
+                reloadConfiguration = true;
+            }
+
+            SentinelTargetReading reading = ReadEnabled() ? ReadSource() : SentinelTargetReading.Of(null);
+            if (!reading.Known) {
+                return;
+            }
+
+            SentinelTargetReport? report = reading.Report;
             string? json = report is null ? null : SentinelTargetPayload.Serialize(report);
 
             long now = Environment.TickCount64;
             if (!ShouldSend(json, now) || now < retryAfterMs) {
+                return;
+            }
+
+            // Sentinel refused this exact body with a 400; resending it cannot succeed.
+            if (json is not null && string.Equals(json, rejectedJson, StringComparison.Ordinal)) {
                 return;
             }
 
@@ -192,6 +234,8 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 lastSentJson = json;
                 lastSentAtMs = now;
                 retryAfterMs = 0;
+                escalation = 0;
+                rejectedJson = null;
                 reloadConfiguration = false;
 
                 if (lastWarning is not null) {
@@ -202,14 +246,19 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 if (changed) {
                     Logger.Debug(report is null
                         ? "PFR Sentinel: cleared the target on Sentinel."
-                        : $"PFR Sentinel: sent target '{report.Name}' to Sentinel.");
+                        : $"PFR Sentinel: sent target '{SentinelTargetPayload.CleanName(report.Name)}' to Sentinel.");
                 }
             } catch (SentinelException ex) when (ex.StatusCode == HttpStatusCode.NotFound) {
-                Fail(now, MissingRouteBackoff,
+                Fail(now, MaxBackoff,
                     "PFR Sentinel: this Sentinel does not accept targets from NINA (HTTP 404). " +
                     "Update Sentinel to see the target on its all-sky overlay.");
             } catch (SentinelException ex) {
-                Fail(now, FailureBackoff, "PFR Sentinel: could not send the NINA target. " + SentinelReadiness.Describe(ex));
+                if (ex.Kind == SentinelErrorKind.BadRequest) {
+                    rejectedJson = json;
+                }
+
+                Fail(now, Escalates(ex.Kind) ? NextEscalation() : FailureBackoff,
+                    "PFR Sentinel: could not send the NINA target. " + WithoutPrefix(SentinelReadiness.Describe(ex)));
             }
         }
 
@@ -226,11 +275,34 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 || now - lastSentAtMs >= (long)Heartbeat.TotalMilliseconds;
         }
 
+        /// <summary>
+        /// Failures that only the operator can fix. Each attempt also lands in
+        /// Sentinel's log, so a wrong token must not write one every 30 s all night.
+        /// </summary>
+        private static bool Escalates(SentinelErrorKind kind) => kind is
+            SentinelErrorKind.Unauthorized or
+            SentinelErrorKind.HostNotAllowed or
+            SentinelErrorKind.ControlDisabled or
+            SentinelErrorKind.BadRequest;
+
+        // 30 s, 60 s, 120 s ... capped at MaxBackoff.
+        private TimeSpan NextEscalation() {
+            double seconds = FailureBackoff.TotalSeconds * Math.Pow(2, Math.Min(escalation, 10));
+            escalation++;
+            return TimeSpan.FromSeconds(Math.Min(seconds, MaxBackoff.TotalSeconds));
+        }
+
         private void Fail(long now, TimeSpan backoff, string message) {
             // The fix for most failures rewrites config.json; pick it up on the retry.
             reloadConfiguration = true;
             retryAfterMs = now + (long)backoff.TotalMilliseconds;
             WarnOnce(message);
+        }
+
+        // Describe() opens some messages with "PFR Sentinel: " already.
+        private static string WithoutPrefix(string detail) {
+            const string prefix = "PFR Sentinel: ";
+            return detail.StartsWith(prefix, StringComparison.Ordinal) ? detail.Substring(prefix.Length) : detail;
         }
 
         private bool ReadEnabled() {
@@ -243,12 +315,12 @@ namespace PFRSentinel.NINA.SentinelTarget {
             return lastEnabled;
         }
 
-        private SentinelTargetReport? ReadSource() {
+        private SentinelTargetReading ReadSource() {
             try {
                 return source();
             } catch (Exception ex) {
                 WarnOnce($"PFR Sentinel: could not read the sequencer target ({ex.GetType().Name}: {ex.Message}).");
-                return null;
+                return SentinelTargetReading.Unknown;
             }
         }
 

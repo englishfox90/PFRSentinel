@@ -45,7 +45,7 @@ A scheduled capture that is enabled but waiting for its capture window counts as
 
 > **New in the next release** — not available in version 3.7.8 or earlier.
 
-While a sequence is imaging a target, the plugin tells Sentinel which target it is, and Sentinel marks it on the [All-Sky Overlay](All-Sky-Overlay#nina-target): a reticle on the target, its name, and the outline of your imaging camera's field of view. You can see at a glance where the main scope is pointed against the clouds, the Moon and the trees.
+While a sequence is imaging a target, the plugin tells Sentinel which target it is, and Sentinel marks it on the [All-Sky Overlay](All-Sky-Overlay#nina-target): its name and its field of view as a box with a centre cross, or a reticle (a ring with four ticks) when no box can be drawn. You can see at a glance where the main scope is pointed against the clouds, the Moon and the trees.
 
 What the plugin sends:
 
@@ -53,7 +53,7 @@ What the plugin sends:
 |------|---------------------|
 | Target name | The running target in the sequencer (Advanced Sequencer first, then the simple sequence). Cut to 64 characters. |
 | Position | The target's right ascension and declination, sent as J2000. |
-| Field of view | Worked out from your imaging camera: pixel size × sensor width and height, divided by the telescope focal length in NINA's profile. When the camera is not connected, the pixel size from the profile and the camera size from the framing assistant settings are used. Left out when any of these is missing, in which case only the reticle is drawn. |
+| Field of view | Worked out from your imaging camera: pixel size × sensor width and height, divided by the telescope focal length in NINA's profile. When the camera is not connected, the pixel size from the profile and the camera size from the framing assistant settings are used. Left out when any of these is missing, in which case the reticle is drawn instead of a box. |
 | Rotation | The target's position angle from the sequencer, in degrees east of north. |
 
 When it is sent:
@@ -250,14 +250,14 @@ Work down the list:
 | The all-sky overlay is off, or the **NINA Target** card's **Show NINA target** is off. | Turn them on on the All-Sky page. See [All-Sky Overlay](All-Sky-Overlay#nina-target). |
 | The lens is not calibrated. | The target is placed through the lens calibration like every other label. Calibrate first. |
 | **Enable Capture Control API** is off in Sentinel. | Turn it on on the Output tab. The plugin uses the same token as Start/Stop. |
-| No target is running. | The marker follows the *running* target. A sequence that is built but not started, or is between targets, has none. |
+| No target is running. | The marker follows the *running* target. A sequence that is built but not started, or is between targets, has none. The plugin also waits about 15 seconds after NINA starts before its first report. |
 | NINA stopped reporting. | Sentinel hides the marker about 2 minutes after the last report (**Hide after (s)** on the All-Sky page). Check NINA is still running the sequence. |
 | **Send the current sequencer target to Sentinel** is off. | Turn it on on the plugin's options page in NINA. |
 | The target is below the horizon. | Nothing is drawn until it rises. |
-| NINA's log says "this Sentinel does not accept targets from NINA (HTTP 404)". | Sentinel is older than the plugin. Update Sentinel; the plugin tries again every 10 minutes. |
-| NINA's log has another "PFR Sentinel: could not send the NINA target" warning. | The rest of the message is the same advice as the Start/Stop messages in the tables above. |
+| NINA's log says "this Sentinel does not accept targets from NINA (HTTP 404)". | Sentinel is older than the plugin. Update Sentinel; the plugin tries again every 10 minutes, or at once when you change an option on its options page. |
+| NINA's log has another "PFR Sentinel: could not send the NINA target" warning. | The rest of the message is the same advice as the Start/Stop messages in the tables above. A rejected token, a refused Host or switched-off control is retried less and less often, up to every 10 minutes; after fixing it, change any option on the plugin's options page (or restart NINA) to retry at once. |
 
-A marker with no field-of-view box means the plugin could not work out the field (check the focal length in NINA's telescope settings and that the camera is connected), or the box is under 4 pixels across at this preview size — it shows at full resolution.
+A reticle instead of a field-of-view box means one of four things: **Show field of view** is off on the NINA Target card; the plugin could not work out the field (check the focal length in NINA's telescope settings and that the camera is connected); part of the field is below the horizon; or the box would be under 4 pixels across on your output image. The overlay is drawn once, on the output image after [Image Resize](Image-Processing#image-resize), and the preview is that same image, so a reticle in the preview means a reticle in the saved, web and timelapse images too. To get a box, raise the **Scale** under Image Resize towards 100% — see [All-Sky Overlay](All-Sky-Overlay#nina-target).
 
 ### "Switched off" versus "not wired up"
 

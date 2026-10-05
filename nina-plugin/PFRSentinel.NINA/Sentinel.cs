@@ -24,24 +24,28 @@ namespace PFRSentinel.NINA {
     /// DataTemplate for that page must be keyed "&lt;AssemblyTitle&gt;_Options" -
     /// "PFR Sentinel_Options" - see Options.xaml.
     ///
-    /// It also hosts the target push (<see cref="SentinelTargetReporter"/>). The manifest
-    /// is constructed once at load and torn down through <see cref="Teardown"/>, so the
-    /// push runs whether or not the panel is open - unlike the dockable, which NINA may
-    /// never construct for an operator who never opens it.
+    /// It also hosts the target push (<see cref="SentinelTargetReporter"/>), started from
+    /// <see cref="Initialize"/> and disposed in <see cref="Teardown"/>, so the push runs
+    /// whether or not the panel is open - unlike the dockable, which NINA may never
+    /// construct for an operator who never opens it.
     /// </summary>
     [Export(typeof(IPluginManifest))]
     public class Sentinel : PluginBase, INotifyPropertyChanged {
         private readonly IPluginOptionsAccessor pluginSettings;
         private readonly IProfileService profileService;
-        private readonly SentinelTargetReporter targetReporter;
+        private readonly ISequenceMediator sequenceMediator;
+        private readonly ICameraMediator cameraMediator;
+        private SentinelTargetReporter targetReporter;
 
-        // VERIFY: that NINA's plugin container exports ISequenceMediator and ICameraMediator
-        // to an IPluginManifest constructor, as the plugin template does for other
-        // mediators. If MEF cannot satisfy an import the whole manifest export is dropped
-        // silently (no options page, no plugin-list entry); the fallback is to host the
-        // reporter in SentinelDockable, which is also [ImportingConstructor].
+        // AllowDefault on the mediators: if MEF cannot satisfy a required import it drops
+        // the whole manifest export silently - no options page, no plugin-list entry - for
+        // the sake of an optional feature. A missing mediator arrives as null instead and
+        // NinaTargetSource reports "unknown", so nothing is sent.
         [ImportingConstructor]
-        public Sentinel(IProfileService profileService, ISequenceMediator sequenceMediator, ICameraMediator cameraMediator) {
+        public Sentinel(
+            IProfileService profileService,
+            [Import(AllowDefault = true)] ISequenceMediator sequenceMediator,
+            [Import(AllowDefault = true)] ICameraMediator cameraMediator) {
             if (Settings.Default.UpdateSettings) {
                 Settings.Default.Upgrade();
                 Settings.Default.UpdateSettings = false;
@@ -56,13 +60,29 @@ namespace PFRSentinel.NINA {
             this.profileService = profileService;
             profileService.ProfileChanged += ProfileService_ProfileChanged;
 
-            this.targetReporter = StartTargetReporter(sequenceMediator, cameraMediator);
+            this.sequenceMediator = sequenceMediator;
+            this.cameraMediator = cameraMediator;
+        }
+
+        /// <summary>Called by NINA's plugin loader right after composition.</summary>
+        /// <remarks>
+        /// The reporter starts here rather than in the constructor so nothing runs
+        /// before NINA has finished building the plugin, and so a failure cannot reach
+        /// MEF at all.
+        /// </remarks>
+        public override Task Initialize() {
+            if (targetReporter is null) {
+                targetReporter = StartTargetReporter();
+            }
+
+            return base.Initialize();
         }
 
         public override Task Teardown() {
             // Unhook or the plugin instance is never collected.
             profileService.ProfileChanged -= ProfileService_ProfileChanged;
             targetReporter?.Dispose();
+            targetReporter = null;
             return base.Teardown();
         }
 
@@ -76,11 +96,9 @@ namespace PFRSentinel.NINA {
         /// Builds and starts the target push. Returns null when it could not start.
         /// </summary>
         /// <remarks>
-        /// Guarded because this runs inside the MEF constructor: an exception escaping
-        /// here would drop the whole manifest export without a word, taking the options
-        /// page with it, for the sake of an optional feature.
+        /// Guarded so an optional feature can never fault plugin start-up.
         /// </remarks>
-        private SentinelTargetReporter StartTargetReporter(ISequenceMediator sequenceMediator, ICameraMediator cameraMediator) {
+        private SentinelTargetReporter StartTargetReporter() {
             try {
                 var source = new NinaTargetSource(sequenceMediator, cameraMediator, profileService);
                 var reporter = new SentinelTargetReporter(
@@ -117,6 +135,7 @@ namespace PFRSentinel.NINA {
             set {
                 pluginSettings.SetValueString(SentinelPluginOptions.BaseUrlOverrideKey, value ?? string.Empty);
                 RaisePropertyChanged();
+                targetReporter?.RequestSendNow();
             }
         }
 

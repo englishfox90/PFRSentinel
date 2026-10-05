@@ -111,33 +111,92 @@ internal static class SentinelTargetPayload
     }
 
     /// <summary>
-    /// Trims, drops control characters, and caps at <see cref="MaxNameChars"/>
-    /// UTF-16 units without splitting a surrogate pair.
+    /// Cleans a name the way Sentinel's <c>api_target.clean_name</c> does: drops every
+    /// character in a Unicode "C" category (control, format, private use, unassigned,
+    /// unpaired surrogate), collapses whitespace runs to one space, trims, and caps at
+    /// <see cref="MaxNameChars"/> code points.
     /// </summary>
     /// <remarks>
-    /// Sentinel cleans the name too; doing it here as well means a target named
-    /// with nothing but control characters becomes a placeholder rather than a 400.
+    /// Mirrored rather than left to the server so a name Sentinel would clean to
+    /// nothing — say a lone zero-width space — becomes a placeholder here instead of a
+    /// 400 on every request. Unpaired surrogates must go in any case:
+    /// <see cref="Utf8JsonWriter"/> refuses to encode them.
     /// </remarks>
     public static string CleanName(string? raw)
     {
-        var builder = new StringBuilder();
-        foreach (char c in raw ?? string.Empty)
+        string text = raw ?? string.Empty;
+        var builder = new StringBuilder(Math.Min(text.Length, MaxNameChars * 2));
+        bool pendingSpace = false;
+        int codePoints = 0;
+
+        for (int i = 0; i < text.Length && codePoints < MaxNameChars; i++)
         {
-            builder.Append(char.IsControl(c) ? ' ' : c);
+            char c = text[i];
+            bool pair = char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
+
+            if (!pair && char.IsWhiteSpace(c))
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+
+            if (!pair && char.IsSurrogate(c))
+            {
+                continue;
+            }
+
+            if (IsDropped(CharUnicodeInfo.GetUnicodeCategory(text, i)))
+            {
+                if (pair)
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+                if (++codePoints >= MaxNameChars)
+                {
+                    break;
+                }
+            }
+
+            builder.Append(c);
+            if (pair)
+            {
+                builder.Append(text[++i]);
+            }
+
+            codePoints++;
         }
 
-        string name = builder.ToString().Trim();
-        if (name.Length > MaxNameChars)
-        {
-            int cut = char.IsHighSurrogate(name[MaxNameChars - 1]) ? MaxNameChars - 1 : MaxNameChars;
-            name = name.Substring(0, cut).TrimEnd();
-        }
-
+        string name = builder.ToString().TrimEnd();
         return name.Length == 0 ? FallbackName : name;
     }
 
-    private static double? ValidFov(double? value) =>
-        value is double v && double.IsFinite(v) && v > 0.0 && v <= MaxFovDeg ? (double?)v : null;
+    private static bool IsDropped(UnicodeCategory category) => category is
+        UnicodeCategory.Control or
+        UnicodeCategory.Format or
+        UnicodeCategory.Surrogate or
+        UnicodeCategory.PrivateUse or
+        UnicodeCategory.OtherNotAssigned;
+
+    // Judged after rounding to the 4 places that go on the wire: 0.00004 would be
+    // sent as 0, which Sentinel rejects.
+    private static double? ValidFov(double? value)
+    {
+        if (value is not double v || !double.IsFinite(v))
+        {
+            return null;
+        }
+
+        double rounded = Math.Round(v, 4, MidpointRounding.AwayFromZero);
+        return rounded > 0.0 && rounded <= MaxFovDeg ? (double?)rounded : null;
+    }
 
     private static double Finite(double value) => double.IsFinite(value) ? value : 0.0;
 

@@ -10,6 +10,8 @@
 - Options page: "Send the current sequencer target to Sentinel" (on by default).
 - Needs a Sentinel that has the route; an older one is reported once in NINA's log
   ("HTTP 404 ... update Sentinel") and retried every 10 minutes.
+- A rejected token, refused Host or disabled control API is retried with a
+  back-off that doubles up to 10 minutes; changing any plugin option retries at once.
 
 ## 1.1.0.0
 - Imaging-tab panel: live frame with staleness indication, Sentinel health line

@@ -71,7 +71,6 @@ namespace PFRSentinel.NINA {
             }
 
             try {
-                // VERIFY: IPluginOptionsAccessor.GetValueBoolean(string, bool).
                 return accessor.GetValueBoolean(ReportTargetKey, ReportTargetDefault);
             } catch (Exception) {
                 return ReportTargetDefault;
@@ -86,7 +85,6 @@ namespace PFRSentinel.NINA {
             }
 
             try {
-                // VERIFY: IPluginOptionsAccessor.SetValueBoolean(string, bool).
                 accessor.SetValueBoolean(ReportTargetKey, value);
                 return true;
             } catch (Exception) {

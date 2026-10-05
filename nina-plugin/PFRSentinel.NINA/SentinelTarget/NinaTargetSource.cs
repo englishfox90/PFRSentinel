@@ -1,4 +1,5 @@
 #nullable enable
+using NINA.Astrometry;
 using NINA.Core.Enum;
 using NINA.Core.Utility;
 using NINA.Equipment.Interfaces.Mediator;
@@ -26,19 +27,24 @@ namespace PFRSentinel.NINA.SentinelTarget {
     /// <b>Never throws.</b> It runs on the reporter's background thread and walks a
     /// sequence tree the UI thread may be editing, so a "collection was modified" is a
     /// routine event, not a bug. A failed read repeats the last good answer for a few
-    /// ticks rather than returning null, because null means "no target" and would send
-    /// Sentinel a clear — the marker would blink off because of a race.
+    /// ticks rather than reporting "no target", which would send Sentinel a clear — the
+    /// marker would blink off because of a race.
     /// </para>
     /// <para>
-    /// <c>VERIFY</c> marks every NINA member whose exact name could not be checked
-    /// without the NINA assemblies; the Windows CI build compiles against
-    /// <c>NINA.Plugin 3.2.0.9001</c> and is the first real check.
+    /// Three answers, not two: a target, no target (send one clear), or
+    /// <see cref="SentinelTargetReading.Unknown"/> — the sequencer is not initialised yet,
+    /// or NINA supplied no sequence mediator — which sends nothing at all.
+    /// </para>
+    /// <para>
+    /// Member names were checked against NINA's public source (isbeorn/nina, develop);
+    /// the Windows CI build compiles against <c>NINA.Plugin 3.2.0.9001</c>.
     /// </para>
     /// </remarks>
     internal sealed class NinaTargetSource {
 
-        // Consecutive read faults before the cached answer is abandoned. At the
-        // reporter's 10 s tick this is 30 s, well inside Sentinel's 120 s stale-out.
+        // Faults 1 and 2 repeat the last good answer; fault 3 reports "no target". At
+        // the reporter's 10 s tick that is about 20 s of tolerance, well inside
+        // Sentinel's 120 s stale-out.
         private const int FaultTolerance = 3;
 
         private readonly ISequenceMediator? sequenceMediator;
@@ -60,19 +66,31 @@ namespace PFRSentinel.NINA.SentinelTarget {
         }
 
         /// <summary>
-        /// The running target, or null when no deep-sky container is running.
+        /// The running target, "no target" when no deep-sky container is running, or
+        /// unknown while the sequencer cannot be asked.
         /// </summary>
         /// <remarks>Reporter thread only; not re-entrant.</remarks>
-        public SentinelTargetReport? TrySnapshot() {
+        public SentinelTargetReading TrySnapshot() {
+            if (sequenceMediator is null) {
+                LogOnce("PFR Sentinel: NINA supplied no sequence mediator, so the target is not sent to Sentinel.");
+                return SentinelTargetReading.Unknown;
+            }
+
             try {
+                // Most mediator calls throw SequenceMediatorException until the
+                // sequencer has registered; asking early is "unknown", not "no target".
+                if (!sequenceMediator.Initialized) {
+                    return SentinelTargetReading.Unknown;
+                }
+
                 SentinelTargetReport? report = ReadRunningTarget();
                 lastGood = report;
                 consecutiveFaults = 0;
-                return report;
+                return SentinelTargetReading.Of(report);
             } catch (Exception ex) {
                 LogOnce($"PFR Sentinel: could not read the sequencer target ({ex.GetType().Name}: {ex.Message}).");
                 consecutiveFaults++;
-                return consecutiveFaults < FaultTolerance ? lastGood : null;
+                return SentinelTargetReading.Of(consecutiveFaults < FaultTolerance ? lastGood : null);
             }
         }
 
@@ -99,15 +117,13 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 return null;
             }
 
-            // VERIFY: IDeepSkyObjectContainer.Target is NINA.Astrometry.InputTarget.
             var target = container.Target;
             if (target is null) {
                 return null;
             }
 
-            // VERIFY: InputTarget.InputCoordinates.Coordinates, Coordinates.Transform(Epoch),
-            // Coordinates.RADegrees / Dec. NINA keeps targets in J2000 already; the
-            // transform makes the epoch explicit rather than assumed.
+            // NINA keeps targets in J2000 already; the transform makes the epoch explicit
+            // rather than assumed.
             var coordinates = target.InputCoordinates?.Coordinates;
             if (coordinates is null) {
                 return null;
@@ -125,7 +141,8 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 return null;
             }
 
-            // VERIFY: InputTarget.PositionAngle (NINA 3.x; it was InputTarget.Rotation in 2.x).
+            // Standard astronomical position angle, degrees east of north, in [0, 360).
+            // NINA 3 migrated the 2.x Rotation as 360 - Rotation, so this is not that.
             double positionAngle = target.PositionAngle;
 
             (double? fovWidth, double? fovHeight) = ReadFieldOfView();
@@ -144,8 +161,6 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 return null;
             }
 
-            // VERIFY: ISequenceMediator.GetAllTargetsInAdvancedSequence() and
-            // GetAllTargetsInSimpleSequence(), each returning IList<IDeepSkyObjectContainer>.
             // Advanced first: it is what a modern NINA night runs.
             IDeepSkyObjectContainer? running = null;
             Exception? advancedFault = null;
@@ -181,7 +196,6 @@ namespace PFRSentinel.NINA.SentinelTarget {
 
             IDeepSkyObjectContainer? found = null;
             foreach (IDeepSkyObjectContainer? container in containers) {
-                // VERIFY: Status comes from ISequenceEntity, SequenceEntityStatus in NINA.Core.Enum.
                 if (container is not null && container.Status == SequenceEntityStatus.RUNNING) {
                     found = container;
                 }
@@ -206,23 +220,20 @@ namespace PFRSentinel.NINA.SentinelTarget {
                     return (null, null);
                 }
 
-                // VERIFY: ITelescopeSettings.FocalLength (mm; NaN when unset).
+                // Millimetres; NaN or 0 when unset.
                 double focal = profile.TelescopeSettings.FocalLength;
 
                 int width = 0;
                 int height = 0;
                 double pixel = 0.0;
 
-                // VERIFY: ICameraMediator.GetInfo() -> CameraInfo with Connected, XSize,
-                // YSize (unbinned pixels) and PixelSize (µm).
+                // XSize / YSize are unbinned pixels, PixelSize is µm.
                 var info = cameraMediator?.GetInfo();
                 if (info is not null && info.Connected && info.XSize > 0 && info.YSize > 0 && IsPositive(info.PixelSize)) {
                     width = info.XSize;
                     height = info.YSize;
                     pixel = info.PixelSize;
                 } else {
-                    // VERIFY: ICameraSettings.PixelSize and
-                    // IFramingAssistantSettings.CameraWidth / CameraHeight (pixels).
                     width = profile.FramingAssistantSettings.CameraWidth;
                     height = profile.FramingAssistantSettings.CameraHeight;
                     pixel = profile.CameraSettings.PixelSize;
