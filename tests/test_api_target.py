@@ -117,6 +117,22 @@ def test_bad_right_ascension_rejected(ra):
     reject(body(ra_deg=ra))
 
 
+_NUMERIC_FIELDS = ["ra_deg", "dec_deg", "fov_w_deg", "fov_h_deg", "rotation_deg"]
+
+
+@pytest.mark.parametrize("field", _NUMERIC_FIELDS)
+@pytest.mark.parametrize("literal", ["1" + "0" * 400, "-" + "9" * 400])
+def test_huge_integer_literal_is_400_not_a_crash(field, literal):
+    raw = body(**{field: 0}).replace(f'"{field}": 0'.encode(), f'"{field}": {literal}'.encode())
+    assert literal.encode() in raw
+    assert "finite number" in reject(raw)
+
+
+@pytest.mark.parametrize("field", _NUMERIC_FIELDS)
+def test_huge_integer_object_is_400_not_a_crash(field):
+    reject({"target": dict(FULL, **{field: 10 ** 400})})
+
+
 def test_nan_literal_in_json_rejected():
     reject(b'{"target": {"name": "M31", "ra_deg": NaN, "dec_deg": 1}}')
 

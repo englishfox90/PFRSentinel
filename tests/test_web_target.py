@@ -237,3 +237,11 @@ def test_web_control_still_rejects_unknown_paths(path):
     h = make_handler(path=path)
     assert web_control.route_post(h, "/capture") is False
     assert h.status is None
+
+
+def test_huge_integer_coordinate_is_400_not_500():
+    raw = b'{"target": {"name": "M31", "ra_deg": 1' + b"0" * 400 + b', "dec_deg": 41}}'
+    h = post(make_handler(body=raw))
+    assert h.status == 400
+    assert h.body["code"] == "bad_request"
+    assert stored() is None

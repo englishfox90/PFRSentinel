@@ -94,9 +94,16 @@ def test_an_unusable_colour_falls_back_to_the_default(card, colour):
     assert card.values()['color'] == DEFAULTS['color']
 
 
-def test_a_named_colour_qt_understands_is_kept(card):
-    card.load({'color': 'red'})
-    assert card.values()['color'] == 'red'
+@pytest.mark.parametrize("colour", ['red', '#abc', '#4488ff00'])
+def test_a_colour_the_renderer_cannot_read_falls_back(card, colour):
+    card.load({'color': colour})
+    assert card.values()['color'] == DEFAULTS['color']
+
+
+@pytest.mark.parametrize("colour", ['#4488ff', '#4488FF'])
+def test_a_six_digit_hex_colour_is_kept_as_given(card, colour):
+    card.load({'color': colour})
+    assert card.values()['color'] == colour
 
 
 def test_the_default_colour_is_one_the_picker_offers():

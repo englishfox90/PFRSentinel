@@ -172,7 +172,7 @@ Returns the current state without changing anything. Use it to pre-flight a clie
 
 > **New in the next release** — not available in version 3.7.8 or earlier.
 
-Tells Sentinel which target your main telescope is imaging, so the [All-Sky Overlay](All-Sky-Overlay) can mark it with a reticle, its name and the imaging camera's field of view. The [NINA plugin](NINA-Integration) sends this for you from the running sequence; this section is for writing your own client.
+Tells Sentinel which target your main telescope is imaging, so the [All-Sky Overlay](All-Sky-Overlay) can mark it and label it with its name. When it can, the overlay draws the imaging camera's field of view as a box with a small cross at its centre; when it can't — no field of view sent, part of the box below the horizon, or the box under 4 pixels across at the output size — it draws a reticle on the target instead. The [NINA plugin](NINA-Integration) sends this for you from the running sequence; this section is for writing your own client.
 
 The route uses the same Host check, token and 4096-byte body limit as the capture routes, and like them it is refused with `control_disabled` while **Enable Capture Control API** is off. It does not start, stop or change capture.
 

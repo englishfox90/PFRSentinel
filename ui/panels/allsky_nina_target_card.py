@@ -4,8 +4,9 @@ Layout only: the controls for ``allsky_overlay.nina_target``. The target
 itself arrives from the NINA plugin over the control API; this card only
 decides whether and how it is drawn.
 """
+import re
+
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QColor
 from qfluentwidgets import CaptionLabel
 
 from services.config_defaults import DEFAULT_CONFIG
@@ -15,6 +16,8 @@ from ..theme.icons import mdi
 from .allsky_settings_rows import LayerToggleRow, ColorPaletteRow
 
 _DEFAULTS = DEFAULT_CONFIG['allsky_overlay']['nina_target']
+
+_HEX_COLOR = re.compile(r'#[0-9A-Fa-f]{6}')
 
 STALE_MIN_S = 30
 STALE_MAX_S = 3600
@@ -79,9 +82,9 @@ class NinaTargetCard(CollapsibleCard):
 
 
 def _valid_color(value) -> str:
-    # A hand-edited config can carry anything; the swatch stylesheet and the
-    # renderer both need a colour Qt and PIL can parse.
-    if isinstance(value, str) and QColor.isValidColorName(value):
+    # The renderer reads only #RRGGBB; anything else would fail the layer on
+    # every frame, so a hand-edited "red" or "#abc" goes back to the default.
+    if isinstance(value, str) and _HEX_COLOR.fullmatch(value):
         return value
     return _DEFAULTS['color']
 

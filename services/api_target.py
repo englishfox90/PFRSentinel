@@ -48,7 +48,10 @@ TARGET_ROUTES = [
         "summary": "Report the target NINA is imaging",
         "description": (
             "Store the current imaging target so the all-sky overlay can mark it "
-            "with a reticle, its name and the imaging camera's field of view. "
+            "and label it with its name: the imaging camera's field of view as a "
+            "box with a small centre cross, or a reticle when no box can be drawn "
+            "(field of view unknown, part of it below the horizon, or too small "
+            "at the output resolution). "
             "Send {\"target\": null} to clear it. The overlay stops drawing a "
             "target that has not been re-sent for the configured staleness "
             "period, so a client should repeat it as a heartbeat. "
@@ -76,10 +79,18 @@ def _is_number(value) -> bool:
 def _finite_number(body: dict, key: str):
     """``(float, None)`` or ``(None, message)`` for a required finite number."""
     value = body.get(key)
-    # json.loads accepts NaN and Infinity, so finiteness is checked explicitly.
-    if not _is_number(value) or not math.isfinite(value):
-        return None, f"'{key}' must be a finite number of degrees."
-    return float(value), None
+    message = f"'{key}' must be a finite number of degrees."
+    if not _is_number(value):
+        return None, message
+    # json.loads accepts NaN and Infinity, and an integer literal of any length,
+    # which math.isfinite and float() refuse with OverflowError.
+    try:
+        value = float(value)
+    except OverflowError:
+        return None, message
+    if not math.isfinite(value):
+        return None, message
+    return value, None
 
 
 def clean_name(raw: str) -> str:
