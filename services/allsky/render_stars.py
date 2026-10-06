@@ -9,13 +9,15 @@ names on the image.
 import numpy as np
 from PIL import Image, ImageDraw
 from datetime import datetime
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .fisheye import FisheyeModel
 from .catalogs import get_bright_stars
 from .coords import radec_to_altaz
 from .label_collision import LabelGrid, estimate_text_size, reserve_targets
-from .render_objects import _parse_color, _load_font, _is_sky_visible
+from .render_objects import (
+    LABEL_MIN_ALT_DEG, _is_sky_visible, _load_font, _parse_color, faded, label_wanted,
+)
 
 
 def star_uid(star: dict) -> str:
@@ -53,8 +55,10 @@ def bright_star_targets(
     dt: datetime,
     gray: np.ndarray,
     allowed_ids: Optional[Set[str]] = None,
+    persisted: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[str, float, float, str]]:
-    """(display name, x, y, uid) of every bright star that gets a label."""
+    """(display name, x, y, uid) of every bright star that gets a label.
+    ``persisted`` as in render_objects: those UIDs, no visibility test."""
     if not config.get('enabled', False):
         return []
     max_mag   = float(config.get('max_magnitude', 2.5))
@@ -65,14 +69,14 @@ def bright_star_targets(
         display = star_display_name(star, use_bayer)
         if not display:
             continue
-        if allowed_ids is not None and star_uid(star) not in allowed_ids:
+        if not label_wanted(star_uid(star), allowed_ids, persisted):
             continue
 
         alt, az = radec_to_altaz(
             star['ra_deg'], star['dec_deg'], lat_deg, lon_deg, dt, refraction=True
         )
         alt, az = float(alt), float(az)
-        if alt < 10.0:
+        if alt < LABEL_MIN_ALT_DEG:
             continue
 
         xy = model.altaz_to_pixel(alt, az)
@@ -80,7 +84,7 @@ def bright_star_targets(
             continue
 
         x, y = int(xy[0]), int(xy[1])
-        if not _is_sky_visible(gray, x, y):
+        if persisted is None and not _is_sky_visible(gray, x, y):
             continue
         visible.append((display, float(x), float(y), star_uid(star)))
     return visible
@@ -97,9 +101,11 @@ def render_bright_stars(
     allowed_ids: Optional[Set[str]] = None,
     sky_gray: Optional[np.ndarray] = None,
     targets: Optional[List[Tuple[str, float, float, str]]] = None,
+    persisted: Optional[Dict[str, float]] = None,
 ) -> Image.Image:
     """Draw bright star name labels. ``targets`` from ``bright_star_targets``
-    lets the caller reserve the stars before other layers place anything."""
+    lets the caller reserve the stars before other layers place anything;
+    ``persisted`` (uid -> alpha) fades each label."""
     if not config.get('enabled', False):
         return img
 
@@ -109,7 +115,8 @@ def render_bright_stars(
 
     if targets is None:
         gray = sky_gray if sky_gray is not None else np.array(img.convert('L'))
-        targets = bright_star_targets(model, config, lat_deg, lon_deg, dt, gray, allowed_ids)
+        targets = bright_star_targets(model, config, lat_deg, lon_deg, dt, gray,
+                                      allowed_ids, persisted)
     if not targets:
         return img
     reserve_targets(label_grid, targets, label_size)
@@ -123,6 +130,7 @@ def render_bright_stars(
         tw, th = estimate_text_size(display, label_size)
         pos = label_grid.try_place(x, y, tw, th, key=uid)
         if pos is not None:
-            draw.text(pos, display, fill=label_color, font=font)
+            alpha = persisted.get(uid, 1.0) if persisted is not None else 1.0
+            draw.text(pos, display, fill=faded(label_color, alpha), font=font)
 
     return Image.alpha_composite(img, overlay)

@@ -18,7 +18,7 @@ from services.allsky.label_collision import LabelGrid
 from services.allsky.label_stability import reset_label_stability
 from services.allsky.moon_label import MoonGlare, glare_at, label_gap, text_halo
 from services.allsky.render_objects import (
-    planet_targets, render_planets, reserve_moon_glare,
+    LABEL_MIN_ALT_DEG, planet_targets, render_planets, reserve_moon_glare,
 )
 
 # Moon at 61 deg altitude over London.
@@ -210,7 +210,7 @@ def test_a_seen_moon_needs_no_visibility_test():
 def test_a_seen_moon_keeps_its_top_n_slot_on_an_obstructed_plane():
     model = _model()
     alt, xy = _moon_above(model)
-    if alt < 0.0 or xy is None:
+    if alt < LABEL_MIN_ALT_DEG or xy is None:
         pytest.skip('Moon not usable at the fixed test instant')
     dark = np.zeros((750, 750), dtype=np.uint8)
     cfg = {'top_n': 5, 'planets': {'enabled': True}}

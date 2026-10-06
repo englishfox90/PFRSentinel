@@ -470,6 +470,18 @@ On some rigs, labels still blinked on and off during the night while their stars
 - **A star the app can see keeps its label.** When a bright star or planet is detected right where the calibration places it on two frames in a row, its label is shown whatever the rest of the frame says, and stays for three or four frames after the star was last seen. This only works with a good calibration, and it never overrides the [equipment map](#equipment-avoidance).
 - **A label that drops out for a frame or two keeps its place** in **Max objects visible**, so the next object in line does not flash on and off in its spot.
 
+#### Labels in a timelapse
+
+> **New in the next release** — not available in version 3.7.8 or earlier.
+
+A timelapse squeezes the night: at 30-second exposures played back at 24 frames per second, every frame of video is half a minute of sky. A label that disappears for three frames is gone for an eighth of a second, which reads as a flicker however steady it looks in the live preview. In 3.7.8 and earlier a label that dropped out kept its place in **Max objects visible** for three frames but was not drawn during them, so it still blinked. From the next release the labels on screen are smoothed themselves:
+
+- **A new label appears only after two frames in a row** in which its object is in view and within **Max objects visible**, so an object that turns up for a single frame is never drawn. The first frame after capture starts, or after the calibration changes, shows its labels straight away.
+- **A label that drops out stays on screen for 10 more frames** (about 5 minutes of sky at 30-second exposures, under half a second of video) at the position the calibration predicts, and its place in **Max objects visible** is kept for as long. If its object comes back in that time, nothing on screen changes.
+- **Labels fade in and out.** A new label fades in over three frames, and a label that has dropped out fades over the last four frames of those 10 before it goes. When a brighter object takes a label's place in **Max objects visible**, the old label fades out over four frames while the new one fades in, so for those few frames one or two more labels than the limit can be on screen.
+- **Held labels can sit over equipment.** For those 10 frames a label is drawn even where the [equipment map](#equipment-avoidance) says the sky is blocked: when a telescope slews in front of a labelled star, the name stays over the telescope for a few minutes and fades. With **Show labels behind equipment** off, it does not come back until its spot is open sky again.
+- **No object takes a place it cannot use.** Objects between 5 and 10 degrees above the horizon used to count towards **Max objects visible** without being drawn (planets and the Moon from just below the horizon), and then popped in already holding their place as they rose. Every layer now counts and draws from the same 10 degrees, and a layer that is switched off no longer counts at all.
+
 None of this changes when the overlay is drawn: a closed roof, an overcast sky or twilight still hide every label straight away (see [When the overlay is drawn](#when-the-overlay-is-drawn)).
 
 ---

@@ -24,6 +24,9 @@ of state that lets consecutive frames agree:
   * ``sightings`` (``star_sightings.StarSightings``) — a star detected at
     its own predicted pixel keeps its label whatever the vote says, held a
     few frames past the last sighting.
+  * ``persistence`` (``label_persistence.LabelPersistence``) — the drawn
+    labels themselves: two eligible frames before a first draw, a hold and
+    a fade after the last one.
 
 State is keyed by nothing: the renderer serves one live frame stream, and a
 recalibration or size change is handled inside each piece.
@@ -35,6 +38,7 @@ from typing import Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
+from .label_persistence import LABEL_HOLD_FRAMES, LabelPersistence
 from .star_sightings import StarSightings
 
 # What counts as open sky is a property of the installation — the pier, the
@@ -62,11 +66,13 @@ RANK_MARGIN = 3           # incumbents survive up to this far past the budget
 MASK_KEEP_FRACTION = 0.25
 
 # An object on screen that drops out of the visible set keeps its slot in
-# the top-N budget for this many frames. It is not drawn while invisible —
-# the renderers test visibility again — but the next-ranked object does not
-# flash into its slot for the frame or two the drop lasts and flash out again
-# when it returns. A lasting drop frees the slot after the hold.
-ABSENT_HOLD_FRAMES = 3
+# the top-N budget for this many frames, so the next-ranked object does not
+# flash into its slot while the drop lasts and flash out again when it
+# returns. It is as long as the drawn-label hold (label_persistence) because
+# the label is still on screen, fading, for that long: a shorter slot hold
+# let a newcomer appear beside it and pushed the drawn count past the budget
+# (issue #144). A lasting drop frees the slot after the hold.
+ABSENT_HOLD_FRAMES = LABEL_HOLD_FRAMES
 
 # The vote is kept at reduced resolution. Fifteen full-resolution masks of a
 # 3552 px frame are ~190 MB; the mask is made of circles no smaller than 15 px
@@ -280,6 +286,12 @@ class StickySelection:
         self._shown.clear()
         self._absent.clear()
 
+    def peek(self, ranked: List[str], top_n: int) -> Set[str]:
+        """What ``select`` would return, without changing any state."""
+        probe = StickySelection(self._margin, self._absent_hold)
+        probe._shown, probe._absent = set(self._shown), dict(self._absent)
+        return probe.select(ranked, top_n)
+
     def select(self, ranked: List[str], top_n: int) -> Set[str]:
         """Pick up to ``top_n`` UIDs from ``ranked`` (brightest first).
 
@@ -288,8 +300,8 @@ class StickySelection:
         out-rank it by more than the margin to take its slot. An incumbent
         absent from ``ranked`` (invisible this frame) keeps its slot for
         ``absent_hold`` frames (ABSENT_HOLD_FRAMES) and is returned with the
-        chosen set — the renderers do not draw what they find invisible —
-        then drops out.
+        chosen set — whether it is drawn meanwhile is the drawn-label
+        persistence's call (label_persistence) — then drops out.
         """
         if top_n <= 0:
             self._shown = set(ranked)
@@ -332,6 +344,7 @@ class LabelStabilizer:
         self.masks = SkyMaskHistory()
         self.selection = StickySelection()
         self.sightings = StarSightings()
+        self.persistence = LabelPersistence()
         self.slot_memory: Dict[str, int] = {}
         self._lock = threading.Lock()
 
@@ -355,9 +368,23 @@ class LabelStabilizer:
         with self._lock:
             return self.masks.small_vote, self.masks.is_stale
 
-    def select(self, ranked: List[str], top_n: int) -> Set[str]:
+    def select(self, ranked: List[str], top_n: int, advance: bool = True) -> Set[str]:
+        """The top-N pick; a reprocess (``advance`` False) reads it without
+        counting the frame again."""
         with self._lock:
-            return self.selection.select(ranked, top_n)
+            if advance:
+                return self.selection.select(ranked, top_n)
+            return self.selection.peek(ranked, top_n)
+
+    def drawn_labels(self, eligible, advance: bool = True,
+                     budget: Optional[Set[str]] = None) -> Dict[str, float]:
+        """``{uid: alpha}`` of the labels to draw this frame from the UIDs
+        the frame itself would label and the top-N pick (``budget``).
+        ``advance`` is False for a reprocess of a capture already counted,
+        which reads without advancing."""
+        if advance:
+            return self.persistence.update(eligible, budget)
+        return self.persistence.current(eligible)
 
     def reset(self) -> None:
         with self._lock:
@@ -365,6 +392,7 @@ class LabelStabilizer:
             self.selection.reset()
             self.slot_memory.clear()
         self.sightings.reset()
+        self.persistence.reset()
 
 
 _stabilizer = LabelStabilizer()
@@ -373,6 +401,12 @@ _stabilizer = LabelStabilizer()
 def get_label_stabilizer() -> LabelStabilizer:
     """The process-wide stabilizer shared by every overlay render."""
     return _stabilizer
+
+
+def forget_drawn_labels() -> None:
+    """Forget only the drawn-label hold: a frame the observing gate
+    withheld must not leave labels to be carried over to the next one."""
+    _stabilizer.persistence.reset()
 
 
 def reset_label_stability() -> None:
