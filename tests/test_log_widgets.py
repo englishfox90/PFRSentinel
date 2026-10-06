@@ -78,10 +78,10 @@ class TestLogsPanel:
         assert "message 0\n" not in text
 
     def test_level_filter_still_applies(self, logs_panel):
-        logs_panel.level_filter.setCurrentText("Info+")
+        logs_panel.level_filter.setCurrentText("INFO")
         logs_panel.append_logs(_lines("DEBUG", 5))
         assert logs_panel.log_text.document().blockCount() == 1  # empty doc
-        logs_panel.level_filter.setCurrentText("All")
+        logs_panel.level_filter.setCurrentText("DEBUG")
         logs_panel.append_logs(_lines("DEBUG", 5))
         assert "DEBUG" in logs_panel.log_text.toPlainText()
 
@@ -91,6 +91,86 @@ class TestLogsPanel:
         text = logs_panel.log_text.toPlainText()
         assert "keep-me please" in text
         assert "drop this" not in text
+
+    def test_search_refilters_lines_already_shown(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        logs_panel.append_logs([
+            "[00:00:00] DEBUG: HTTP 127.0.0.1 GET /latest",
+            "[00:00:01] INFO: NINA target set via HTTP API: M31",
+        ])
+        logs_panel.search_input.setText("nina")
+        logs_panel._refilter_timer.timeout.emit()
+        text = logs_panel.log_text.toPlainText()
+        assert "NINA target set" in text
+        assert "GET /latest" not in text
+        assert logs_panel.match_label.text() == "1 match"
+
+    def test_clearing_search_brings_history_back(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        logs_panel.search_input.setText("nina")
+        logs_panel.append_logs(["[00:00:00] INFO: other line", "[00:00:01] INFO: NINA up"])
+        assert "other line" not in logs_panel.log_text.toPlainText()
+        logs_panel.search_input.setText("")
+        logs_panel._refilter_timer.timeout.emit()
+        assert "other line" in logs_panel.log_text.toPlainText()
+        assert logs_panel.match_label.text() == ""
+
+    def test_search_reaches_lines_past_the_visible_cap(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        logs_panel.append_logs(["[00:00:00] INFO: rare needle"])
+        logs_panel.append_logs(_lines("DEBUG", logs_panel._max_lines * 2))
+        assert "rare needle" not in logs_panel.log_text.toPlainText()
+        logs_panel.search_input.setText("needle")
+        logs_panel._refilter_timer.timeout.emit()
+        assert "rare needle" in logs_panel.log_text.toPlainText()
+
+    def test_level_change_refilters_history(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("INFO")
+        logs_panel.append_logs(_lines("DEBUG", 3))
+        assert "DEBUG" not in logs_panel.log_text.toPlainText()
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        assert "DEBUG" in logs_panel.log_text.toPlainText()
+
+    def test_new_matches_counted_and_shown(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        logs_panel.search_input.setText("nina")
+        logs_panel._refilter_timer.timeout.emit()
+        logs_panel.append_logs(["[00:00:00] INFO: NINA a", "[00:00:01] INFO: nope", "[00:00:02] DEBUG: nina b"])
+        assert logs_panel.match_label.text() == "2 matches"
+        assert "nope" not in logs_panel.log_text.toPlainText()
+
+    def test_debug_level_shows_every_level(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        logs_panel.append_logs([
+            "[00:00:00] DEBUG: d", "[00:00:01] INFO: NINA target set",
+            "[00:00:02] WARN: w", "[00:00:03] ERROR: e",
+        ])
+        text = logs_panel.log_text.toPlainText()
+        for part in ("DEBUG: d", "INFO: NINA target set", "WARN: w", "ERROR: e"):
+            assert part in text
+
+    def test_warn_level_hides_info_and_debug(self, logs_panel):
+        logs_panel.level_filter.setCurrentText("WARN")
+        logs_panel.append_logs(["[00:00:00] INFO: i", "[00:00:01] WARN: w", "[00:00:02] ERROR: e"])
+        text = logs_panel.log_text.toPlainText()
+        assert "INFO: i" not in text
+        assert "WARN: w" in text and "ERROR: e" in text
+
+    def test_legacy_saved_levels_load_as_thresholds(self, logs_panel):
+        logs_panel.load_from_config({'ui_log_level': 'All'})
+        assert logs_panel.level_filter.currentText() == "DEBUG"
+        logs_panel.load_from_config({'ui_log_level': 'Info+'})
+        assert logs_panel.level_filter.currentText() == "INFO"
+
+    def test_angle_brackets_are_shown_not_parsed(self, logs_panel):
+        logs_panel.append_logs(["[00:00:00] INFO: called <lambda> ok"])
+        assert "<lambda>" in logs_panel.log_text.toPlainText()
+
+    def test_clear_forgets_history(self, logs_panel):
+        logs_panel.append_logs(["[00:00:00] INFO: gone"])
+        logs_panel._clear_logs()
+        logs_panel.level_filter.setCurrentText("DEBUG")
+        assert "gone" not in logs_panel.log_text.toPlainText()
 
     def test_empty_batch_is_a_noop(self, logs_panel):
         before = logs_panel.log_text.document().blockCount()

@@ -27,7 +27,7 @@ DEFAULT_CONFIG = {
     # UI appearance
     "ui_accent": "iris",   # accent theme: iris | nebula | aurora | solar | nova | forest
     "ui_special_theme": "",   # special theme pack ("" = off): halloween
-    "ui_log_level": "Info+",
+    "ui_log_level": "INFO",
 
     # Window settings
     "window_geometry": "1280x1700",
