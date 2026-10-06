@@ -25,6 +25,7 @@ from .planets import get_all_positions
 from .coords import radec_to_altaz
 from .label_collision import LabelGrid, estimate_text_size, reserve_targets
 from .moon_label import MoonGlare, label_gap, text_halo
+from .object_label_text import CONFIG_KEY as LABEL_STYLE_KEY, object_label_text
 
 # No label is ranked or drawn below this altitude. One constant for both
 # (label_candidates ranks, the layers draw): ranking used to count Messier
@@ -267,8 +268,7 @@ def render_messier(
         if persisted is None and not _is_sky_visible(gray, x, y):
             continue
 
-        common = (obj.get('name') or '').strip()
-        display = f"{common} ({label})" if common else label
+        display = object_label_text(obj.get('name'), label, config.get(LABEL_STYLE_KEY))
         tw, th = estimate_text_size(display, label_size)
         pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
@@ -339,8 +339,7 @@ def render_ngc(
         if persisted is None and not _is_sky_visible(gray, x, y):
             continue
 
-        common = (obj.get('name') or '').strip()
-        display = f"{common} ({oid})" if common else oid
+        display = object_label_text(obj.get('name'), oid, config.get(LABEL_STYLE_KEY))
         tw, th = estimate_text_size(display, label_size)
         pos = label_grid.try_place(float(x), float(y), tw, th, key=uid)
         if pos is not None:
