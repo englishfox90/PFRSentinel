@@ -245,3 +245,21 @@ def test_huge_integer_coordinate_is_400_not_500():
     assert h.status == 400
     assert h.body["code"] == "bad_request"
     assert stored() is None
+
+
+@pytest.mark.parametrize("raw, length, status", [
+    (b'{"target": {"name": "M31"}}', None, 400),
+    (M31_BODY, str(api_control.MAX_BODY_BYTES + 1), 413),
+])
+def test_a_refused_target_is_a_warning_in_sentinels_log(monkeypatch, raw, length, status):
+    """The plugin's own warning lands in NINA's log; Sentinel's showed a bare 400."""
+    warnings = []
+    monkeypatch.setattr(app_logger, "warning", lambda msg, *a, **k: warnings.append(str(msg)))
+    h = make_handler(body=raw)
+    if length is not None:
+        h.headers["Content-Length"] = length
+    post(h)
+    assert h.status == status
+    assert len(warnings) == 1
+    assert warnings[0].startswith(f"NINA target refused (HTTP {status}): ")
+    assert TOKEN not in warnings[0]

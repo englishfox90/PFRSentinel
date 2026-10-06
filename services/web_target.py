@@ -33,12 +33,16 @@ def serve_target(handler):
 
     raw_body, error = web_control._read_body(handler)
     if error:
+        app_logger.warning(f"NINA target refused (HTTP {error[0]}): {error[1]}")
         web_control._send_error(handler, *error)
         return
 
     params, error = api_target.parse_target_request(raw_body)
     if error:
         status, message = error
+        # The plugin backs off and logs its own warning, but only in NINA's
+        # log; without this line Sentinel's log shows a bare 400.
+        app_logger.warning(f"NINA target refused (HTTP {status}): {message}")
         web_control._send_error(handler, status, message,
                                 web_control.ERR_BODY_TOO_LARGE if status == 413
                                 else web_control.ERR_BAD_REQUEST)

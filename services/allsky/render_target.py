@@ -2,8 +2,10 @@
 The target NINA is imaging, drawn on the all-sky overlay (issue #137).
 
 The imaging camera's field of view as the outline of the sensor rectangle
-projected through the fisheye model, with a small cross at its centre, and the
-target's name. With no box to draw (no field of view reported, too small, or
+projected through the fisheye model, and the target's name. The box alone
+marks the target: a cross inside it was drawn screen-aligned, so on a box the
+position angle and the fisheye had turned it read as a slanted X, and at full
+resolution it filled most of the box. With no box to draw (no field of view reported, too small, or
 reaching below the horizon) a reticle, a ring with four ticks, marks the
 target instead. The target arrives from the NINA plugin (``POST /nina/target``,
 ``services.nina_target_store``) as J2000 RA/Dec; the renderer reads it from
@@ -49,7 +51,6 @@ EDGE_SAMPLES = 6  # points per edge: the fisheye bends a long edge
 _DEFAULT_COLOR = '#FF66AA'
 _TICK_INNER = 1.4  # tick span, in ring radii
 _TICK_OUTER = 2.2
-_CROSS_OF_BOX = 0.35  # centre-cross half-length cap, in box shorter sides
 _HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 STALE_MIN_S = 30
@@ -105,6 +106,7 @@ class TargetPlacement:
     label_px: int
     fov_polygon: Optional[Tuple[Tuple[float, float], ...]]
     label_pos: Optional[Tuple[float, float]] = None
+    reticle_reason: str = ''  # why there is no box; empty when there is one
 
 
 def target_label_px(img_size: Tuple[int, int], layer_cfg: dict) -> int:
@@ -165,21 +167,23 @@ def _project(model: FisheyeModel, ra: float, dec: float, lat: float, lon: float,
 
 
 def _fov_polygon(model, layer_cfg, target, ra, dec, lat, lon, dt):
+    """``(polygon, '')``, or ``(None, why)`` when the reticle stands in."""
     if not layer_cfg.get('show_fov', True):
-        return None
+        return None, "the field-of-view box is switched off"
     fw, fh = target.get('fov_w_deg'), target.get('fov_h_deg')
     if not fw or not fh:
-        return None
+        return None, "NINA sent no field of view"
     pts = []
     for r, dd in fov_corners_radec(ra, dec, float(fw), float(fh),
                                    float(target.get('rotation_deg') or 0.0)):
         xy = _project(model, r, dd, lat, lon, dt)
         if xy is None:
-            return None  # a part-drawn box reads as a different shape
+            # A part-drawn box reads as a different shape.
+            return None, "part of the field is below the horizon"
         pts.append(xy)
     if max(_bbox_size(pts)) < MIN_FOV_PX:
-        return None
-    return tuple(pts)
+        return None, f"the field is under {MIN_FOV_PX:.0f} px across"
+    return tuple(pts), ''
 
 
 def place_target(
@@ -192,46 +196,55 @@ def place_target(
     """Where the target and its field of view land on the frame, or None
     when there is no target, the layer is off, or the target is below the
     horizon or off the image."""
+    return locate_target(img_size, model, layer_cfg, target, lat, lon, dt)[0]
+
+
+def locate_target(
+    img_size: Tuple[int, int],
+    model: FisheyeModel,
+    layer_cfg: dict,
+    target: Optional[dict],
+    lat: float, lon: float, dt: datetime,
+) -> Tuple[Optional[TargetPlacement], str]:
+    """``place_target`` plus why it came back None, for the log
+    (``target_status_log``); the reason is empty when it was placed. Reasons
+    are fixed text so the log can tell one outcome from the next."""
     layer_cfg = layer_config(layer_cfg)
-    if not target or not layer_cfg.get('enabled', True):
-        return None
+    if not target:
+        return None, "no target"
+    if not layer_cfg.get('enabled', True):
+        return None, "the NINA target layer is switched off"
     ra, dec = precess_from_j2000(float(target['ra_deg']), float(target['dec_deg']), dt)
     ra, dec = float(ra), float(dec)
     xy = _project(model, ra, dec, lat, lon, dt)
+    if xy is None:
+        alt = float(radec_to_altaz(ra, dec, lat, lon, dt, refraction=True)[0])
+        if alt < 0.0:
+            return None, "it is below the horizon"
+        return None, "it is outside the lens model's sky"
     w, h = img_size
-    if xy is None or not (0 <= xy[0] < w and 0 <= xy[1] < h):
-        return None
+    if not (0 <= xy[0] < w and 0 <= xy[1] < h):
+        return None, "it falls outside the image"
+    polygon, why = _fov_polygon(model, layer_cfg, target, ra, dec, lat, lon, dt)
     return TargetPlacement(
         name=str(target.get('name') or ''),
         x=xy[0], y=xy[1],
         marker_r=_marker_r(img_size, layer_cfg),
         label_px=target_label_px(img_size, layer_cfg),
-        fov_polygon=_fov_polygon(model, layer_cfg, target, ra, dec, lat, lon, dt),
-    )
-
-
-def cross_half_length(placement: TargetPlacement) -> Optional[float]:
-    """Half-length of the centre cross drawn inside the field-of-view box, or
-    None with no box (the ring and ticks are drawn instead). At full
-    resolution a typical field is smaller than the ring and ticks, which
-    would swallow it."""
-    if not placement.fov_polygon:
-        return None
-    w, h = _bbox_size(placement.fov_polygon)
-    return min(placement.marker_r, _CROSS_OF_BOX * min(w, h))
+        fov_polygon=polygon,
+        reticle_reason=why,
+    ), ''
 
 
 def marker_reach(placement: TargetPlacement) -> float:
     """Radius round the target that holds everything drawn for it: the
     reticle, and the box's whole bounding rectangle when there is one, so a
     label kept outside it clears the box."""
-    cross = cross_half_length(placement)
-    if cross is None:
+    if not placement.fov_polygon:
         return placement.marker_r * _TICK_OUTER
     xs = [px - placement.x for px, _ in placement.fov_polygon]
     ys = [py - placement.y for _, py in placement.fov_polygon]
-    corner = math.hypot(max(abs(min(xs)), abs(max(xs))), max(abs(min(ys)), abs(max(ys))))
-    return max(cross, corner)
+    return math.hypot(max(abs(min(xs)), abs(max(xs))), max(abs(min(ys)), abs(max(ys))))
 
 
 def _bbox_size(points) -> Tuple[float, float]:
@@ -255,8 +268,8 @@ def reserve_target(grid: LabelGrid, placement: TargetPlacement,
 
 def render_target(img: Image.Image, layer_cfg: dict,
                   placement: Optional[TargetPlacement]) -> Image.Image:
-    """Draw the field-of-view box with a centre cross, or the ring and ticks
-    when there is no box, and the name."""
+    """Draw the field-of-view box, or the ring and ticks when there is no
+    box, and the name."""
     layer_cfg = layer_config(layer_cfg)
     if placement is None or not layer_cfg.get('enabled', True):
         return img
@@ -270,8 +283,7 @@ def render_target(img: Image.Image, layer_cfg: dict,
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     x, y, r = placement.x, placement.y, placement.marker_r
-    cross = cross_half_length(placement)
-    if cross is None:
+    if not placement.fov_polygon:
         draw.ellipse((x - r, y - r, x + r, y + r), outline=color, width=width)
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             draw.line((x + dx * r * _TICK_INNER, y + dy * r * _TICK_INNER,
@@ -280,8 +292,6 @@ def render_target(img: Image.Image, layer_cfg: dict,
     else:
         pts = list(placement.fov_polygon)
         draw.line(pts + [pts[0]], fill=color, width=width, joint='curve')
-        draw.line((x - cross, y, x + cross, y), fill=color, width=width)
-        draw.line((x, y - cross, x, y + cross), fill=color, width=width)
     if placement.label_pos is not None and layer_cfg.get('show_label', True):
         draw.text(placement.label_pos, placement.name, fill=color,
                   font=_load_font(placement.label_px),
