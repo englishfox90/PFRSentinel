@@ -80,6 +80,7 @@ namespace PFRSentinel.NINA.SentinelTarget {
         private bool? announcedEnabled;
         private bool announcedIdle;
         private string? lastWarning;
+        private SentinelTargetReport? sendingReport;
 
         /// <summary>Creates a reporter. Nothing is sent until <see cref="Start"/>.</summary>
         /// <param name="source">The current reading. Expected never to throw.</param>
@@ -210,6 +211,10 @@ namespace PFRSentinel.NINA.SentinelTarget {
 
             bool isEnabled = ReadEnabled();
             AnnounceEnabled(isEnabled);
+            // With a clear still owed, the send below decides between Off and Failing.
+            if (!isEnabled && lastSentJson is null) {
+                SentinelTargetStatus.Set(SentinelTargetState.Off);
+            }
 
             SentinelTargetReading reading = isEnabled ? ReadSource() : SentinelTargetReading.Of(null);
             if (!reading.Known) {
@@ -217,10 +222,13 @@ namespace PFRSentinel.NINA.SentinelTarget {
             }
 
             SentinelTargetReport? report = reading.Report;
-            if (isEnabled && report is null && lastSentJson is null && !announcedIdle) {
-                announcedIdle = true;
-                Logger.Info("PFR Sentinel: no deep-sky target is running in the sequencer, so no target is sent " +
-                    "to Sentinel. One is sent within about 10 s of a target container (or Target Scheduler) starting a target.");
+            if (isEnabled && report is null && lastSentJson is null) {
+                SentinelTargetStatus.Set(SentinelTargetState.Idle);
+                if (!announcedIdle) {
+                    announcedIdle = true;
+                    Logger.Info("PFR Sentinel: no deep-sky target is running in the sequencer, so no target is sent " +
+                        "to Sentinel. One is sent within about 10 s of a target container (or Target Scheduler) starting a target.");
+                }
             }
             string? json = report is null ? null : SentinelTargetPayload.Serialize(report);
 
@@ -234,6 +242,7 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 return;
             }
 
+            sendingReport = report;
             try {
                 SentinelSequenceLink link = SentinelSequenceLink.Instance;
                 link.ApplyEndpointOverride(ReadOverride(link));
@@ -254,6 +263,12 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 escalation = 0;
                 rejectedJson = null;
                 reloadConfiguration = false;
+
+                if (report is not null) {
+                    SentinelTargetStatus.Sent(report);
+                } else {
+                    SentinelTargetStatus.Set(isEnabled ? SentinelTargetState.Idle : SentinelTargetState.Off);
+                }
 
                 if (lastWarning is not null) {
                     lastWarning = null;
@@ -317,6 +332,7 @@ namespace PFRSentinel.NINA.SentinelTarget {
             reloadConfiguration = true;
             retryAfterMs = now + (long)backoff.TotalMilliseconds;
             WarnOnce(message);
+            SentinelTargetStatus.Failed(sendingReport, WithoutPrefix(message));
         }
 
         // Describe() opens some messages with "PFR Sentinel: " already.

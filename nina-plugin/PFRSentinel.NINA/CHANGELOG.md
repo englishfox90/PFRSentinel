@@ -9,6 +9,12 @@
   (telescope focal length, camera pixel size or sensor size); Sentinel draws a
   reticle instead of a box until it is set.
 - A sequencer read that fails is now a Warning, not Debug.
+- Imaging-tab panel: an **All-sky target** column shows what was last sent to
+  Sentinel (status, name, RA/Dec, field of view, rotation, time since Sentinel
+  accepted it) and, in amber, why a send failed. It sits beside the statistics
+  when the panel is wide enough and under them when it is not.
+- Panel statistics trimmed: Frame age (the frame line already shows it), Images
+  served and Uptime are gone.
 
 ## 1.2.0.0
 - Target push: while a deep-sky target is running in the sequencer, the plugin

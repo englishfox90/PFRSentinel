@@ -3,6 +3,7 @@ using NINA.Core.Utility;
 using NINA.Equipment.Interfaces.ViewModel;
 using NINA.Profile.Interfaces;
 using NINA.WPF.Base.ViewModel;
+using PFRSentinel.NINA.SentinelTarget;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -150,6 +151,10 @@ namespace PFRSentinel.NINA.SentinelDockables {
                 : Visibility.Collapsed;
 
             Statistics = SentinelStatistics.Build(snapshot);
+
+            (TargetRows, string problem) = SentinelTargetRows.Build(SentinelTargetStatus.Current, DateTime.UtcNow);
+            TargetProblemText = problem;
+            TargetProblemVisibility = problem.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
             ApplyLinkNotice(snapshot);
 
