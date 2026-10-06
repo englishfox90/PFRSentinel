@@ -45,7 +45,7 @@ A scheduled capture that is enabled but waiting for its capture window counts as
 
 > **New in the next release** — not available in version 3.7.8 or earlier.
 
-While a sequence is imaging a target, the plugin tells Sentinel which target it is, and Sentinel marks it on the [All-Sky Overlay](All-Sky-Overlay#nina-target): its name and its field of view as a box with a centre cross, or a reticle (a ring with four ticks) when no box can be drawn. You can see at a glance where the main scope is pointed against the clouds, the Moon and the trees.
+While a sequence is imaging a target, the plugin tells Sentinel which target it is, and Sentinel marks it on the [All-Sky Overlay](All-Sky-Overlay#nina-target): its name and its field of view as a box, or a reticle (a ring with four ticks) when no box can be drawn. You can see at a glance where the main scope is pointed against the clouds, the Moon and the trees.
 
 What the plugin sends:
 
@@ -76,7 +76,7 @@ The marker is only drawn when the all-sky overlay is turned on and the lens is c
 | Same machine | NINA and Sentinel must run on the same PC, under the same Windows user account. See [Sentinel on another machine](#sentinel-on-another-machine). |
 | Web server | **Enable Web Server** turned on in the **Web Server** card of the [Output Settings](Output-Settings) tab. |
 | Capture control | **Enable Capture Control API** turned on in the same card. The live frame and health work without it, but Start/Stop and the sequencer instructions need it. |
-| Target on the all-sky overlay | Sentinel newer than 3.7.8 (the next release) with plugin version 1.2.0.0 — the plugin bundled with that Sentinel. Also needs capture control, as above, and a calibrated [All-Sky Overlay](All-Sky-Overlay). An older Sentinel ignores the target and the plugin notes it once in NINA's log. |
+| Target on the all-sky overlay | Sentinel newer than 3.7.8 (the next release) with plugin version 1.2.0.0 or later — the plugin bundled with that Sentinel. Also needs capture control, as above, and a calibrated [All-Sky Overlay](All-Sky-Overlay). An older Sentinel ignores the target and the plugin notes it once in NINA's log. |
 
 ---
 
@@ -258,6 +258,24 @@ Work down the list:
 | NINA's log has another "PFR Sentinel: could not send the NINA target" warning. | The rest of the message is the same advice as the Start/Stop messages in the tables above. A rejected token, a refused Host or switched-off control is retried less and less often, up to every 10 minutes; after fixing it, change any option on the plugin's options page (or restart NINA) to retry at once. |
 
 A reticle instead of a field-of-view box means one of four things: **Show field of view** is off on the NINA Target card; the plugin could not work out the field (check the focal length in NINA's telescope settings and that the camera is connected); part of the field is below the horizon; or the box would be under 4 pixels across on your output image. The overlay is drawn once, on the output image after [Image Resize](Image-Processing#image-resize), and the preview is that same image, so a reticle in the preview means a reticle in the saved, web and timelapse images too. To get a box, raise the **Scale** under Image Resize towards 100% — see [All-Sky Overlay](All-Sky-Overlay#nina-target).
+
+#### What the logs say
+
+Both logs record each step at their default level, so you can follow a target from NINA to the overlay. Each line is written when something changes, not every frame or every 30-second update.
+
+| Log | Line | Meaning |
+|-----|------|---------|
+| NINA | `PFR Sentinel: target reporting to Sentinel is on.` | The plugin loaded and the option is on. |
+| NINA | `PFR Sentinel: no deep-sky target is running in the sequencer …` | Nothing to send yet, for example while Target Scheduler waits for darkness. |
+| NINA | `PFR Sentinel: sent target 'M31' to Sentinel.` | The target reached Sentinel. "without a field of view" at the end means Sentinel will draw a reticle. |
+| NINA | `PFR Sentinel: the target is sent without a field of view …` | Names the missing setting: telescope focal length, camera pixel size or sensor size. |
+| Sentinel | `NINA target set via HTTP API: 'M31' RA … Dec …, FOV …, PA …` | Sentinel received the target, with the field of view and rotation it will draw. |
+| Sentinel | `NINA target refused (HTTP 400): …` | Sentinel rejected what the plugin sent; the rest of the line says why. |
+| Sentinel | `NINA target 'M31' drawn on the all-sky overlay with its field-of-view box` | Drawn. A reticle line says why there is no box. |
+| Sentinel | `NINA target 'M31' not drawn on the all-sky overlay: …` | Received but not drawn, for example below the horizon. |
+| Sentinel | `NINA target 'M31' hidden: NINA has not reported it for over 120 s` | The updates stopped, so the marker was taken down. |
+
+Sentinel only draws the target while the all-sky overlay itself is shown, so outside the observing window (twilight, a closed roof, no stars) there is no "drawn" line; the overlay's own "Sky features suppressed" line says why.
 
 ### "Switched off" versus "not wired up"
 
