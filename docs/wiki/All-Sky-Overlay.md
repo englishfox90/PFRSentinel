@@ -383,7 +383,7 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 
 > **New in the next release** — not available in version 3.7.8 or earlier.
 
-Marks where NINA is imaging: the outline of your imaging camera's field of view, turned to the camera's rotation, with a small cross at its centre, and the target's name beside it. When there is no field of view to draw, a reticle (a ring with four ticks) marks the target instead. The target, its coordinates and the field of view come from the [NINA plugin](NINA-Integration) with target reporting turned on; nothing is drawn until it has sent a target.
+Marks where NINA is imaging: the outline of your imaging camera's field of view, turned to the camera's rotation, and the target's name beside it. The outline and the name have a dark border so they stay readable against the Milky Way and a bright sky, and the outline gets thicker with the name on a larger output image. When there is no field of view to draw, a reticle (a ring with four ticks) marks the target instead. The target, its coordinates and the field of view come from the [NINA plugin](NINA-Integration) with target reporting turned on; nothing is drawn until it has sent a target.
 
 | Setting | Default | Range | Description |
 |---------|---------|-------|-------------|

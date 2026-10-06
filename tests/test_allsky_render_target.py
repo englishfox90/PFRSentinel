@@ -25,8 +25,8 @@ from services.allsky.render_stars import render_bright_stars
 from services.allsky import render_target as render_target_module
 from services.allsky.moon_label import MoonGlare
 from services.allsky.render_target import (
-    MIN_FOV_PX, TARGET_UID, TargetPlacement, cross_half_length, fov_corners_radec,
-    layer_config, marker_reach, place_target, render_target, reserve_target,
+    MIN_FOV_PX, TARGET_UID, TargetPlacement, fov_corners_radec,
+    layer_config, locate_target, marker_reach, place_target, stroke_widths, render_target, reserve_target,
     stale_after_seconds, target_label_px,
 )
 from services.config_defaults import DEFAULT_CONFIG
@@ -211,6 +211,31 @@ class TestPlaceTarget:
         assert place_target(IMG_SIZE, _model(), LAYER, None, LAT, LON, DT) is None
         assert _place(layer=dict(LAYER, enabled=False)) is None
 
+    @pytest.mark.parametrize('kw, expected', [
+        (dict(target=_target(dec_deg=-60.0)), "it is below the horizon"),
+        (dict(model=_model(cx=375.0, cy=-200.0)), "it falls outside the image"),
+        (dict(layer=dict(LAYER, enabled=False)), "the NINA target layer is switched off"),
+    ])
+    def test_locate_says_why_nothing_was_placed(self, kw, expected):
+        placement, why = locate_target(IMG_SIZE, kw.get('model', _model()),
+                                       kw.get('layer', LAYER), kw.get('target', _target()),
+                                       LAT, LON, DT)
+        assert placement is None and why == expected
+
+    @pytest.mark.parametrize('target, layer, expected', [
+        (_target(fov_w_deg=None, fov_h_deg=None), LAYER, "NINA sent no field of view"),
+        (_target(), dict(LAYER, show_fov=False), "the field-of-view box is switched off"),
+        (_target(fov_w_deg=0.5, fov_h_deg=0.5), LAYER, "the field is under 4 px across"),
+    ])
+    def test_a_reticle_placement_says_why_there_is_no_box(self, target, layer, expected):
+        placement, why = locate_target(IMG_SIZE, _model(), layer, target, LAT, LON, DT)
+        assert why == '' and placement.fov_polygon is None
+        assert placement.reticle_reason == expected
+
+    def test_a_box_placement_has_no_reason(self):
+        placement, why = locate_target(IMG_SIZE, _model(), LAYER, _target(), LAT, LON, DT)
+        assert why == '' and placement.fov_polygon and placement.reticle_reason == ''
+
     def test_coordinates_are_precessed_to_the_date(self):
         """The catalogue layers precess J2000 to the date; without the same
         step the target sat ~0.37 deg off every label by 2026."""
@@ -276,32 +301,43 @@ class TestReserveAndRender:
         assert _count_target_pixels(box) > 10                   # name
         assert not _is_target_colour(out.getpixel((300, 300)))  # open centre
 
-    def test_with_a_box_render_draws_the_box_and_a_centre_cross(self):
+    def test_with_a_box_render_draws_the_box_and_nothing_inside_it(self):
+        """A screen-aligned cross read as a slanted X on a turned box."""
         poly = ((250.0, 270.0), (350.0, 270.0), (350.0, 330.0), (250.0, 330.0))
         placement = reserve_target(LabelGrid(*IMG_SIZE), self._placement(fov_polygon=poly))
         out = render_target(_img(), LAYER, placement)
         assert _is_target_colour(out.getpixel((300, 270)))      # outline
-        assert _is_target_colour(out.getpixel((300, 300)))      # cross centre
-        assert _is_target_colour(out.getpixel((308, 300)))      # cross arm
-        assert not _is_target_colour(out.getpixel((300, 282)))  # no tick
+        inside = out.crop((253, 273, 348, 328))
+        assert _count_target_pixels(inside) == 0                # no cross, no ring
         lx, ly = placement.label_pos
         box = out.crop((int(lx), int(ly), int(lx) + 40, int(ly) + 16))
         assert _count_target_pixels(box) > 10
 
+    def test_the_box_line_follows_the_name_and_line_width_is_its_floor(self):
+        """A fixed 2 px line vanished beside a 43 px name on the rig's 2464 px frame."""
+        assert stroke_widths(LAYER, 13) == (2, 4)
+        assert stroke_widths(LAYER, 43) == (4, 8)
+        assert stroke_widths(dict(LAYER, line_width=6), 13) == (6, 12)
+
+    def test_the_box_has_a_dark_outline_on_both_sides(self):
+        poly = ((250.0, 270.0), (350.0, 270.0), (350.0, 330.0), (250.0, 330.0))
+        placement = reserve_target(LabelGrid(*IMG_SIZE), self._placement(fov_polygon=poly))
+        out = render_target(Image.new('RGBA', IMG_SIZE, (200, 200, 200, 255)), LAYER, placement)
+        assert _is_target_colour(out.getpixel((300, 270)))      # the line
+        for px in ((300, 269), (300, 272)):                     # either side of it
+            r, g, b, _ = out.getpixel(px)
+            assert max(r, g, b) < 80, px
+
     def test_a_small_box_has_no_ring_round_it(self):
         """At full resolution a field is smaller than the ring and ticks;
-        those would swallow the box, so only a cross sized to it is drawn."""
+        those would swallow the box, so only the box is drawn."""
         poly = ((295.0, 296.0), (305.0, 296.0), (305.0, 304.0), (295.0, 304.0))
         placement = reserve_target(LabelGrid(*IMG_SIZE), self._placement(fov_polygon=poly))
-        assert cross_half_length(placement) == pytest.approx(0.35 * 8)
         out = render_target(_img(), LAYER, placement)
-        for px in ((290, 300), (300, 290), (300, 310), (307, 307), (293, 307), (300, 278)):
+        for px in ((290, 300), (300, 290), (300, 310), (307, 307), (293, 307), (300, 278),
+                   (300, 300)):
             assert not _is_target_colour(out.getpixel(px)), px
         assert _is_target_colour(out.getpixel((295, 300)))      # box edge
-
-    def test_the_cross_never_outgrows_the_marker(self):
-        poly = ((200.0, 200.0), (400.0, 200.0), (400.0, 400.0), (200.0, 400.0))
-        assert cross_half_length(self._placement(fov_polygon=poly)) == pytest.approx(10.0)
 
     @pytest.mark.parametrize('poly', [
         ((280.0, 290.0), (320.0, 290.0), (320.0, 310.0), (280.0, 310.0)),
@@ -374,8 +410,8 @@ class TestOverlayRenderer:
         out = overlay_renderer.render_allsky_overlay(
             _img(), _overlay_config(cal_path, _target()), {})
         assert _count_target_pixels(out) > 100
-        assert _is_target_colour(out.getpixel((379, 375)))      # centre cross
         assert _is_target_colour(out.getpixel((395, 375)))      # box edge, 20 px out
+        assert not _is_target_colour(out.getpixel((379, 375)))  # no centre cross
         assert not _is_target_colour(out.getpixel((385, 375)))  # no ring
         assert get_label_stabilizer().slot_memory.get(TARGET_UID) == 0
 
@@ -389,13 +425,13 @@ class TestOverlayRenderer:
                             lambda img, *a, **kw: np.zeros((img.height, img.width), np.uint8))
         out = overlay_renderer.render_allsky_overlay(
             _img(), _overlay_config(cal_path, _target()), {})
-        assert _is_target_colour(out.getpixel((379, 375)))
+        assert _is_target_colour(out.getpixel((395, 375)))      # box edge
 
     def test_a_failing_placement_leaves_the_other_layers_alone(self, cal_path, monkeypatch):
         def boom(*a, **kw):
             raise RuntimeError('boom')
 
-        monkeypatch.setattr(overlay_renderer, 'place_target', boom)
+        monkeypatch.setattr(overlay_renderer, 'locate_target', boom)
         _one_star(monkeypatch, 420.0, 375.0)
         out = overlay_renderer.render_allsky_overlay(
             _img(), _overlay_config(cal_path, _target()), {})
@@ -493,12 +529,12 @@ class TestSettings:
                      opacity=float('nan'))
         p = _place(layer=layer)
         assert p.marker_r == pytest.approx(10.0) and p.label_px == 13
-        assert _is_target_colour(render_target(_img(), layer, p).getpixel((379, 375)))
+        assert _is_target_colour(render_target(_img(), layer, p).getpixel((395, 375)))
 
     def test_a_null_layer_block_draws_with_the_defaults(self):
         p = place_target(IMG_SIZE, _model(), None, _target(), LAT, LON, DT)
         assert p is not None and p.fov_polygon is not None
-        assert _is_target_colour(render_target(_img(), None, p).getpixel((379, 375)))
+        assert _is_target_colour(render_target(_img(), None, p).getpixel((395, 375)))
 
 
 def test_the_label_size_preset_moves_the_target_label():

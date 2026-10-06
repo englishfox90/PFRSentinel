@@ -30,8 +30,9 @@ from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
 from .moon_label import measure_moon_glare
+from . import target_status_log
 from .render_target import (
-    layer_config, place_target, render_target, reserve_target, stale_after_seconds,
+    layer_config, locate_target, render_target, reserve_target, stale_after_seconds,
 )
 from .render_objects import (
     planet_label_px, planet_targets, render_messier, render_ngc, render_planets,
@@ -186,8 +187,12 @@ def render_allsky_overlay(
     target_placement = None
     try:
         reserve_moon_glare(grid_cfg, moon_glare)
-        target_placement = place_target(img.size, model, target_cfg,
-                                        config.get('_nina_target'), lat, lon, dt)
+        target = config.get('_nina_target')
+        target_placement, unplaced = locate_target(img.size, model, target_cfg,
+                                                   target, lat, lon, dt)
+        if target:
+            target_status_log.report_placement(
+                str(target.get('name') or ''), target_placement, unplaced)
         if target_placement is not None:
             target_placement = reserve_target(
                 grid_cfg, target_placement, bool(target_cfg.get('show_label', True)))
@@ -324,8 +329,17 @@ def _current_nina_target(allsky_cfg: dict) -> Optional[dict]:
     setting or a failing store loses the target, never the overlay."""
     try:
         stale_after_s = stale_after_seconds(allsky_cfg.get('nina_target'))
-        target = get_nina_target_store().current(stale_after_s)
-        return target.as_dict() if target is not None else None
+        store = get_nina_target_store()
+        target = store.current(stale_after_s)
+        if target is not None:
+            return target.as_dict()
+        held = store.snapshot()
+        if held.get('target'):
+            target_status_log.report_stale(str(held['target'].get('name') or ''),
+                                           held.get('age_s'), stale_after_s)
+        else:
+            target_status_log.forget()
+        return None
     except Exception as e:
         log.debug(f"allsky: NINA target unavailable: {e}")
         return None

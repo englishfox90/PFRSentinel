@@ -54,6 +54,7 @@ namespace PFRSentinel.NINA.SentinelTarget {
         private SentinelTargetReport? lastGood;
         private int consecutiveFaults;
         private string? lastLogged;
+        private string? lastFovNote;
 
         public NinaTargetSource(
             ISequenceMediator? sequenceMediator,
@@ -242,9 +243,15 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 double? fovWidth = FieldDegrees(width, pixel, focal);
                 double? fovHeight = FieldDegrees(height, pixel, focal);
                 if (fovWidth is null || fovHeight is null) {
+                    NoteMissingFov(!IsPositive(focal)
+                        ? "the telescope focal length is not set in NINA's equipment options"
+                        : !IsPositive(pixel)
+                            ? "the camera pixel size is unknown (connect the camera, or set it in NINA's camera options)"
+                            : "the camera sensor size is unknown (connect the camera, or set it in the framing assistant)");
                     return (null, null);
                 }
 
+                lastFovNote = null;
                 return (fovWidth, fovHeight);
             } catch (Exception ex) {
                 LogOnce($"PFR Sentinel: could not work out the camera field of view ({ex.GetType().Name}: {ex.Message}).");
@@ -254,13 +261,27 @@ namespace PFRSentinel.NINA.SentinelTarget {
 
         private static bool IsPositive(double value) => double.IsFinite(value) && value > 0.0;
 
+        // Warning, not Debug: at NINA's default Info level a Debug line here left a
+        // target push that never read a target looking exactly like an idle one.
         private void LogOnce(string message) {
             if (string.Equals(message, lastLogged, StringComparison.Ordinal)) {
                 return;
             }
 
             lastLogged = message;
-            Logger.Debug(message);
+            Logger.Warning(message);
+        }
+
+        // Sentinel draws a reticle when no field of view arrives; this says which
+        // setting would give it the box. Once per distinct cause, not every tick.
+        private void NoteMissingFov(string reason) {
+            if (string.Equals(reason, lastFovNote, StringComparison.Ordinal)) {
+                return;
+            }
+
+            lastFovNote = reason;
+            Logger.Info($"PFR Sentinel: the target is sent without a field of view, so Sentinel marks it " +
+                $"with a reticle instead of a box: {reason}.");
         }
     }
 }
