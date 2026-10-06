@@ -143,9 +143,16 @@ class _RefineWorker(QThread):
                     dark_sky_frames(frames, self._lat, self._lon),
                     score_tolerance_px(sky_r)))
 
+            # The buffer holds preview-resolution frames, while a guided or
+            # Calibrate Now model is solved on the raw frame. Unscaled, a
+            # 3552 px guided seed meets 2628 px detections ~35 % too wide and
+            # the fit walks off to chance level from a model that scores 24x
+            # chance on the same buffer (2026-10-05 rig log).
+            seed = (model_in_frame(self._seed, pole_w, pole_h)
+                    if self._seed is not None else None)
             model = refine_from_detections(
                 frames,
-                self._seed,
+                seed,
                 max_residual_px=MAX_RESIDUAL_PX,
                 east_left_hint=east_left_hint(self._incumbent, pole, drought),
                 pole=pole, lat_deg=self._lat, ring=ring,
