@@ -3,6 +3,7 @@
 **Live Camera Monitoring & Overlay System for Observatories**
 
 [![PFR Sentinel Discord](https://img.shields.io/badge/Discord-PFR%20Sentinel-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/kURE739B8)
+[![My Discord (702660989438656592)](https://img.shields.io/badge/My-Discord-%235865F2.svg)](https://discord.com/users/702660989438656592)
 
 A modern astrophotography application with a Fluent Design UI (PySide6 + qfluentwidgets) that watches directories for new images or captures directly from ZWO ASI cameras, adding customizable metadata overlays with weather data and serving output through multiple channels.
 
@@ -150,7 +151,7 @@ Logs in `%APPDATA%\PFRSentinel\logs` (7-day rotation)
 ## Community & Support
 
 - **Discord server**: join the [PFR Sentinel Discord](https://discord.gg/kURE739B8) for help, questions and to share your all-sky setup.
-- **Message the author**: Paul is `englishfox3689` on Discord.
+- **Message the author**: Paul is [`englishfox3689`](https://discord.com/users/702660989438656592) on Discord.
 - **Bugs and feature requests**: open an issue on [GitHub](https://github.com/englishfox90/PFRSentinel/issues).
 
 ---
