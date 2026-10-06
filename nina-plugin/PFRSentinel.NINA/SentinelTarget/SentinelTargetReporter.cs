@@ -33,6 +33,13 @@ namespace PFRSentinel.NINA.SentinelTarget {
     /// rejected token or a disabled control API escalates its back-off, because each of
     /// those requests also writes a warning into Sentinel's own log.
     /// </para>
+    /// <para>
+    /// A working push is visible at NINA's default <c>Info</c> level too: the switch
+    /// turning on or off, the first idle reading (no target running), each target sent
+    /// or cleared, and the push recovering after a failure. Heartbeats stay silent.
+    /// Before these were <c>Debug</c>, a working push and one that never ran left the
+    /// same empty log.
+    /// </para>
     /// </remarks>
     internal sealed class SentinelTargetReporter : IDisposable {
 
@@ -70,6 +77,8 @@ namespace PFRSentinel.NINA.SentinelTarget {
         private int escalation;
         private bool reloadConfiguration = true;
         private bool lastEnabled = true;
+        private bool? announcedEnabled;
+        private bool announcedIdle;
         private string? lastWarning;
 
         /// <summary>Creates a reporter. Nothing is sent until <see cref="Start"/>.</summary>
@@ -199,12 +208,20 @@ namespace PFRSentinel.NINA.SentinelTarget {
                 reloadConfiguration = true;
             }
 
-            SentinelTargetReading reading = ReadEnabled() ? ReadSource() : SentinelTargetReading.Of(null);
+            bool isEnabled = ReadEnabled();
+            AnnounceEnabled(isEnabled);
+
+            SentinelTargetReading reading = isEnabled ? ReadSource() : SentinelTargetReading.Of(null);
             if (!reading.Known) {
                 return;
             }
 
             SentinelTargetReport? report = reading.Report;
+            if (isEnabled && report is null && lastSentJson is null && !announcedIdle) {
+                announcedIdle = true;
+                Logger.Info("PFR Sentinel: no deep-sky target is running in the sequencer, so no target is sent " +
+                    "to Sentinel. One is sent within about 10 s of a target container (or Target Scheduler) starting a target.");
+            }
             string? json = report is null ? null : SentinelTargetPayload.Serialize(report);
 
             long now = Environment.TickCount64;
@@ -240,13 +257,16 @@ namespace PFRSentinel.NINA.SentinelTarget {
 
                 if (lastWarning is not null) {
                     lastWarning = null;
-                    Logger.Debug("PFR Sentinel: target push reached Sentinel again.");
+                    Logger.Info("PFR Sentinel: target push reached Sentinel again.");
                 }
 
                 if (changed) {
-                    Logger.Debug(report is null
+                    // A clear already says so; the next idle stretch needs no second note.
+                    announcedIdle = true;
+                    Logger.Info(report is null
                         ? "PFR Sentinel: cleared the target on Sentinel."
-                        : $"PFR Sentinel: sent target '{SentinelTargetPayload.CleanName(report.Name)}' to Sentinel.");
+                        : $"PFR Sentinel: sent target '{SentinelTargetPayload.CleanName(report.Name)}' to Sentinel" +
+                          (report.FovWidthDeg is null ? " without a field of view." : "."));
                 }
             } catch (SentinelException ex) when (ex.StatusCode == HttpStatusCode.NotFound) {
                 Fail(now, MaxBackoff,
@@ -313,6 +333,17 @@ namespace PFRSentinel.NINA.SentinelTarget {
             }
 
             return lastEnabled;
+        }
+
+        private void AnnounceEnabled(bool isEnabled) {
+            if (announcedEnabled == isEnabled) {
+                return;
+            }
+
+            announcedEnabled = isEnabled;
+            Logger.Info(isEnabled
+                ? "PFR Sentinel: target reporting to Sentinel is on."
+                : "PFR Sentinel: target reporting to Sentinel is off (plugin options).");
         }
 
         private SentinelTargetReading ReadSource() {
