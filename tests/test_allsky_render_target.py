@@ -26,7 +26,7 @@ from services.allsky import render_target as render_target_module
 from services.allsky.moon_label import MoonGlare
 from services.allsky.render_target import (
     MIN_FOV_PX, TARGET_UID, TargetPlacement, fov_corners_radec,
-    layer_config, locate_target, marker_reach, place_target, render_target, reserve_target,
+    layer_config, locate_target, marker_reach, place_target, stroke_widths, render_target, reserve_target,
     stale_after_seconds, target_label_px,
 )
 from services.config_defaults import DEFAULT_CONFIG
@@ -312,6 +312,21 @@ class TestReserveAndRender:
         lx, ly = placement.label_pos
         box = out.crop((int(lx), int(ly), int(lx) + 40, int(ly) + 16))
         assert _count_target_pixels(box) > 10
+
+    def test_the_box_line_follows_the_name_and_line_width_is_its_floor(self):
+        """A fixed 2 px line vanished beside a 43 px name on the rig's 2464 px frame."""
+        assert stroke_widths(LAYER, 13) == (2, 4)
+        assert stroke_widths(LAYER, 43) == (4, 8)
+        assert stroke_widths(dict(LAYER, line_width=6), 13) == (6, 12)
+
+    def test_the_box_has_a_dark_outline_on_both_sides(self):
+        poly = ((250.0, 270.0), (350.0, 270.0), (350.0, 330.0), (250.0, 330.0))
+        placement = reserve_target(LabelGrid(*IMG_SIZE), self._placement(fov_polygon=poly))
+        out = render_target(Image.new('RGBA', IMG_SIZE, (200, 200, 200, 255)), LAYER, placement)
+        assert _is_target_colour(out.getpixel((300, 270)))      # the line
+        for px in ((300, 269), (300, 272)):                     # either side of it
+            r, g, b, _ = out.getpixel(px)
+            assert max(r, g, b) < 80, px
 
     def test_a_small_box_has_no_ring_round_it(self):
         """At full resolution a field is smaller than the ring and ticks;

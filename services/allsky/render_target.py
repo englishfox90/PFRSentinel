@@ -51,6 +51,7 @@ EDGE_SAMPLES = 6  # points per edge: the fisheye bends a long edge
 _DEFAULT_COLOR = '#FF66AA'
 _TICK_INNER = 1.4  # tick span, in ring radii
 _TICK_OUTER = 2.2
+_LINE_OF_LABEL = 10.0  # name height per pixel of box line
 _HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 STALE_MIN_S = 30
@@ -266,10 +267,25 @@ def reserve_target(grid: LabelGrid, placement: TargetPlacement,
     return replace(placement, label_pos=pos)
 
 
+def stroke_widths(layer_cfg: dict, label_px: int) -> Tuple[int, int]:
+    """``(line, outline)`` pixel widths for the box and the reticle.
+
+    ``line_width`` alone is a fixed pixel count while the name scales with
+    the frame, so on a full-resolution output (2628 px on the reference rig)
+    a 2 px box sat beside a 46 px name and vanished into the Milky Way. The
+    line follows the name's stroke weight, ``line_width`` its floor, and a
+    dark outline underneath, the same one the name carries, keeps it
+    readable against a bright sky.
+    """
+    line = max(1, int(_number(layer_cfg, 'line_width', 2)),
+               int(round(label_px / _LINE_OF_LABEL)))
+    return line, line + 2 * max(1, line // 2)
+
+
 def render_target(img: Image.Image, layer_cfg: dict,
                   placement: Optional[TargetPlacement]) -> Image.Image:
     """Draw the field-of-view box, or the ring and ticks when there is no
-    box, and the name."""
+    box, and the name, each over a dark outline."""
     layer_cfg = layer_config(layer_cfg)
     if placement is None or not layer_cfg.get('enabled', True):
         return img
@@ -278,24 +294,29 @@ def render_target(img: Image.Image, layer_cfg: dict,
         img = img.convert('RGBA')
     opacity = int(max(0, min(255, _number(layer_cfg, 'opacity', 230))))
     color = target_color(layer_cfg, opacity)
-    width = max(1, int(_number(layer_cfg, 'line_width', 2)))
+    halo = text_halo(placement.label_px, opacity)
+    line, outline = stroke_widths(layer_cfg, placement.label_px)
 
     overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     x, y, r = placement.x, placement.y, placement.marker_r
-    if not placement.fov_polygon:
-        draw.ellipse((x - r, y - r, x + r, y + r), outline=color, width=width)
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            draw.line((x + dx * r * _TICK_INNER, y + dy * r * _TICK_INNER,
-                       x + dx * r * _TICK_OUTER, y + dy * r * _TICK_OUTER),
-                      fill=color, width=width)
-    else:
-        pts = list(placement.fov_polygon)
-        draw.line(pts + [pts[0]], fill=color, width=width, joint='curve')
+    for fill, width in ((halo['stroke_fill'], outline), (color, line)):
+        if not placement.fov_polygon:
+            # PIL draws an ellipse outline inward from its box; widen the box
+            # by half the extra so both strokes stay centred on the ring.
+            g = (width - line) / 2.0
+            draw.ellipse((x - r - g, y - r - g, x + r + g, y + r + g),
+                         outline=fill, width=width)
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                draw.line((x + dx * r * _TICK_INNER, y + dy * r * _TICK_INNER,
+                           x + dx * r * _TICK_OUTER, y + dy * r * _TICK_OUTER),
+                          fill=fill, width=width)
+        else:
+            pts = list(placement.fov_polygon)
+            draw.line(pts + [pts[0]], fill=fill, width=width, joint='curve')
     if placement.label_pos is not None and layer_cfg.get('show_label', True):
         draw.text(placement.label_pos, placement.name, fill=color,
-                  font=_load_font(placement.label_px),
-                  **text_halo(placement.label_px, opacity))
+                  font=_load_font(placement.label_px), **halo)
 
     img = Image.alpha_composite(img, overlay)
     return img if original_mode == 'RGBA' else img.convert(original_mode)
