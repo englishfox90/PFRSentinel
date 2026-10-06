@@ -89,8 +89,7 @@ These two cards are pointers only. Discord settings and storage cleanup are conf
 
 ## Weather API
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
-> Choosing **Imperial** now saves and applies; in 3.7.8 and earlier it was always saved as metric.
+> Added in version v3.7.9. Choosing **Imperial** now saves and applies; in 3.7.8 and earlier it was always saved as metric.
 
 Weather data is used for overlay tokens, the Weather tile in the status strip, Discord posts, and cloud cover in the [Image Library](Image-Library). PFR Sentinel uses OpenWeatherMap and caches results for 10 minutes. For a full walkthrough see [Weather Setup](Weather-Setup).
 

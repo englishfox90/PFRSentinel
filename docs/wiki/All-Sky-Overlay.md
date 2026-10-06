@@ -58,8 +58,8 @@ Open **All-Sky** from the navigation rail (in the Image group).
 |---------|---------|-------|-------------|
 | All-Sky overlay enabled | Off | — | Master switch for the overlay. Automatic calibration also only runs while this is on. |
 | Max objects visible | 15 | 5–50 (steps of 5) | Maximum number of labelled bright stars, Messier objects, NGC/IC objects, and planets combined. The brightest visible objects win. Constellations do not count towards this limit. |
-| Label size | Large | Too small, Small, Normal, Large, Why so large | Size of every label on the overlay. **Large** is the size earlier versions always drew; each step down takes 2 px off every layer (at the 750 px reference size, so the step scales with your image), each step up adds 2 px. The layers keep their relative sizes: planets stay a little larger than star names, NGC labels a little smaller. New in the next release. |
-| Show labels behind equipment | Off | On / Off | Keeps names on where the pier, a telescope or other equipment blocks the sky, across the whole calibrated sky circle. Off: names only where the sky is actually seen (see [Equipment avoidance](#equipment-avoidance)). A closed roof or a frame that cannot show the night sky still hides every label. New in the next release. |
+| Label size | Large | Too small, Small, Normal, Large, Why so large | Size of every label on the overlay. **Large** is the size earlier versions always drew; each step down takes 2 px off every layer (at the 750 px reference size, so the step scales with your image), each step up adds 2 px. The layers keep their relative sizes: planets stay a little larger than star names, NGC labels a little smaller. Added in version v3.7.9. |
+| Show labels behind equipment | Off | On / Off | Keeps names on where the pier, a telescope or other equipment blocks the sky, across the whole calibrated sky circle. Off: names only where the sky is actually seen (see [Equipment avoidance](#equipment-avoidance)). A closed roof or a frame that cannot show the night sky still hides every label. Added in version v3.7.9. |
 
 ### Burn overlay into output
 
@@ -91,10 +91,10 @@ The **Lens Calibration** card shows a coloured quality badge (hover it for a des
 |--------|--------------|
 | **Calibrate Now** | Runs an immediate single-frame calibration on the most recent clean frame. The button reads **Calibrating…** while it works. Needs a frame, so start capture first. |
 | **Guided Calibration…** | Opens a dialog where you identify bright stars by hand. The dependable option for obstructed, tilted, or hazy views where automatic calibration cannot work out the orientation. See [Guided Calibration](#guided-calibration). |
-| **Calibration History…** | Lists every calibration that has been in use and lets you put an earlier one back. New in the next release. See [Calibration history](#calibration-history). |
+| **Calibration History…** | Lists every calibration that has been in use and lets you put an earlier one back. Added in version v3.7.9. See [Calibration history](#calibration-history). |
 | **Reset Calibration…** | Deletes the saved calibration after a confirmation prompt. See [Reset Calibration](#reset-calibration). |
 | **Dump calibration buffer** | Saves the star positions automatic calibration has collected to a small file for a bug report. See [Dump calibration buffer](#dump-calibration-buffer). |
-| **Reset Equipment Map…** | Forgets where the app has learned that telescopes, mounts and other equipment sit in the frame, after a confirmation prompt. New in the next release. See [Equipment avoidance](#equipment-avoidance). |
+| **Reset Equipment Map…** | Forgets where the app has learned that telescopes, mounts and other equipment sit in the frame, after a confirmation prompt. Added in version v3.7.9. See [Equipment avoidance](#equipment-avoidance). |
 
 When **Calibrate Now** or **Guided Calibration** succeeds, a notification is posted if **Post Calibration** is enabled in your [Hermes Notifications](Hermes-Notifications) settings. Improvements made by automatic calibration do not send a notification.
 
@@ -134,11 +134,11 @@ Neither changes or deletes your calibration, and cloud causes both: a cloudy nig
 >
 > Each time automatic refinement runs, the saved calibration is now also checked against the same frames the refinement used: how many stars it matches, compared with how many a wrong calibration would match by coincidence. If it comes out no better than chance in two runs in a row, the badge drops to **Preliminary — check alignment**, its tooltip shows the measurement (how many stars matched against how many chance would supply) together with the rating from when the calibration was saved, and the status line reads "matches at chance level" until a later run clears it. This check works on obstructed and moonlit skies where the bright-star check cannot reach a verdict, which is why it can appear without the "refinements rejected" trigger above. It is skipped, rather than counted against the calibration, when the frames hold too few stars to judge by (cloud, or glare from the Moon). The calibration file itself is not changed, and nothing else is saved or re-pointed: the badge shows the live verdict, the file keeps its own rating.
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
+> Added in version v3.7.9.
 >
 > While the badge reads **Preliminary — check alignment** for this reason, three more things happen. The overlay is **not drawn**: a calibration that matches the stars no better than chance puts every label in the wrong place, and drawing them for hours is worse than drawing nothing. Automatic calibration **starts again from scratch** at the next opportunity instead of refining the doubted calibration, on the same schedule as a basin escape, and a fresh result that passes the checks replaces it. And a **notification** is sent, once, through Discord and Hermes if **Post Calibration** is on there (see [Hermes Notifications](Hermes-Notifications)). The calibration file is still not changed. The overlay returns as soon as a later run clears the doubt or a new calibration is saved. A Guided Calibration is never treated this way: its stars are ones you identified.
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
+> Added in version v3.7.9.
 >
 > Two changes keep this check from firing on a calibration that is fine. First, it now only looks at frames taken once the Sun is at least 15° below the horizon. In twilight the camera still picks up hundreds of points of light, but few of them are stars, so every calibration — right or wrong — scores as chance; the dev builds before this change could hide the overlay at dusk and start re-calibrating a good model, which looked like the calibration had been lost. Until there are enough dark frames the check is skipped, not counted against the calibration. Second, the bar is now lower for doubting the saved calibration than for clearing it: it is doubted only when it matches fewer than one and a half times the stars chance would supply, and cleared once it matches twice as many. A calibration scoring close to twice chance therefore no longer flips between doubted and cleared through the night, taking the overlay with it.
 
@@ -156,7 +156,7 @@ With the overlay enabled and capture running in ZWO Camera mode, calibration run
 
 A refined model only replaces the current one if it is actually better: it must either reach a higher quality level without being more than 15% worse on RMS, or have a lower RMS with at least as many matched stars. Otherwise the current calibration is kept.
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
+> Added in version v3.7.9.
 >
 > The quick single-frame calibration is now judged against chance the same way a multi-frame one is (see [Quality levels](#quality-levels)). Before, a single frame only had to match 8 stars and land on 5 of the 12 brightest, and on a high-resolution camera a wrong orientation can do that by coincidence: on the reference camera, on a partly cloudy night, a fit that matched 10 stars with an RMS that measured its own matching distance rather than the sky was saved as Preliminary and drew Polaris at the wrong edge of the frame for most of a day. Such a fit is now rejected outright — the log names the numbers (stars matched against how many chance would supply, and the matching distance) — and PFR Sentinel keeps collecting frames for a multi-frame calibration instead. A single-frame fit that passes records the same two numbers as a multi-frame one, so its badge tooltip can show them. Guided Calibration is unaffected: its stars are ones you identified.
 
@@ -203,13 +203,11 @@ A calibration built with **Guided Calibration** comes from stars you identified 
 
 Before an automatic calibration overwrites the saved one, the previous file is copied to `%LOCALAPPDATA%\PFRSentinel\allsky_calibration.previous.json`. This keeps one step of history in case an automatic update makes the overlay worse. Results from **Calibrate Now** and **Guided Calibration**, which you asked for, are saved without making a backup.
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
+> Added in version v3.7.9.
 >
 > That backup only goes back one step, so two automatic updates in a row can leave no copy of a Guided Calibration anywhere. Every Guided Calibration you save is now also kept as `allsky_calibration.guided.json` in the same folder, and automatic calibrations never overwrite it. To go back to it, close PFR Sentinel, copy it over `allsky_calibration.json`, and start PFR Sentinel again. [Export Diagnostics](Diagnostics-Export) includes it. The [calibration history](#calibration-history) does the same from inside the app.
 
 ### Calibration history
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 Every calibration that becomes the one in use is kept: automatic ones, **Calibrate Now**, **Guided Calibration**, and restores. **Calibration History…** on the Lens Calibration card lists them, newest first, with when each one was saved, where it came from, its quality, RMS and number of stars. Guided Calibrations are marked with ★.
 
@@ -239,11 +237,11 @@ The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be ma
 | Hover | At whole-frame zoom a loupe follows the cursor with a near full-resolution close-up, so you can tell close pairs apart (for example Mizar and Alioth). The green circle in the loupe shows how close a click must be to snap to a star. The loupe switches off once you zoom in past full resolution. |
 | **Stretch** slider | How hard the frame is brightened. Left is softer (only the brightest star cores saturate, the sky stays dark), right is harder (faint stars come up, the sky washes out). The middle is what the star detector itself sees, which was the fixed setting before. It changes the display only — the solve is unaffected — and your choice is remembered for next time. |
 
-> **New in the next release** — not available in version 3.7.8 or earlier. The **Stretch** slider is new. So is the way circles and labels are drawn: every ring and name now sits on a dark halo, in a slightly larger bold face, so they stay readable on a bright moonlit frame instead of vanishing into it.
+> Added in version v3.7.9. The **Stretch** slider is new. So is the way circles and labels are drawn: every ring and name now sits on a dark halo, in a slightly larger bold face, so they stay readable on a bright moonlit frame instead of vanishing into it.
 
 ### Identifying stars
 
-> **New in the next release** — not available in version 3.7.8 or earlier. **Exclude selected** is new: a star you doubt can be left out of the solve without deleting it.
+> Added in version v3.7.9. **Exclude selected** is new: a star you doubt can be left out of the solve without deleting it.
 
 1. **Click a bright star.** The click snaps to the nearest star PFR Sentinel detected. If no detected star is nearby, the click stays where you placed it, with a warning that the solve is much less accurate with unsnapped clicks.
 2. **Choose which star it is.** Type in **Search for a star by name…** to filter the list. It contains bright stars (magnitude 3.5 or brighter) more than 15 degrees above the horizon at the frame's capture time, each shown with its magnitude and altitude. Stars without a proper name are listed by Bayer designation or catalogue number.
@@ -254,13 +252,13 @@ The **Guided All-Sky Calibration** dialog opens nearly full-screen and can be ma
 
    **Or drag the circle onto the star.** Press on a blue circle and drag it onto the real star it belongs to: the star is identified in one gesture, with no name to confirm and no **Add** to press. The drop snaps to the nearest detected star like a click does, and carries the same unsnapped warning if none is nearby.
 
-   > **New in the next release** — not available in version 3.7.8 or earlier. Dragging a suggestion is new. So is the way the **Check your stars** warning is judged: the stars you have already identified count towards that check, and stars the [equipment map](#equipment-avoidance) places on a telescope or mount do not, so on a rig where the mount hides much of the sky, naming the visible bright stars no longer sets off the warning.
+   > Added in version v3.7.9. Dragging a suggestion is new. So is the way the **Check your stars** warning is judged: the stars you have already identified count towards that check, and stars the [equipment map](#equipment-avoidance) places on a telescope or mount do not, so on a rig where the mount hides much of the sky, naming the visible bright stars no longer sets off the warning.
 5. **Identify at least 5 stars spread across the sky.** **6 or more** lets the solver recover automatically if one turns out to be wrong. The button shows your progress, for example **Solve (3/5)**, and becomes available at five.
 6. **Click Solve.** A progress bar runs for the few seconds the solve takes.
 
 ### If the solve fails
 
-> **New in the next release** — not available in version 3.7.8 or earlier. Excluding is new, and an excluded star is left alone by a failure.
+> Added in version v3.7.9. Excluding is new, and an excluded star is left alone by a failure.
 
 Nothing is lost. Every star you identified stays where it was, the message names the star that did not fit and how far off it is, that star is shown in red on the frame and in the list (and selected, ready for **Remove selected**), and the others show their own error. Remove or re-identify the suspect and click **Solve** again — or, when you are not sure the named star is the wrong one, select it and click **Exclude selected** to try the solve without it while keeping it in the list. A star you had already excluded takes no part in the failure and keeps its **excluded by you** mark. The full detail for every star is also in the [Logs](Logs).
 
@@ -270,13 +268,13 @@ A solve that passes is **not saved yet**. The dialog shows the RMS error and dra
 
 - **Save calibration** saves it, closes the dialog, and the overlay starts using it. The Lens Calibration status line reads "Guided calibration saved: …" and a notification is added.
 - **Adjust stars** returns to identifying stars without saving, with everything you identified intact.
-- **Drag a blue circle onto its star** when one of the predictions has missed. That discards the unsaved result, returns to identifying stars, and adds that star to your list at the position you dropped it — then click **Solve** again to refit with it. (New in the next release — not available in version 3.7.8 or earlier.)
+- **Drag a blue circle onto its star** when one of the predictions has missed. That discards the unsaved result, returns to identifying stars, and adds that star to your list at the position you dropped it — then click **Solve** again to refit with it. (Added in version v3.7.9.)
 
 Closing the dialog with stars identified asks for confirmation first, so a stray Esc does not discard your work.
 
 ### Outlier rescue
 
-> **New in the next release** — not available in version 3.7.8 or earlier. The list now shows what the solver made of every star, and a star you excluded yourself is told apart from one the solver left out.
+> Added in version v3.7.9. The list now shows what the solver made of every star, and a star you excluded yourself is told apart from one the solver left out.
 
 If the full set of stars does not fit well and you identified more than five, the solver tries leaving out one or two of them. If a left-out click actually sits on a different bright star, it is re-identified as that star and kept. The result explains what happened, and the list shows the solver's verdict on every star after a passing solve:
 
@@ -347,7 +345,7 @@ Labels the 110 Messier objects (galaxies, nebulae, and star clusters). By defaul
 | Label text | Common name | **Common name** ("Andromeda Galaxy"), **Common name and number** ("Andromeda Galaxy (M31)") or **Catalogue number** ("M31"). An object without a common name always shows its number. |
 | Color | Orange | Label colour. |
 
-> **New in the next release** — not available in version 3.7.8 or earlier. **Label text** is new. Version 3.7.8 and earlier always show the common name and the number, as in "Andromeda Galaxy (M31)". Shorter labels also clash less often with their neighbours, so fewer of them are dropped for lack of room from one frame to the next. The label colour still tells Messier objects apart from the other layers.
+> Added in version v3.7.9. **Label text** is new. Version 3.7.8 and earlier always show the common name and the number, as in "Andromeda Galaxy (M31)". Shorter labels also clash less often with their neighbours, so fewer of them are dropped for lack of room from one frame to the next. The label colour still tells Messier objects apart from the other layers.
 
 ---
 
@@ -359,7 +357,7 @@ Labels objects from the NGC and IC catalogues. The catalogue holds several thous
 |---------|---------|-------|-------------|
 | Show NGC objects (mag filtered) | Off | — | Show NGC/IC object labels. |
 | Max magnitude | 8 | 5–12 | Only label objects at least this bright. Lower values show fewer, brighter objects. |
-| Label text | Common name | — | As for Messier objects (an object listed under several names shows the first): **Common name** ("Owl Cluster"), **Common name and number** ("Owl Cluster (NGC0457)") or **Catalogue number** ("NGC0457"). New in the next release; 3.7.8 and earlier always show both. |
+| Label text | Common name | — | As for Messier objects (an object listed under several names shows the first): **Common name** ("Owl Cluster"), **Common name and number** ("Owl Cluster (NGC0457)") or **Catalogue number** ("NGC0457"). Added in version v3.7.9; 3.7.8 and earlier always show both. |
 | Color | Green | — | Label colour. |
 
 Objects that also have a Messier number are skipped, since the Messier layer already labels them.
@@ -380,8 +378,6 @@ Positions are computed from simplified orbital theory (Meeus, *Astronomical Algo
 ---
 
 ## NINA Target
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 Marks where NINA is imaging: the outline of your imaging camera's field of view, turned to the camera's rotation, and the target's name beside it. The outline and the name have a dark border so they stay readable against the Milky Way and a bright sky, and the outline gets thicker with the name on a larger output image. When there is no field of view to draw, a reticle (a ring with four ticks) marks the target instead. The target, its coordinates and the field of view come from the [NINA plugin](NINA-Integration) with target reporting turned on; nothing is drawn until it has sent a target.
 
@@ -409,13 +405,13 @@ These settings are on the **NINA Target** card of the All-Sky page.
 - Each label is tried in several positions around its object (right, left, below, above, then the diagonals) and never covers the object it names. A label that would overlap one already placed is dropped. Placement order is the NINA target's name, constellation abbreviations, then planets and the Moon, bright stars, Messier, and NGC/IC.
 - Planet and Moon names follow the same rule as star names: right of the object first, at the same distance. No label is placed over any star or planet.
 
-  > **New in the next release** — not available in version 3.7.8 or earlier. Planets used to be labelled last, so a star's name could take the place to a planet's right and push the planet's name to its left, or hide it.
+  > Added in version v3.7.9. Planets used to be labelled last, so a star's name could take the place to a planet's right and push the planet's name to its left, or hide it.
 - **The Moon's label sits outside its glare.** When the Moon is bright enough to saturate the image, the app measures how far its glare reaches and puts the name just beyond it, centred on the Moon as it appears in the frame (even when the calibration is a little off there). The name has a dark outline so it reads on a bright moonlit sky, and no other label is drawn inside the glare. A Moon that saturates the frame is shown even where the recent frames could not judge the sky, because its glare hides every star around it. A Moon behind the pier or in thick cloud is labelled like a planet.
 
-  > **New in the next release** — not available in version 3.7.8 or earlier. The Moon's name used to sit a few pixels from its centre, inside the glare, where it could not be read.
+  > Added in version v3.7.9. The Moon's name used to sit a few pixels from its centre, inside the glare, where it could not be read.
 - **The NINA target's name is placed first**, before any constellation, star or planet, so it normally sits to the right of the target, and every other label keeps clear of the marker and the field-of-view box. Only the Moon's glare is kept clear before it. Near the edge of the image, or right beside the Moon, the name moves to another side, and it is left out if no side is free.
 
-  > **New in the next release** — not available in version 3.7.8 or earlier.
+  > Added in version v3.7.9.
 - **Max objects visible** picks the brightest visible objects.
 - Label text scales with the image size, so labels look the same at any resolution. **Label size** on the Enable Overlay card makes every label larger or smaller together.
 
@@ -432,7 +428,7 @@ From the next release the app also keeps an **equipment map**: a slow memory of 
 - **How it is used.** While the recent frames have a good view of the sky, a label needs both the recent frames and the map to agree that its spot is sky. When the recent frames lose the sky (cloud, the Moon), the map alone decides, so labels keep their places instead of disappearing. Before either exists — the first minutes of a first session — labels are placed anywhere inside the calibrated sky circle, so they may briefly sit on equipment.
 - **Resetting it.** **Reset Equipment Map…** on the Lens Calibration card forgets the map after a confirmation; use it after moving the camera or rearranging the rig. **Reset Calibration…** forgets it too. Changing the image size or the output crop starts a new map automatically.
 
-- **Labels behind equipment.** Turn on **Show labels behind equipment** on the Enable Overlay card to keep names on over the pier and the telescopes, for example to see where Polaris is when your pier hides it. Labels then cover the whole calibrated sky circle; the map keeps learning in the background, so turning the option off again picks up where it was. New in the next release.
+- **Labels behind equipment.** Turn on **Show labels behind equipment** on the Enable Overlay card to keep names on over the pier and the telescopes, for example to see where Polaris is when your pier hides it. Labels then cover the whole calibrated sky circle; the map keeps learning in the background, so turning the option off again picks up where it was. Added in version v3.7.9.
 The map is saved in the app's data folder as `allsky_obstruction.npz`, at most every ten minutes and when capture stops. Like the calibration, it belongs to one installation: do not copy it to another rig.
 
 ### Stable labels from frame to frame
@@ -466,8 +462,6 @@ On a recorded sequence with a simulated exposure ramp, this cut label changes fr
 
 #### Labels that come and go through the night
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
-
 On some rigs, labels still blinked on and off during the night while their stars stayed in plain view. This happened mostly in the gaps between detected stars and at the edge of the open sky. From the next release:
 
 - **Once a spot counts as open sky, it stays that way until most recent frames disagree.** A spot only becomes open sky when half the recent frames agree, but once it is open, it is only given up when fewer than a quarter still see sky there. A telescope parked across the view still loses its labels, about four frames later than before.
@@ -475,8 +469,6 @@ On some rigs, labels still blinked on and off during the night while their stars
 - **A label that drops out for a frame or two keeps its place** in **Max objects visible**, so the next object in line does not flash on and off in its spot.
 
 #### Labels in a timelapse
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 A timelapse squeezes the night: at 30-second exposures played back at 24 frames per second, every frame of video is half a minute of sky. A label that disappears for three frames is gone for an eighth of a second, which reads as a flicker however steady it looks in the live preview. In 3.7.8 and earlier a label that dropped out kept its place in **Max objects visible** for three frames but was not drawn during them, so it still blinked. From the next release the labels on screen are smoothed themselves:
 
@@ -513,7 +505,7 @@ The All-Sky page does not draw a compass. To show N/E/S/W on your image, add a *
 | Guided solve fails with a large error on one star | That star was misidentified or mis-clicked | It is marked in red and selected in the dialog, with your other stars kept: remove or re-identify it and solve again. Identify 6 or more stars so the solver can recover automatically. |
 | Guided Calibration shows **Check your stars** | The stars identified so far do not agree with each other or with the frame | Re-check the most recent star first. The warning clears as soon as the identifications agree. |
 | Badge is amber and reads **unconfirmed** or **check alignment** | Automatic refinements keep being rejected and recent frames could not confirm the saved calibration | See [When the badge turns amber](#when-the-badge-turns-amber). Often just cloud; if the overlay is visibly off on a clear night, run Guided Calibration. |
-| Badge reads **Preliminary — check alignment** and the overlay has stopped appearing | The saved calibration matched the stars no better than chance in two automatic runs in a row, so its labels are withheld | From the next release this is deliberate: automatic calibration restarts from scratch, and the overlay returns when a run clears the doubt or a new calibration is saved. On a clear night, run Guided Calibration to settle it now. Not in 3.7.8 or earlier, where the labels keep drawing. |
+| Badge reads **Preliminary — check alignment** and the overlay has stopped appearing | The saved calibration matched the stars no better than chance in two automatic runs in a row, so its labels are withheld | From version 3.7.9 this is deliberate: automatic calibration restarts from scratch, and the overlay returns when a run clears the doubt or a new calibration is saved. On a clear night, run Guided Calibration to settle it now. Not in 3.7.8 or earlier, where the labels keep drawing. |
 
 ---
 
