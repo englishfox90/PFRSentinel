@@ -99,8 +99,7 @@ If a refresh fails after the cache has expired, weather tokens show `?` until th
 
 ## Units
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
-> Choosing **Imperial** now saves and applies; in 3.7.8 and earlier it was always saved as metric.
+> Added in version v3.7.9. Choosing **Imperial** now saves and applies; in 3.7.8 and earlier it was always saved as metric.
 
 | Option | Temperature | Wind Speed |
 |--------|-------------|------------|

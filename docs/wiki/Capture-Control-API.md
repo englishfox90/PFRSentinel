@@ -75,7 +75,7 @@ The control routes live under `/capture` by default. The base path can be change
 | `POST` | `/capture/start` | Start capture in Sentinel's configured mode (camera or directory watch). |
 | `POST` | `/capture/stop` | Stop capture. |
 | `GET` | `/capture` | Current capture state plus a readiness flag, without issuing a command. |
-| `POST` | `/nina/target` | Report the target your imaging rig is on, for the all-sky overlay (see [below](#post-ninatarget)). Not available in version 3.7.8 or earlier. |
+| `POST` | `/nina/target` | Report the target your imaging rig is on, for the all-sky overlay (see [below](#post-ninatarget)). Added in version v3.7.9. |
 
 All of them need the `Authorization: Bearer <token>` header. A query string on the path is ignored on every route. A trailing slash is ignored only on the `POST` routes, so `POST /capture/start/` works but `GET /capture/` returns `404`. A `POST` to any other path returns `404`. `/nina/target` is a fixed path: it does not move with `webserver_control_path`.
 
@@ -169,8 +169,6 @@ Returns the current state without changing anything. Use it to pre-flight a clie
 ---
 
 ## POST /nina/target
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 Tells Sentinel which target your main telescope is imaging, so the [All-Sky Overlay](All-Sky-Overlay) can mark it and label it with its name. When it can, the overlay draws the imaging camera's field of view as a box with a small cross at its centre; when it can't — no field of view sent, part of the box below the horizon, or the box under 4 pixels across at the output size — it draws a reticle on the target instead. The [NINA plugin](NINA-Integration) sends this for you from the running sequence; this section is for writing your own client.
 

@@ -19,8 +19,6 @@ A control bar at the top of the tab contains the following:
 
 ### Filtering past and new messages
 
-> **New in the next release** — not available in version 3.7.8 or earlier.
-
 Changing the level or the search text re-filters the messages already received, and new messages that arrive afterwards are filtered the same way. For example, typing `NINA` with the level at **DEBUG** shows every NINA message from the last 10,000 lines, then adds each new one as it is logged. Clearing the search box brings the full view back. The search reaches further back than the 1,000 lines the view holds, so a rare message pushed out by DEBUG lines can still be found.
 
 In version 3.7.8 and earlier, filters only applied to messages arriving after the change, so you had to click **Clear** to start with a filtered view. The **Level** list also offered **Info+** and **All**, and **INFO**, **WARN**, **ERROR** and **DEBUG** each showed only that one level. A saved **All** now opens as **DEBUG**, and **Info+** opens as **INFO**.
@@ -68,8 +66,6 @@ When asking for help, attach a [diagnostics bundle](Diagnostics-Export) rather t
 ---
 
 ## Resource Lines
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 PFR Sentinel writes a `Resources:` line to the log at start-up, when capture starts or stops, and whenever the app's memory use moves noticeably (about every 30 minutes otherwise). It shows two memory figures that mean different things:
 

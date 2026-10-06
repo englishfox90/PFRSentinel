@@ -16,7 +16,7 @@ A panel in NINA's **Imaging** tab, titled **PFR Sentinel**:
 | Frame line | How old the last frame is and its file name. |
 | **Health** | Sentinel's overall capture health — **OK**, **IDLE**, **DEGRADED**, **RECOVERING** or **ERROR** — with Sentinel's own explanation underneath when there is one. See [Capture Control API](Capture-Control-API#health-block) for what each means. |
 | Statistics | **Capture** (state and mode), **Interval**, **Last frame**, **Next frame**. A **Recovery** row appears only while the camera is recovering or has needed recovery attempts. |
-| **All-sky target** | What the plugin last sent for the [all-sky overlay](#target-on-the-all-sky-overlay): whether it is sending, idle (no target running), off, or not reaching Sentinel, and while sending, the target's name, RA / Dec, field of view, rotation and how long ago Sentinel last accepted it. **Field: none (reticle)** means no field of view could be worked out, so Sentinel draws a reticle instead of a box. When a send fails, the reason is shown underneath in amber. Beside the statistics when the panel is wide enough, underneath them when it is not. *New in the next release.* |
+| **All-sky target** | What the plugin last sent for the [all-sky overlay](#target-on-the-all-sky-overlay): whether it is sending, idle (no target running), off, or not reaching Sentinel, and while sending, the target's name, RA / Dec, field of view, rotation and how long ago Sentinel last accepted it. **Field: none (reticle)** means no field of view could be worked out, so Sentinel draws a reticle instead of a box. When a send fails, the reason is shown underneath in amber. Beside the statistics when the panel is wide enough, underneath them when it is not. *Added in version v3.7.9.* |
 | **Start** / **Stop** | Start or stop Sentinel capture. Both buttons are disabled while a command is waiting for Sentinel to confirm, and whenever capture control is unavailable — a line underneath always says why. |
 | **Reconnect** | Re-reads Sentinel's settings and checks in immediately. Use it after changing a setting in Sentinel, such as turning capture control on: the panel's regular checks don't re-read Sentinel's settings. |
 | Endpoint line | The Sentinel address the panel is talking to. It turns amber when an address override is in force. |
@@ -43,8 +43,6 @@ Both are safe to re-run: starting a capture that is already running, or stopping
 A scheduled capture that is enabled but waiting for its capture window counts as started, so **Start Sentinel Capture** will not hold your sequence until the window opens.
 
 ### Target on the all-sky overlay
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 While a sequence is imaging a target, the plugin tells Sentinel which target it is, and Sentinel marks it on the [All-Sky Overlay](All-Sky-Overlay#nina-target): its name and its field of view as a box, or a reticle (a ring with four ticks) when no box can be drawn. You can see at a glance where the main scope is pointed against the clouds, the Moon and the trees.
 
@@ -77,7 +75,7 @@ The marker is only drawn when the all-sky overlay is turned on and the lens is c
 | Same machine | NINA and Sentinel must run on the same PC, under the same Windows user account. See [Sentinel on another machine](#sentinel-on-another-machine). |
 | Web server | **Enable Web Server** turned on in the **Web Server** card of the [Output Settings](Output-Settings) tab. |
 | Capture control | **Enable Capture Control API** turned on in the same card. The live frame and health work without it, but Start/Stop and the sequencer instructions need it. |
-| Target on the all-sky overlay | Sentinel newer than 3.7.8 (the next release) with plugin version 1.2.0.0 or later — the plugin bundled with that Sentinel. Also needs capture control, as above, and a calibrated [All-Sky Overlay](All-Sky-Overlay). An older Sentinel ignores the target and the plugin notes it once in NINA's log. |
+| Target on the all-sky overlay | Sentinel 3.7.9 or newer with plugin version 1.2.0.0 or later — the plugin bundled with that Sentinel. Also needs capture control, as above, and a calibrated [All-Sky Overlay](All-Sky-Overlay). An older Sentinel ignores the target and the plugin notes it once in NINA's log. |
 
 ---
 
@@ -134,8 +132,6 @@ Turning capture control on is different. The panel keeps the settings it last re
 ### Plugin option: base URL override
 
 NINA's options page for the PFR Sentinel plugin has a **Sentinel base URL override** setting (for example `http://192.168.1.20:8080`). Leave it empty on the observatory PC. It changes only the address the plugin talks to — the token still comes from the local Sentinel settings — and it applies within a few seconds without a restart. The address must start with `http://` or `https://`.
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 The same page has the **Send the current sequencer target to Sentinel** switch — see [Target on the all-sky overlay](#target-on-the-all-sky-overlay).
 
@@ -241,8 +237,6 @@ The panel always explains why the buttons are disabled:
 | Timed out waiting for capture to reach 'running'… | The camera took longer than **Wait up to (s)**. Raise it. |
 
 ### No target marker on the all-sky view
-
-> **New in the next release** — not available in version 3.7.8 or earlier.
 
 Work down the list:
 
