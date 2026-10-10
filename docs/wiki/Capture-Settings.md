@@ -25,11 +25,40 @@ ZWO Camera mode captures directly from a connected ZWO ASI camera. The settings 
 
 | Setting | Description |
 |---------|-------------|
-| SDK Path | Path to the ZWO SDK file `ASICamera2.dll`. By default this points at the copy installed with PFR Sentinel, so most users never need to change it. **Browse** opens a file picker filtered to DLL files. |
+| SDK Path | Path to the ZWO SDK library: `ASICamera2.dll` on Windows, `libASICamera2.dylib` on macOS, `libASICamera2.so` on Linux. On Windows this points at the copy installed with PFR Sentinel, so most users never need to change it. **Browse** opens a file picker filtered to that kind of file. |
 | Camera | Drop-down of detected cameras, listed by model name (for example `ZWO ASI676MC`). |
 | Detect | Scans for connected cameras in the background. The button reads **Detecting...** while the scan runs. |
 
-On startup, PFR Sentinel scans for cameras automatically if the SDK Path points at a valid file. If the SDK file can't be found, the startup scan is skipped without a message. Clicking **Detect** then shows a **Camera Detection Failed** message explaining why.
+On startup, PFR Sentinel scans for cameras automatically if it can find the SDK library. If it can't, the startup scan is skipped without a message. Clicking **Detect** then shows a **Camera Detection Failed** message explaining why, and the log lists every folder that was searched.
+
+#### Where the SDK library is looked for
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+If SDK Path is empty or points at a file that no longer exists, PFR Sentinel searches for the library itself, in this order, and the log says which copy it used:
+
+1. The PFR Sentinel program folder.
+2. An `sdk` folder inside the PFR Sentinel data folder (`%LOCALAPPDATA%\PFRSentinel\sdk` on Windows, `~/Library/Application Support/PFRSentinel/sdk` on macOS, `~/.local/share/PFRSentinel/sdk` on Linux).
+3. The usual system library folders: `/usr/local/lib` and the Homebrew folders on macOS; `/usr/lib`, `/usr/local/lib` and the distribution's architecture folder on Linux.
+
+#### ZWO cameras on macOS and Linux
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+PFR Sentinel runs from source on macOS and Linux, and the ZWO library is not included there. Camera capture on these systems has not yet been confirmed on real hardware, so treat it as experimental.
+
+1. Get the library. On Linux, if INDI's ZWO driver (`libasi`) is installed, it is already there and nothing more is needed. Otherwise download the **ASI Camera SDK (Linux & Mac)** from the ZWO website's developer page, and take the file for your computer: `lib/mac/libASICamera2.dylib`, or `lib/x64/` (Intel/AMD PC) or `lib/armv8/` (64-bit Raspberry Pi and similar) for `libASICamera2.so`. Use a current SDK — old copies found elsewhere online do not know newer cameras such as the ASI676MC.
+2. Copy it into the `sdk` folder listed above, or anywhere you like and point **SDK Path** at it.
+3. Linux only: install the udev rule that ships with PFR Sentinel, then unplug and replug the camera.
+
+   ```bash
+   sudo install -m 644 installer/linux/asi.rules /etc/udev/rules.d/
+   sudo udevadm control --reload-rules
+   ```
+
+   Without it the camera is listed but will not open unless PFR Sentinel runs as root, and long exposures can time out or come back corrupted because the USB buffer is too small. PFR Sentinel writes a warning to the log when either setting is missing.
+
+The USB reset step of camera recovery (**Revive**) is Windows-only. On macOS and Linux, recovery reconnects the camera and can restart the app, but cannot power-cycle the USB device.
 
 **Which camera gets selected:**
 

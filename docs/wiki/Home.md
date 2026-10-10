@@ -94,7 +94,7 @@ The navigation rail groups the pages:
 ## System Requirements
 
 - Windows 10 or later
-- For ZWO camera mode: ASICamera2.dll (bundled, or a folder you choose)
+- For ZWO camera mode: ASICamera2.dll (bundled, or a folder you choose). On macOS and Linux, see [ZWO cameras on macOS and Linux](Capture-Settings#zwo-cameras-on-macos-and-linux)
 - For timelapse: ffmpeg (installable via winget from the Timelapse tab)
 - For weather data: a free OpenWeatherMap API key (see [Weather Setup](Weather-Setup))
 - For the all-sky overlay and sun-based timelapse windows: your latitude and longitude, entered on the Settings tab
