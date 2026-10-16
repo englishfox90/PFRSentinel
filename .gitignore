@@ -61,9 +61,9 @@ releases/
 # Local DLLs (user-specific paths)
 # Keep ASICamera2.dll in source for bundling
 # *.dll
-# The macOS/Linux SDK libraries are per-CPU downloads from ZWO, dropped at the
-# repo root for a source run or a build — never committed (*.so is ignored above).
-libASICamera2.dylib
+# libASICamera2.dylib (universal) is committed, like the DLL — update it with
+# scripts/update_zwo_sdk.py. The Linux library is a per-CPU download from ZWO,
+# dropped at the repo root for a source run or a build, never committed.
 libASICamera2.so*
 
 # User Data

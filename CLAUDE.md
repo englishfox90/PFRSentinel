@@ -161,6 +161,7 @@ python main.py
 # Build
 .\build_sentinel.bat              # PyInstaller exe (Python 3.13 needs an email module workaround)
 .\build_sentinel_installer.bat    # Inno Setup installer
+./build_sentinel_macos.sh         # macOS: PFR Sentinel.app + .dmg (Apple silicon, ad-hoc signed)
 ```
 
 ## Testing
@@ -253,10 +254,21 @@ The Windows build job also compiles the NINA plugin with `dotnet` (its only
 automated check — there is no C# test suite) and asserts the exe's FileVersion
 matches `version.py`.
 
-macOS and Linux get `scripts/ci/check_spec_parses.py` instead of a build: it
+Linux gets `scripts/ci/check_spec_parses.py` instead of a build: it
 executes the spec with the PyInstaller classes stubbed, which catches a
-Windows-only import or a one-OS `datas` entry in seconds. Actual mac/Linux
-packaging is issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
+Windows-only import or a one-OS `datas` entry in seconds. macOS gets a real
+dev build (`macOS dev build`, Apple-silicon runner) that runs
+`build_sentinel_macos.sh` — the same script a local Mac build uses — and
+uploads the `.dmg`. That script stages the ZWO SDK with
+`scripts/ci/stage_zwo_sdk_macos.py`: the arm64 slice of the committed universal
+`libASICamera2.dylib` (ZWO's official build, updated with
+`scripts/update_zwo_sdk.py`), with Homebrew's libusb beside it, its libusb
+reference rewritten to `@rpath` with an `@loader_path` rpath, and both
+re-signed. The committed file is never bundled as-is: its arm64 slice links
+libusb at an absolute Homebrew path a user's Mac may not have.
+The job is not required by the ruleset and the `.app` is not notarized or
+published to the dev prerelease yet; the rest of mac/Linux packaging is
+issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
 apart from `requirements-dev.txt` so the test matrix doesn't install it three
 times.
 
@@ -334,6 +346,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
 | `test_autostart_posix.py` | 25 | `autostart_macos` / `autostart_linux` / `launch_command` / POSIX `app_restart` — LaunchAgent plist relaunches on crash but not on a clean quit, written atomically, never calls `launchctl`, foreign/garbage plist reads as off; XDG entry and Exec quoting; dispatch per OS; the real `/bin/sh` waiter relaunches only after the PID exits (skipped on Windows) |
+| `test_stage_zwo_sdk_macos.py` | 7 | `scripts/ci/stage_zwo_sdk_macos.py` — finds ZWO's absolute Homebrew libusb reference (and an already-`@rpath` one) in `otool -L` output, never mistakes the library's own id line, reads every `LC_RPATH`, licence and source are in the repo, refuses to run off macOS |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
 | `test_zwo_sdk_library.py` | 35 | `zwo_sdk_library` — library name per OS, search order (bundled → per-user `sdk/` → system, multiarch first), versioned `.so`/`.dylib`, symlink stubs skipped, foreign-platform path detection, help text |
 | `test_zwo_sdk_loading.py` | 9 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; the Start Capture index resolver does the same; `Config` rewrites only another platform's SDK path |
