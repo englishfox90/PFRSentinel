@@ -14,7 +14,7 @@ WARN_CAP = 600
 EXCEPTIONS = {
     "ml/train_sky_classifier.py": 743,
     "ui/panels/live_monitoring.py": 723,
-    "tests/test_camera.py": 1430,
+    "tests/test_camera.py": 1361,
     # Frozen 2026-09-15 when CI started auditing every tracked file.
     "services/camera/camera_connection.py": 788,
     "scripts/dev/image/analyze_raw.py": 1284,

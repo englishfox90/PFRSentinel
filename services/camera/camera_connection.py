@@ -49,7 +49,7 @@ class CameraConnection:
         Initialize connection manager.
 
         Args:
-            sdk_path: Path to ASICamera2.dll (optional, will search defaults)
+            sdk_path: Path to the ZWO SDK library (optional, will search defaults)
             logger: Callback function for logging messages
         """
         self.sdk_path = sdk_path
@@ -153,21 +153,18 @@ class CameraConnection:
             self.asi = asi
             self.log("zwoasi module imported successfully")
 
-            if self.sdk_path and os.path.exists(self.sdk_path):
-                self.log(f"Attempting SDK init with configured path: {self.sdk_path}")
-                asi.init(self.sdk_path)
-                self.log(f"✓ ZWO SDK initialized successfully from: {self.sdk_path}")
-            else:
-                # Try default locations
-                self.log("SDK path not configured or not found, trying default location")
-                if os.path.exists('ASICamera2.dll'):
-                    self.log("Found ASICamera2.dll in application directory")
-                    asi.init('ASICamera2.dll')
-                    self.log("✓ ZWO SDK initialized from: ASICamera2.dll")
-                else:
-                    self.log("ERROR: ASICamera2.dll not found in application directory")
-                    self.log("Please configure SDK path in Capture tab settings")
-                    return False
+            from ..zwo_sdk_library import resolve_sdk_path
+            from ..host_platform import zwo_sdk_library_name
+            library = resolve_sdk_path(self.sdk_path)
+            if not library:
+                self.log(f"ERROR: {zwo_sdk_library_name()} not found "
+                         f"(configured: {self.sdk_path or 'none'})")
+                self.log("Please configure SDK path in Capture tab settings")
+                return False
+            if library != self.sdk_path:
+                self.log(f"SDK path not configured or not usable here, using: {library}")
+            asi.init(library)
+            self.log(f"✓ ZWO SDK initialized successfully from: {library}")
 
             return True
 
