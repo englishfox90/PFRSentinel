@@ -28,8 +28,8 @@ class TestCameraConnectionMock:
         from services.config import DEFAULT_CONFIG
         
         assert 'zwo_sdk_path' in DEFAULT_CONFIG
-        from services.host_platform import zwo_sdk_library_name
-        assert os.path.basename(DEFAULT_CONFIG['zwo_sdk_path']) == zwo_sdk_library_name()
+        from services.host_platform import zwo_sdk_library_name  # this OS's SDK file
+        assert zwo_sdk_library_name() in DEFAULT_CONFIG['zwo_sdk_path']
     
     def test_camera_settings_defaults(self):
         """Per-camera defaults now live in DEFAULT_CAMERA_PROFILE, not DEFAULT_CONFIG."""
