@@ -266,9 +266,13 @@ uploads the `.dmg`. That script stages the ZWO SDK with
 reference rewritten to `@rpath` with an `@loader_path` rpath, and both
 re-signed. The committed file is never bundled as-is: its arm64 slice links
 libusb at an absolute Homebrew path a user's Mac may not have.
-The job is not required by the ruleset and the `.app` is not notarized or
-published to the dev prerelease yet; the rest of mac/Linux packaging is
-issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
+The job is not required by the ruleset and the `.app` is not notarized.
+`publish-dev` attaches its `.dmg` to `dev-latest` as
+`PFRSentinel-dev-unsigned-macos-arm64.dmg` beside the Windows installer, and
+the release notes and Discussions comment link it (`dev_build_notes.py --mac`).
+A failed macOS build doesn't block the Windows publish: it goes out without
+the `.dmg` and without the link. The rest of macOS packaging is issue #41,
+Linux packaging #163. PyInstaller is pinned in `requirements-build.txt`, kept
 apart from `requirements-dev.txt` so the test matrix doesn't install it three
 times.
 
@@ -328,7 +332,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_coordinate_hemisphere.py` | 24 | `coordinate_hemisphere` + `config_migrate` — unsigned DMS is read north/east and the typed text kept under `weather.hemisphere_unconfirmed`, clock-based longitude default, applying an answer signs the decimal and clears the mark, the startup prompt saves on Confirm and keeps the question on Ask me later, the diagnostics bundle redacts the typed text |
 | `test_hemisphere_dialog.py` | 4 | `HemisphereDialog` — one radio pair per pending field, defaults preselected, typed text shown (offscreen Qt) |
 | `test_update_checker.py` | 12 | `update_checker` — prereleases/drafts and the dev asset are never offered; `-dev` ranks below its release |
-| `test_dev_build_notes.py` | 12 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list |
+| `test_dev_build_notes.py` | 15 | `scripts/ci/dev_build_notes.py` — dev tag stays off `v*`, release/discussion text states the risks and carries the change list; the macOS `.dmg` link appears only with `--mac` (a failed Mac build publishes no dead link), and its name can never pass for an installer |
 | `test_dev_build_changelog.py` | 7 | `scripts/ci/dev_build_changelog.py` — PRs since the last release via commits, grouping, delta since the previous dev build, API failure never blocks |
 | `test_dev_build_discussion.py` | 9 | `scripts/ci/dev_build_discussion.py` — one thread per release cycle, retire/reopen, never edits a post (GITHUB_TOKEN is refused updateDiscussion), never touches people's threads |
 | `test_set_dev_version.py` | 11 | `scripts/ci/set_dev_version.py` — dev version base/counter, Windows FileVersion, spec parses the same way |

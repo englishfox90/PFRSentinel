@@ -16,6 +16,9 @@ repeated there:
   ``setup`` in its name. The updater polls ``/releases/latest``, which excludes
   prereleases, so this is the second line of defence, not the first. The name
   is fixed so its download URL always serves the newest build.
+- ``MAC_ASSET_NAME`` likewise: a fixed name for the Apple-silicon ``.dmg``.
+  It is optional per build: when the macOS job fails, Windows still
+  publishes, and ``--mac`` is left off so no text links to a missing file.
 - ``discussion_title`` is how dev_build_discussion.py finds a cycle's thread
   again. Renaming a thread on GitHub makes the next publish open a new one.
 
@@ -34,11 +37,13 @@ REPO = "englishfox90/PFRSentinel"
 
 TAG = "dev-latest"
 ASSET_NAME = "PFRSentinel-dev-unsigned-installer.exe"
+MAC_ASSET_NAME = "PFRSentinel-dev-unsigned-macos-arm64.dmg"
 DISCUSSION_CATEGORY = "Dev builds"
 DISCUSSION_TITLE_PREFIX = "Dev builds: "
 
 RELEASE_URL = f"https://github.com/{REPO}/releases/tag/{TAG}"
 ASSET_URL = f"https://github.com/{REPO}/releases/download/{TAG}/{ASSET_NAME}"
+MAC_ASSET_URL = f"https://github.com/{REPO}/releases/download/{TAG}/{MAC_ASSET_NAME}"
 PRODUCTION_URL = f"https://github.com/{REPO}/releases/latest"
 
 
@@ -64,12 +69,23 @@ def _source_line(sha: str, ref: str, pr: str | None) -> str:
     return f"Built from {commit} ({origin})"
 
 
+def _downloads(mac: bool) -> str:
+    links = f"Windows: [{ASSET_NAME}]({ASSET_URL})"
+    if mac:
+        links += f" · macOS (Apple silicon): [{MAC_ASSET_NAME}]({MAC_ASSET_URL})"
+    return links
+
+
 def before_you_install() -> str:
     return "\n".join([
         "### Before you install",
         "",
         "- **Windows SmartScreen will warn.** The installer is unsigned. Choose "
         "*More info* → *Run anyway*.",
+        "- **macOS: Apple silicon only, and not notarized.** Drag the app to "
+        "Applications, then clear the download flag once in Terminal: "
+        "`xattr -dr com.apple.quarantine \"/Applications/PFR Sentinel.app\"`. "
+        "Settings live in `~/Library/Application Support/PFRSentinel`.",
         "- **Raw capture is on by default.** On a fresh config a dev build writes a "
         "raw FITS file and a calibration JSON for *every frame* into the `raw_debug` "
         "folder. On a rig capturing all night that adds up to real disk. Turn it off "
@@ -87,14 +103,14 @@ def before_you_install() -> str:
 
 
 def release_body(version: str, sha: str, ref: str, pr: str | None, run_url: str,
-                 discussion_url: str, changelog: str) -> str:
+                 discussion_url: str, changelog: str, mac: bool = False) -> str:
     return "\n".join([
         "> [!WARNING]",
         "> Unsigned, unsupported test build of PFR Sentinel. Not a release.",
         "",
         f"{_source_line(sha, ref, pr)}, version {version}. [Build log]({run_url}).",
         "",
-        f"Download: [{ASSET_NAME}]({ASSET_URL}). That link always serves the newest "
+        f"Download: {_downloads(mac)}. These links always serve the newest "
         "dev build, and this release is replaced each time one is published.",
         "",
         f"Feedback and questions go in [{discussion_title(version)}]({discussion_url}).",
@@ -118,7 +134,7 @@ def discussion_intro(version: str) -> str:
         "have not been released yet. A new build is published every time a change "
         "merges, and announced as a comment below, so subscribe to hear about them.",
         "",
-        f"- **Download the newest build:** [{ASSET_NAME}]({ASSET_URL})",
+        f"- **Download the newest build:** {_downloads(mac=True)}",
         f"- **Everything in it:** [the dev prerelease notes]({RELEASE_URL}) list every "
         f"pull request merged since the last release, and so does the newest comment below.",
         "",
@@ -152,11 +168,14 @@ def _changes_section(delta: str, changelog: str) -> list[str]:
 
 
 def build_comment(version: str, sha: str, ref: str, pr: str | None, run_url: str,
-                  delta: str, changelog: str) -> str:
+                  delta: str, changelog: str, mac: bool = False) -> str:
+    downloads = f"[Windows]({ASSET_URL})"
+    if mac:
+        downloads += f" · [macOS (Apple silicon)]({MAC_ASSET_URL})"
     return "\n".join([
         f"**New dev build: {version}.** {_source_line(sha, ref, pr)}.",
         "",
-        f"[Download]({ASSET_URL}) · [Release notes]({RELEASE_URL}) · [Build log]({run_url})",
+        f"Download: {downloads} · [Release notes]({RELEASE_URL}) · [Build log]({run_url})",
         "",
         *_changes_section(delta, changelog),
         "",
@@ -177,6 +196,7 @@ def constants() -> str:
     return "\n".join([
         f"DEV_TAG={TAG}",
         f"DEV_ASSET_NAME={ASSET_NAME}",
+        f"DEV_MAC_ASSET_NAME={MAC_ASSET_NAME}",
         f"DEV_DISCUSSION_CATEGORY={DISCUSSION_CATEGORY}",
         "",
     ])
@@ -196,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     build_args.add_argument("--ref", required=True)
     build_args.add_argument("--pr", default="", help="PR number; empty when none")
     build_args.add_argument("--run-url", required=True)
+    build_args.add_argument("--mac", action="store_true",
+                            help="the macOS .dmg was published with this build")
 
     sub.add_parser("title", parents=[build_args], help="Release title")
     release = sub.add_parser("release", parents=[build_args], help="Release body")
@@ -215,11 +237,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "release":
         text = release_body(args.version, args.sha, args.ref, pr, args.run_url,
                             args.discussion_url,
-                            args.changelog_file.read_text(encoding="utf-8"))
+                            args.changelog_file.read_text(encoding="utf-8"), mac=args.mac)
     else:
         text = build_comment(args.version, args.sha, args.ref, pr, args.run_url,
                              args.delta_file.read_text(encoding="utf-8"),
-                             args.changelog_file.read_text(encoding="utf-8"))
+                             args.changelog_file.read_text(encoding="utf-8"), mac=args.mac)
 
     sys.stdout.write(text)
     return 0

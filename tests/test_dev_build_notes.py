@@ -64,6 +64,41 @@ def test_release_body_states_the_risks_the_source_and_the_changes():
     assert "### What's in this build\n\n**Changes**" in body
 
 
+def test_mac_link_appears_only_when_the_dmg_was_published():
+    notes = load_notes()
+    args = ("3.7.10-dev.11", SHA, "main", "164", "https://run.invalid")
+    without = notes.release_body(*args, "https://discussion.invalid", CHANGELOG)
+    with_mac = notes.release_body(*args, "https://discussion.invalid", CHANGELOG, mac=True)
+    assert notes.MAC_ASSET_URL not in without
+    assert f"[{notes.MAC_ASSET_NAME}]({notes.MAC_ASSET_URL})" in with_mac
+    assert f"[{notes.ASSET_NAME}]({notes.ASSET_URL})" in with_mac
+    comment = notes.build_comment(*args, CHANGELOG, CHANGELOG, mac=True)
+    assert f"[macOS (Apple silicon)]({notes.MAC_ASSET_URL})" in comment
+    assert notes.MAC_ASSET_URL not in notes.build_comment(*args, CHANGELOG, CHANGELOG)
+
+
+def test_mac_flag_reaches_the_text_from_the_cli(tmp_path, capsys):
+    notes = load_notes()
+    log = tmp_path / "changelog.md"
+    log.write_text(CHANGELOG, encoding="utf-8")
+    base = ["--version", "3.7.10-dev.11", "--sha", SHA, "--ref", "main",
+            "--run-url", "https://run.invalid"]
+    assert notes.main(["comment", *base, "--mac", "--delta-file", str(log),
+                       "--changelog-file", str(log)]) == 0
+    assert notes.MAC_ASSET_URL in capsys.readouterr().out
+    assert notes.main(["release", *base, "--discussion-url", "https://d.invalid",
+                       "--changelog-file", str(log)]) == 0
+    assert notes.MAC_ASSET_URL not in capsys.readouterr().out
+
+
+def test_mac_asset_is_never_mistaken_for_an_installer_or_a_release():
+    notes = load_notes()
+    name = notes.MAC_ASSET_NAME.lower()
+    assert name.endswith(".dmg") and "setup" not in name and "dev" in name
+    install = notes.before_you_install()
+    assert "Apple silicon" in install and "com.apple.quarantine" in install
+
+
 def test_intro_is_build_independent_and_asks_for_replies_per_build():
     notes = load_notes()
     intro = notes.discussion_intro("3.7.7-dev.14")
@@ -112,6 +147,7 @@ def test_constants_are_github_env_lines(capsys):
     keys = dict(line.split("=", 1) for line in lines)
     assert keys["DEV_TAG"] == notes.TAG
     assert keys["DEV_ASSET_NAME"] == notes.ASSET_NAME
+    assert keys["DEV_MAC_ASSET_NAME"] == notes.MAC_ASSET_NAME
     assert keys["DEV_DISCUSSION_CATEGORY"] == notes.DISCUSSION_CATEGORY
 
 
