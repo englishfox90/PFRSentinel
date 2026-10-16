@@ -32,9 +32,10 @@ name: Build
 # token that cannot publish at all. PRs keep their per-run artifacts.
 #
 # Windows and macOS (Apple silicon) produce artifacts; Linux gets a spec-parse
-# smoke test instead. The macOS app is ad-hoc signed and not notarized, and is
-# not published to the dev prerelease yet. Remaining packaging work (Linux
-# .deb, the udev rule, notarization, an Intel Mac build) is issue #41.
+# smoke test instead. The macOS app is ad-hoc signed and not notarized; its
+# .dmg is published to the dev prerelease beside the Windows installer when
+# its build succeeds. Remaining macOS packaging (notarization, an Intel build,
+# the updater) is issue #41; Linux packaging is #163.
 
 # Docs-only changes skip the build on both triggers: on a PR there is no binary
 # change to review, and on main it would republish an identical binary and
@@ -267,8 +268,11 @@ jobs:
   # repository check keeps a fork's own main pushes from trying to publish.
   publish-dev:
     name: Publish the dev prerelease
-    needs: [windows, freshness]
-    if: needs.freshness.outputs.current == 'true'
+    # Waits for the macOS build too, but publishes without it when it fails:
+    # a broken Mac build must not hold back the Windows installer. !cancelled()
+    # is what lets this run after a failed macos job.
+    needs: [windows, macos, freshness]
+    if: ${{ !cancelled() && needs.windows.result == 'success' && needs.freshness.outputs.current == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -310,6 +314,30 @@ jobs:
           fi
           mv "${found[0]}" "staging/$DEV_ASSET_NAME"
 
+      - uses: actions/download-artifact@v8
+        if: needs.macos.result == 'success'
+        with:
+          name: PFRSentinel-macos-arm64-dev-unsigned
+          path: staging-mac
+
+      # DEV_MAC_ARGS (--mac or empty) tells the text steps whether the .dmg is
+      # on the release, so nothing links to a file that wasn't published.
+      - name: Stage the macOS disk image under its stable name
+        if: needs.macos.result == 'success'
+        run: |
+          shopt -s nullglob
+          found=(staging-mac/*.dmg)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::warning::Expected one .dmg in the macOS artifact, found ${#found[@]}; publishing Windows only"
+            exit 0
+          fi
+          mv "${found[0]}" "staging/$DEV_MAC_ASSET_NAME"
+          echo "DEV_MAC_ARGS=--mac" >> "$GITHUB_ENV"
+
+      - name: Note a missing macOS build
+        if: needs.macos.result != 'success'
+        run: echo "::warning::The macOS dev build did not succeed (${{ needs.macos.result }}); publishing Windows only"
+
       # Before the release is replaced: the previous dev-latest tag marks where
       # the last dev build stopped, which is what the discussion comment's
       # "new since the previous dev build" list is measured from.
@@ -331,7 +359,7 @@ jobs:
         run: |
           pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' || true)
           echo "DEV_PR=$pr" >> "$GITHUB_ENV"
-          notes=(--version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$pr" --run-url "$RUN_URL")
+          notes=(--version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$pr" --run-url "$RUN_URL" $DEV_MAC_ARGS)
           python3 scripts/ci/dev_build_notes.py release "${notes[@]}" \
             --discussion-url "$DISCUSSION_URL" --changelog-file changelog.md > release.md
           title=$(python3 scripts/ci/dev_build_notes.py title "${notes[@]}")
@@ -345,7 +373,11 @@ jobs:
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$DEV_TAG"
           fi
 
-          gh release create "$DEV_TAG" "staging/$DEV_ASSET_NAME" \
+          assets=("staging/$DEV_ASSET_NAME")
+          if [ -n "${DEV_MAC_ARGS:-}" ]; then
+            assets+=("staging/$DEV_MAC_ASSET_NAME")
+          fi
+          gh release create "$DEV_TAG" "${assets[@]}" \
             --target "$GITHUB_SHA" --prerelease --latest=false \
             --title "$title" --notes-file release.md
 
@@ -355,7 +387,7 @@ jobs:
         run: |
           python3 scripts/ci/dev_build_notes.py comment \
             --version "$DEV_VERSION" --sha "$GITHUB_SHA" --ref "$GITHUB_REF_NAME" --pr "$DEV_PR" \
-            --run-url "$RUN_URL" --delta-file delta.md --changelog-file changelog.md > comment.md
+            --run-url "$RUN_URL" $DEV_MAC_ARGS --delta-file delta.md --changelog-file changelog.md > comment.md
           python3 scripts/ci/dev_build_discussion.py comment --id "$DISCUSSION_ID" --body-file comment.md
 
       - name: Summary
@@ -366,6 +398,9 @@ jobs:
             echo "### Dev prerelease $DEV_VERSION published"
             echo
             echo "- Download: https://github.com/$GITHUB_REPOSITORY/releases/download/$DEV_TAG/$DEV_ASSET_NAME"
+            if [ -n "${DEV_MAC_ARGS:-}" ]; then
+              echo "- macOS: https://github.com/$GITHUB_REPOSITORY/releases/download/$DEV_TAG/$DEV_MAC_ASSET_NAME"
+            fi
             echo "- Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$DEV_TAG"
             echo "- Discussion: $DISCUSSION_URL"
           } >> "$GITHUB_STEP_SUMMARY"

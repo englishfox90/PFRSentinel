@@ -12,7 +12,7 @@ PFR Sentinel runs on Apple-silicon Macs (M1 and later) as a regular app, `PFR Se
 
 ## Installing
 
-1. Download the `.dmg` (named like `PFRSentinel-3.7.10-dev.4-macos-arm64.dmg`).
+1. Download the `.dmg` (see below for where).
 2. Open it and drag **PFR Sentinel** onto **Applications**.
 3. The app is not notarized by Apple yet, so the first time you open a downloaded copy macOS says it "cannot be opened" or "is damaged". Clear the download flag once in Terminal, then open the app normally:
 
@@ -22,7 +22,7 @@ PFR Sentinel runs on Apple-silicon Macs (M1 and later) as a regular app, `PFR Se
 
    A copy you built yourself with `build_sentinel_macos.sh` doesn't need this.
 
-Dev builds are attached to each run of the **Build** workflow on GitHub as `PFRSentinel-macos-arm64-dev-unsigned` (you need to be signed in to GitHub to download them). They are not on the Releases page yet.
+Dev builds are published with the Windows ones: the newest is always at the [dev-latest prerelease](https://github.com/englishfox90/PFRSentinel/releases/tag/dev-latest) as `PFRSentinel-dev-unsigned-macos-arm64.dmg`, and each build is announced, with its download link, in the "Dev builds" thread under [Discussions](https://github.com/englishfox90/PFRSentinel/discussions). There is no macOS release build yet.
 
 ## Where things are kept
 
