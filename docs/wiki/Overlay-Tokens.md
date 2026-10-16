@@ -121,6 +121,7 @@ These tokens show `N/A` when star detection is skipped:
 
 - during daylight and twilight (the sun higher than 6° below the horizon), when latitude and longitude are set in [Settings](Settings)
 - while the ML roof classifier reports Closed, if **Skip Sky Features When Roof Closed** is on
+- from the next release, on frames judged not to show a night sky: sensor noise only, an exposure under the **Minimum exposure** floor, or a roof that reads Open with no stars detected on three frames in a row (see [When the overlay is drawn](All-Sky-Overlay#when-the-overlay-is-drawn))
 
 ---
 

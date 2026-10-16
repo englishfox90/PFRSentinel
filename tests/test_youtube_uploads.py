@@ -6,6 +6,7 @@ from datetime import datetime
 
 from services.timelapse_publishers import TimelapsePublishers, make_timelapse_metadata
 from services.youtube_config import (
+    NIGHT_PLACEHOLDERS,
     normalize_youtube_config,
     parse_tags,
     render_template,
@@ -37,7 +38,11 @@ class DummyAuth:
 
 
 class DummyUploader:
-    def upload_video(self, config, metadata, *, resumable_uri="", progress_callback=None):
+    def __init__(self):
+        self.night_stats = []
+
+    def upload_video(self, config, metadata, *, resumable_uri="", progress_callback=None, night_stats=None):
+        self.night_stats.append(night_stats)
         if progress_callback:
             progress_callback({"resumable_uri": "https://upload.example/session"})
         return YouTubeUploadResult(
@@ -165,6 +170,18 @@ def test_template_rendering_leaves_unknown_placeholders(tmp_path):
     rendered = render_template("{date} {filename} {frame_count} {duration} {missing}", metadata)
 
     assert rendered == "2026-06-19 timelapse_20260619.mp4 42 00:01:05 {missing}"
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def test_upload_state_claims_and_prevents_duplicate(tmp_path):
@@ -370,6 +387,7 @@ def test_publisher_queue_marks_upload_success(tmp_path):
     video = tmp_path / "video.mp4"
     video.write_bytes(b"fake")
     statuses = []
+    uploader = DummyUploader()
     store = YouTubeUploadStateStore(storage_dir=str(tmp_path))
     publisher = TimelapsePublishers(
         DummyConfig(youtube={
@@ -379,7 +397,7 @@ def test_publisher_queue_marks_upload_success(tmp_path):
         }),
         youtube_status_callback=statuses.append,
         youtube_auth_manager=DummyAuth(has_token=True),
-        youtube_uploader=DummyUploader(),
+        youtube_uploader=uploader,
         youtube_state_store=store,
     )
 
@@ -388,6 +406,8 @@ def test_publisher_queue_marks_upload_success(tmp_path):
     publisher.shutdown(timeout=1)
     entry = store.get(store.make_key(str(video)))
 
+    # No library wired in: the night placeholders still arrive, empty.
+    assert uploader.night_stats == [{name: "" for name in NIGHT_PLACEHOLDERS}]
     assert result.status == "queued"
     assert entry["status"] == "uploaded"
     assert entry["video_id"] == "abc123"
@@ -503,6 +523,19 @@ def test_youtube_setup_dialog_can_open(tmp_path):
             assert "Choose the Google file" in browser.toPlainText()
         finally:
             _dispose_widget(dialog)
+    finally:
+        _dispose_widget(card)
+        controller.shutdown()
+
+
+def test_youtube_card_lists_every_placeholder(tmp_path):
+    card, controller = make_youtube_card(tmp_path, enabled=False, client_json="", has_token=False)
+
+    try:
+        tip = card.description_input.toolTip()
+        assert card.title_input.toolTip() == tip
+        for name in ("date", "duration", "recording", *NIGHT_PLACEHOLDERS):
+            assert "{" + name + "}" in tip
     finally:
         _dispose_widget(card)
         controller.shutdown()

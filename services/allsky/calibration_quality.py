@@ -6,6 +6,7 @@ existing callers). Pure: no Qt, no I/O.
 """
 from typing import Optional
 
+from .calibration_fit_merit import fit_is_credible
 from .fisheye import FisheyeModel
 from .model_admission import is_guided
 
@@ -78,13 +79,23 @@ def model_quality(
 
     Returns one of the CalibrationQuality level strings:
     'none', 'preliminary', 'acceptable', 'good', 'excellent'.
+
+    A fit whose own statistics are no better than chance (calibration_fit_merit)
+    never rates above PRELIMINARY, whatever its frame count: issue #93's
+    606-match, 60-frame chance fit rated Good for a week on these tiers.
     """
     if model is None or not model.is_valid():
         return CalibrationQuality.NONE
-    rms = model.rms_residual
     n = model.n_matches
     if n < MIN_AUTO_MATCHES and not is_guided(model):
         return CalibrationQuality.NONE
+    tier = _tier(n, model.rms_residual, n_images, span_minutes)
+    if tier != CalibrationQuality.PRELIMINARY and not fit_is_credible(model)[0]:
+        return CalibrationQuality.PRELIMINARY
+    return tier
+
+
+def _tier(n: int, rms: float, n_images: int, span_minutes: float) -> str:
     if n_images >= 20 and span_minutes >= 60 and rms <= 8.0:
         return CalibrationQuality.EXCELLENT
     if n_images >= 10 and n >= 100 and rms <= 12.0:

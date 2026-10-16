@@ -31,6 +31,7 @@ except Exception as _e:
 
 from .star_centroid import detect_stars, fallback_sky_circle, measure_sky_circle
 from .fisheye import FisheyeModel
+from .single_frame_chance import judge_single_frame_fit, single_frame
 from .catalogs import get_bright_stars
 from .coords import radec_to_altaz
 from .calibration_validate import (
@@ -207,6 +208,9 @@ def calibrate(
     #   (d) the brightest N anchors actually land on detected stars —
     #       rejects spurious density-noise fits that look fine on average
     #       but miss Sirius/Vega/etc. by 100+ px.
+    #   (e) the fit beats chance — the same judgement the joint fit and the
+    #       badge apply (single_frame_chance). 2026-09-28: 10 matches at
+    #       RMS = tol/√2 passed (a)–(d) and filled the empty slot wrong-basin.
     match_ok = model.n_matches >= min_matches
     match_msg = (
         f"{model.n_matches} matches >= {min_matches}" if match_ok else
@@ -216,11 +220,18 @@ def calibrate(
     scale_ok, scale_msg = validate_a1_scale(model, _sky_r_ref)
     anch_ok, anch_msg = validate_bright_anchors(
         model, above_horizon, detected, sky_r=_sky_r_ref)
-    if not (match_ok and poly_ok and scale_ok and anch_ok):
+    chance_ok, chance_msg, _est = judge_single_frame_fit(
+        model, single_frame(
+            detected, above_horizon,
+            _sky_cx if _sky_r_ref is not None else None,
+            _sky_cy if _sky_r_ref is not None else None,
+            _sky_r_ref, image_width=img_w, image_height=img_h))
+    if not (match_ok and poly_ok and scale_ok and anch_ok and chance_ok):
         reason = "; ".join(m for ok, m in ((match_ok, match_msg),
                                            (poly_ok, poly_msg),
                                            (scale_ok, scale_msg),
-                                           (anch_ok, anch_msg)) if not ok)
+                                           (anch_ok, anch_msg),
+                                           (chance_ok, chance_msg)) if not ok)
         log.warning(
             f"Grid calibration failed sanity check: {reason}. "
             "Falling through to triangle-hash fallback."
@@ -238,7 +249,8 @@ def calibrate(
                 f"Grid fit failed sanity check ({reason}); "
                 f"triangle-hash fallback also failed: {e}"
             )
-    log.info(f"Sanity checks passed: {match_msg}; {poly_msg}; {scale_msg}; {anch_msg}")
+    log.info(f"Sanity checks passed: {match_msg}; {poly_msg}; {scale_msg}; "
+             f"{anch_msg}; {chance_msg}")
 
     warn_sky_coverage(model)
 
@@ -529,6 +541,10 @@ def _iterative_fit(
     fit_lo = np.array([50.0, 50.0, 50.0, A3_MIN, -1500.0, -np.pi, 60.0, 0.0])
     fit_hi = np.array([4000.0, 4000.0, 2000.0, A3_MAX, 500.0, np.pi, 90.0, 360.0])
 
+    # The tolerance n_matches and rms_residual were last taken at — persisted
+    # as final_tol_px so the chance judgement (single_frame_chance,
+    # calibration_fit_merit) can read the fit the way the joint fit's is read.
+    final_tol = 0.0
     for iteration in range(8):
         params = np.array([
             model.cx, model.cy, model.a1, model.a3, model.a5,
@@ -573,6 +589,7 @@ def _iterative_fit(
         # scaled to the sky radius so behaviour is resolution-independent.
         tol = tol_scale * max(10.0, 50.0 - iteration * 6.0)
         matches = _brightness_match(detected, above_horizon, model, tol_px=tol)
+        final_tol = tol
         rms = _compute_rms(matches, model)
         log.info(f"  Iteration {iteration}: {len(matches)} matches, RMS={rms:.2f}px, "
                  f"tol={tol:.0f}px")
@@ -582,6 +599,7 @@ def _iterative_fit(
 
     model.n_matches = len(matches)
     model.rms_residual = float(_compute_rms(matches, model))
+    model.final_tol_px = float(final_tol)
 
     # Build per-match diagnostics so the debug tool can show which stars were matched
     matched_stars = []

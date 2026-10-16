@@ -136,6 +136,10 @@ class MainWindow(
 
         self.load_config()
 
+        # A coordinate saved without a hemisphere letter gets one question,
+        # after the window is up and the panels show the migrated value.
+        QTimer.singleShot(1500, self._confirm_coordinate_hemispheres)
+
         # Bring the web server up now if it's enabled — it publishes the latest
         # image/status and shouldn't wait for the first capture to start. Deferred
         # to the event loop so the app bar (status indicator) exists, and the bind
@@ -273,6 +277,9 @@ class MainWindow(
         self.allsky_controller = AllSkyController(self)
         self.allsky_controller.status_changed.connect(self.allsky_panel.set_status)
         self.allsky_controller.quality_changed.connect(self.allsky_panel.set_quality)
+        self.allsky_controller.quality_note_changed.connect(self.allsky_panel.set_quality_note)
+        self.allsky_controller.attention_changed.connect(self.allsky_panel.set_attention)
+        self.allsky_controller.badge_quality_changed.connect(self.allsky_panel.set_badge_quality)
         self.allsky_controller.settings_changed.connect(self._on_allsky_settings_changed)
         self.allsky_panel.settings_changed.connect(self._on_allsky_panel_changed)
 
@@ -419,6 +426,7 @@ class MainWindow(
         self.weather_timer.timeout.connect(self._refresh_weather_async)
         self.weather_timer.start(60_000)  # 60s
         QTimer.singleShot(2000, self._refresh_weather_async)  # prompt first fill
+        self._start_resource_monitor()
 
     def _check_admin_privileges(self):
         """Warn once at startup if the app lacks Administrator rights.

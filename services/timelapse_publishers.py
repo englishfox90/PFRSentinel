@@ -20,6 +20,7 @@ from .youtube_config import (
     normalize_youtube_config,
     validate_youtube_config,
 )
+from .youtube_night_stats import build_night_context
 from .youtube_upload import YouTubeUploadResult, YouTubeUploadService, sanitize_exception
 from .youtube_upload_state import YouTubeUploadStateStore
 
@@ -37,6 +38,7 @@ class TimelapsePublishers:
         youtube_auth_manager: Optional[YouTubeAuthManager] = None,
         notifier: Optional[NotificationDispatcher] = None,
         max_queue_size: int = 5,
+        library_index_provider: Optional[Callable[[], object]] = None,
     ):
         self.config = config
         self.youtube_status_callback = youtube_status_callback
@@ -47,6 +49,9 @@ class TimelapsePublishers:
         # so backend delivery queues aren't duplicated; fall back to a private one —
         # cheap to construct and timelapse completion is once-per-session.
         self._notifier = notifier or NotificationDispatcher(config)
+        # Zero-arg callable returning the image library's index (or None), read
+        # at upload time so the night placeholders see the frames of the night.
+        self._library_index_provider = library_index_provider
         self._queue: queue.Queue = queue.Queue(maxsize=max_queue_size)
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
@@ -176,6 +181,7 @@ class TimelapsePublishers:
                     metadata,
                     resumable_uri=job.get("resumable_uri", ""),
                     progress_callback=_progress,
+                    night_stats=self._night_stats(metadata),
                 )
             except Exception as exc:
                 result = YouTubeUploadResult(
@@ -191,6 +197,18 @@ class TimelapsePublishers:
             self._capture_youtube_event(result, metadata)
             self._emit_youtube_status(result.to_status())
             self._queue.task_done()
+
+    def _night_stats(self, metadata: TimelapseUploadMetadata) -> dict:
+        """Night placeholders for the description; empty, never raising."""
+        index = None
+        units = "metric"
+        try:
+            if self._library_index_provider:
+                index = self._library_index_provider()
+            units = str((self.config.get("weather", {}) or {}).get("units") or "metric")
+        except Exception as exc:
+            app_logger.debug(f"YouTube: image library unavailable for night stats: {exc}")
+        return build_night_context(metadata, index, units=units)
 
     def _notify_timelapse_done(self, metadata: TimelapseUploadMetadata):
         """Fan out the completed-timelapse event to every enabled backend.

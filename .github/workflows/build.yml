@@ -102,7 +102,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -172,7 +172,7 @@ jobs:
           if (-not (Test-Path $plugin)) { throw "NINA plugin DLL is not in the bundle" }
 
       - name: Upload the app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PFRSentinel-windows-dev-unsigned
           path: dist/PFRSentinel/
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload the installer
         if: env.BUILD_INSTALLER == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PFRSentinel-installer-dev-unsigned
           path: installer/dist/*.exe
@@ -292,7 +292,7 @@ jobs:
       - name: Load the channel names
         run: python3 scripts/ci/dev_build_notes.py constants >> "$GITHUB_ENV"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: PFRSentinel-installer-dev-unsigned
           path: staging

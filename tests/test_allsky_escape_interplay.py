@@ -36,6 +36,10 @@ N_FRAMES = 53
 FINAL_TOL_PX = 15.5
 N_MATCHES_33 = 726
 RMS_33 = 10.96          # == 15.5 / sqrt(2): the median residual of a chance pair
+# A residual a real fit reports at that tolerance (0.45 of it; the credibility
+# line in calibration_fit_merit is 0.55). Rule 3 waives the incumbent's RMS
+# veto only for a candidate that is itself credible.
+RMS_CREDIBLE = 7.0
 
 # Detections per frame. 200 is the reporter's rig (400-candidate pool, the
 # matcher's cap); 30 is a sparse rig whose pool is 5 * 30 = 150, putting chance
@@ -125,19 +129,42 @@ class TestChanceGateGuardsRuleThree:
     def test_a_candidate_above_chance_replaces_an_incumbent_that_missed_the_anchors(
             self, monkeypatch):
         """The rig rule 3 is for: the same 726 matches, but over frames where
-        chance supplies only ~31, so the count is informative (23x). It clears
-        the gate, and the five-star incumbent's 2.43 px does not veto it."""
+        chance supplies only ~31, so the count is informative (23x), at a
+        residual a real fit reports. It clears the gate, and the five-star
+        incumbent's 2.43 px does not veto it."""
         frames = _rig_frames(SPARSE_DETECTIONS)
-        fitted = _run_fit_and_validate(monkeypatch, frames, _candidate_model())
+        fitted = _run_fit_and_validate(monkeypatch, frames,
+                                       _candidate_model(rms=RMS_CREDIBLE))
 
         assert fitted.chance_expected == pytest.approx(31.4, rel=0.05)
         assert fitted.n_matches >= CHANCE_MARGIN * fitted.chance_expected
+        assert fitted.chance_ratio > 20.0
 
         ok, why = should_replace(_five_star_incumbent(), 'none', fitted, 'good',
                                  escape=True, evidence=False,
                                  incumbent_failed_anchors=True)
         assert ok, why
         assert 'bright-anchor' in why and 'does not get an RMS veto' in why
+
+    def test_a_candidate_at_chance_scatter_does_not_get_the_rule_3_bypass(
+            self, monkeypatch):
+        """Same frames, same 726 informative matches, but the residual is the
+        chance pair's tol / sqrt(2): the count says sky, the residual says
+        tolerance. The discredited incumbent loses its veto, yet what replaces
+        it must be sky-worthy itself, so this one is held to the normal
+        comparison — which it loses to the (incomparable) five-star model only
+        on rank, and here on nothing: the reason names the candidate's merit."""
+        frames = _rig_frames(SPARSE_DETECTIONS)
+        fitted = _run_fit_and_validate(monkeypatch, frames, _candidate_model())
+        assert fitted.rms_residual == pytest.approx(FINAL_TOL_PX / np.sqrt(2.0),
+                                                    abs=0.01)
+
+        ok, why = should_replace(_five_star_incumbent(), 'good', fitted, 'good',
+                                 escape=True, evidence=False,
+                                 incumbent_failed_anchors=True)
+        assert not ok, why
+        assert 'no merit of its own' in why and 'match tolerance' in why
+        assert 'does not get an RMS veto' not in why
 
     def test_the_same_candidate_wins_on_rank_when_the_incumbent_kept_its_anchors(
             self, monkeypatch):

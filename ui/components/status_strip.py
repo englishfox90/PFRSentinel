@@ -12,9 +12,18 @@ fetches anything itself.
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 from PySide6.QtCore import Qt, QSize
 
+from services.observing_window import REASON_KEY as GATE_REASON_KEY
+
 from ..theme.tokens import Colors, Typography
 from ..theme.icons import mdi, qicon
 from ..theme.styles import paint_border_lines
+
+# Sky tile text per observable-sky gate reason. 'roof' and 'static' are
+# shown from the ML results above them; 'twilight' is daylight, not news.
+_GATE_REASON_TEXT = {
+    'no_stars': "No stars detected",
+    'exposure': "Exposure too short",
+}
 
 
 # tone -> colour. 'stale' is a dimmed value kept in place when data goes cold.
@@ -29,6 +38,11 @@ _TONE_COLORS = {
 }
 
 _ICON_SIZE = QSize(18, 18)
+
+_STATIC_TOOLTIP = (
+    "This frame is almost entirely sensor noise, so there is too little in it "
+    "to judge the roof or the sky. The readings shown may be wrong."
+)
 
 
 class StatusTile(QFrame):
@@ -207,6 +221,7 @@ class StatusStrip(QFrame):
         super().__init__(parent)
         self._capture_mode = 'idle'
         self._frame_count = 0
+        self._static_shown = False
         self._build()
 
     def _build(self):
@@ -265,11 +280,11 @@ class StatusStrip(QFrame):
             self.discord_tile.set_value("Off", 'muted', 'fa6b.discord')
 
     # --- Sensor tiles ----------------------------------------------------
-    def set_roof(self, text: str, tone: str = 'primary'):
-        self.roof_tile.set_value(text, tone, 'home-roof')
+    def set_roof(self, text: str, tone: str = 'primary', icon_name: str = 'home-roof'):
+        self.roof_tile.set_value(text, tone, icon_name)
 
-    def set_sky(self, text: str, tone: str = 'primary'):
-        self.sky_tile.set_value(text, tone, 'weather-partly-cloudy')
+    def set_sky(self, text: str, tone: str = 'primary', icon_name: str = 'weather-partly-cloudy'):
+        self.sky_tile.set_value(text, tone, icon_name)
 
     def set_weather(self, text: str, tone: str = 'primary'):
         self.weather_tile.set_value(text, tone, 'thermometer', mono=(tone != 'muted'))
@@ -317,9 +332,36 @@ class StatusStrip(QFrame):
 
         ml = metadata.get('_ML_RESULTS') or {}
 
+        # A noise-only frame still shows the model's roof reading — the static
+        # score is unproven and must not hide an identification — but flags it.
+        static = bool(ml.get('frame_is_static'))
+        tooltip = _STATIC_TOOLTIP if static else ""
+        self.roof_tile.setToolTip(tooltip)
+        self.sky_tile.setToolTip(tooltip)
+
+        # The warning is painted over whatever the tiles held, and a tile is
+        # only repainted when a frame carries a verdict for it. A classifier
+        # that is off or that failed gives none, so the first good frame after
+        # a static one must clear the warning itself or it stays up for good.
+        recovering = self._static_shown and not static
+        self._static_shown = static
+
         roof = ml.get('roof_status')
         if roof in ('Open', 'Closed'):
-            self.set_roof(roof, 'ok' if roof == 'Open' else 'error')
+            if static:
+                self.set_roof(f"{roof} · unreliable", 'warn', 'alert-outline')
+            else:
+                self.set_roof(roof, 'ok' if roof == 'Open' else 'error')
+        elif recovering:
+            # The flagged reading came from a noise frame, so there is no last
+            # good value to fall back to.
+            self.set_roof("—", 'muted')
+
+        if static:
+            self.set_sky("Too much static", 'warn', 'alert-outline')
+            # A star count taken from noise is not a seeing measurement.
+            self.set_seeing("Roof closed" if roof == 'Closed' else "—", 'muted')
+            return
 
         # With the roof closed the pier camera only sees the closed roof, so the
         # frame-derived sky condition and star/seeing values are meaningless —
@@ -330,10 +372,21 @@ class StatusStrip(QFrame):
             self.set_seeing("Roof closed", 'muted')
             return
 
+        # The observable-sky gate judged the frame to show no sky worth
+        # reading (issue #93): the reason takes the Sky tile the way "Roof
+        # closed" does, and star detection was skipped, so Seeing has nothing.
+        gate_text = _GATE_REASON_TEXT.get(metadata.get(GATE_REASON_KEY))
+        if gate_text:
+            self.set_sky(gate_text, 'muted')
+            self.set_seeing("—", 'muted')
+            return
+
         sky = ml.get('sky_condition')
         if sky and sky != 'N/A':
             tone = 'ok' if sky == 'Clear' else ('warn' if sky == 'Partly Cloudy' else 'error')
             self.set_sky(sky, tone)
+        elif recovering:
+            self.set_sky("—", 'muted')
 
         stars = metadata.get('STAR_COUNT')
         if stars not in (None, 'N/A'):

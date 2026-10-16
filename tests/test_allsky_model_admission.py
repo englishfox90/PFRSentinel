@@ -572,3 +572,49 @@ class TestPoleRungExpiry:
     def test_default_is_no_drought(self):
         """Callers without a history (tests, tools) see the stamp honoured."""
         assert incumbent_authority(_corroborated()) == PROVENANCE_POLE
+
+
+class TestCalibratedPoleTolerance:
+    """Issue #93, package 5d: a pole with a sigma is gated at
+    pole_tolerance.pole_tolerance_px; the model-vs-model basin veto keeps
+    the flat POLE_TOL_REF_PX."""
+
+    def _rotation_pole(self, x, y, sigma_px, east_left=True):
+        return replace(_pole(x, y, east_left), sigma_px=sigma_px, source='rotation')
+
+    def test_rotation_pole_uses_the_calibrated_gate(self):
+        from services.allsky.pole_tolerance import pole_tolerance_px
+        good = _good()
+        px, py = projected_pole(good, LAT)
+
+        def tol_at(pole):
+            r_p = float(np.hypot(pole.x - good.cx, pole.y - good.cy))
+            return pole_tolerance_px(6.0, tol_scale(SKY_R), r_p)
+
+        inside = self._rotation_pole(px + 100.0, py, 6.0)
+        outside = self._rotation_pole(px + 150.0, py, 6.0)
+        assert 100.0 < tol_at(inside) < 150.0 < tol_at(outside) + 40.0
+        assert tol_at(outside) != POLE_TOL_REF_PX * tol_scale(SKY_R)
+        ok, msg = admit_candidate(_good(), None, LAT, inside, SKY_R, W, H)
+        assert ok, msg
+        ok, msg = admit_candidate(_good(), None, LAT, outside, SKY_R, W, H)
+        assert not ok and f"limit {tol_at(outside):.0f}px" in msg
+
+    def test_sigma_less_pole_keeps_the_flat_gate(self):
+        good = _good()
+        px, py = projected_pole(good, LAT)
+        flat = POLE_TOL_REF_PX * tol_scale(SKY_R)
+        ok, msg = admit_candidate(_good(), None, LAT, _pole(px + 0.9 * flat, py), SKY_R, W, H)
+        assert ok, msg
+        ok, msg = admit_candidate(_good(), None, LAT, _pole(px + 1.1 * flat, py), SKY_R, W, H)
+        assert not ok
+
+    def test_basin_veto_between_models_is_unchanged(self):
+        """Two models of one rig 100 px apart at the pole are the same basin
+        (140 px scaled), whatever any measured pole's sigma says."""
+        from services.allsky.model_admission import _basin_veto
+        good = _good()
+        shifted = replace(good, cy=good.cy + 100.0)
+        notes = []
+        assert _basin_veto(shifted, good, LAT, SKY_R, "the incumbent", notes) is None
+        assert any('tol 140px' in n for n in notes)

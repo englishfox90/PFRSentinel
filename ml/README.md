@@ -120,9 +120,13 @@ This allows the model to make weather inferences even when it can't directly see
 - Stars Visible: 91.2% accuracy  
 - Moon Visible: 100% accuracy
 
-### Phase 3: Production Integration ✅ COMPLETE
+### Phase 3: Dev Mode Integration ✅ COMPLETE
 
-**Goal**: Integrate ML predictions into PFR Sentinel DEV MODE for validation.
+**Goal**: Write ML predictions into the Dev Mode calibration JSON export for validation.
+
+This is the dev-only path. Production per-frame inference is `services/ml_service.py`
+(`get_ml_service()`, `MLService.analyze_image`), enabled by `ml_models.enabled` and
+shipped in every build; it does not depend on Dev Mode.
 
 **Implementation**:
 - Roof classifier runs on every captured frame
@@ -130,7 +134,7 @@ This allows the model to make weather inferences even when it can't directly see
 - Predictions saved to `calibration_*.json` files for future validation
 - Configurable via `dev_mode.ml_predictions` settings
 
-**Usage in PFR Sentinel**:
+**Usage in the Dev Mode export**:
 ```python
 from ui.controllers.ml_prediction import predict_roof_state, predict_sky_condition, get_ml_status
 
@@ -317,16 +321,28 @@ Shows current progress vs targets and recommends priority collection.
 python ml/labeling_tool.py "D:\Pier Camera ML Data"
 ```
 
-**Keyboard shortcuts**:
-- `Space` - Save & Next
-- `A` / `←` - Previous
-- `D` / `→` - Next
-- `S` - Save
+**Keyboard shortcuts** (Labeling tab):
+- `Space` - Save & Next (accepts the pre-filled suggestion as-is)
+- `A` / `←` - Previous, `D` / `→` - Next, `S` - Save, `Del` - Remove frame
+- `R` - toggle roof, `1` / `2` / `3` - Clear / Partly Cloudy / Overcast (sets the cloud flag and opens the roof)
+- `C` - clouds, `T` - stars, `M` - moon
 
 **Features**:
-- Auto-suggests labels from collected context (and from AI pre-labels if present)
+- The image is framed in the colour of its roof tag — green open, red closed — with the tag
+  written above it. Solid frame = saved label, dashed = suggestion or unsaved edit.
+- Pre-fill priority is `ml/label_suggestion.py`: roof from NINA, then AI, then the roof CNN
+  (NINA matched ~4,000 human labels 99.4 %, the AI 94.9 %, both agreeing 99.9 %); sky from the
+  AI, then the sky CNN, then weather; stars/moon from the sky CNN.
+- **⚡ Batch Confirm tab** — unlabeled frames grouped by suggested tag, 24 thumbnails a page.
+  Click the ones that don't match, `Enter` labels the rest, `N` skips the page. By default only
+  frames whose roof sources agree are offered. Labels written here carry
+  `label_source: "batch_confirm"` (the form writes `"manual"`), so they can be audited or excluded.
 - "Skip labeled" checkbox to process only new samples
 - Shows the pier camera luminance frame (all-sky reference removed — models train on lum only)
+
+**Housekeeping folders**: any folder starting with `_` (`_removed`, `_backup_scrub_*`, …) is
+ignored by the tool, the AI pre-labeller and the training scripts (`ml/dataset_files.py`). They hold
+same-named copies of the calibration JSONs; never search the data dir with a bare `rglob`.
 
 ### AI Pre-labeling (optional, speeds up review)
 
@@ -357,6 +373,35 @@ You can also trigger the AI from inside the GUI (needs `OPENROUTER_API_KEY` set)
 The Review tab also adds AI columns (AI Pred / AI vs NINA / AI vs Label) and AI
 filters ("AI disagrees with NINA", "AI disagrees with manual label", …) so you can
 surface exactly the frames worth a second look.
+
+### Jev label audit (optional, second opinion on existing labels)
+
+TypeSafe's Jev is a text-only decision model: it never sees the frame, only the
+numbers already in the calibration JSON (image statistics, exposure, moon, weather,
+NINA roof state), and answers typed questions with calibrated probabilities. That
+makes it useless as a label source and useful as an auditor — a confident
+disagreement means either the label or the metadata is wrong.
+
+```bash
+$env:OPENROUTER_API_KEY = "sk-or-..."
+python ml/jev_label_audit.py --dry-run       # print example states, no API calls
+python ml/jev_label_audit.py --sample 200    # random subset first
+python ml/jev_label_audit.py                 # every human-labelled frame, ~$0.10
+python ml/jev_label_audit.py --no-nina       # image statistics only
+```
+
+Each verdict is stored under `jev_audit` in the frame's JSON (labels are never
+touched; `--no-store` keeps the files untouched entirely), a report and a
+`conflicts.csv` land in `<data dir>/_jev_audit/`, and responses are cached so a
+re-run is free. In the labeling tool:
+
+- **Labeling tab** — a "🎯 Jev Audit" panel shows the verdict beside the AI
+  pre-label, and the banner flags a frame whose label Jev disputes. Jev never
+  pre-fills the form.
+- **Review Predictions tab** — Jev Roof / Jev Sky / Jev vs Label columns and the
+  filters "Jev disagrees with manual label (roof / sky)", "Jev + NINA/AI all
+  against manual label" (the likeliest label errors, listed first), "Has / Missing
+  Jev audit". Double-click a row to open and fix it.
 
 ### Data Collection
 

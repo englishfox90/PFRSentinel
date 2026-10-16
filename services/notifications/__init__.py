@@ -4,6 +4,7 @@ See docs/dev/HERMES_NOTIFICATIONS_PLAN.md for the design.
 """
 from .dispatcher import NotificationDispatcher
 from .events import (
+    CALIBRATION_DISCREDITED,
     CALIBRATION_DONE,
     ERROR,
     LIFECYCLE,
@@ -22,4 +23,5 @@ __all__ = [
     "PERIODIC_IMAGE",
     "TIMELAPSE_DONE",
     "CALIBRATION_DONE",
+    "CALIBRATION_DISCREDITED",
 ]

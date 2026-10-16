@@ -13,12 +13,17 @@ namespace PFRSentinel.NINA.SentinelDockables {
     /// <see cref="SentinelStat.Unknown"/> rather than a plausible-looking guess. Several
     /// are legitimately null: intervals in watch mode, capture ages before the first
     /// frame, and the next-capture estimate whenever it is not predictable.
+    /// <para>
+    /// Frame age, images served and uptime were dropped: the frame line above the
+    /// block already gives the frame's age, and the other two never changed what an
+    /// operator did. The room went to the all-sky target column.
+    /// </para>
     /// </remarks>
     internal static class SentinelStatistics {
 
         /// <summary>Rows shown when Sentinel has not been reached, so the block keeps its shape.</summary>
         private static readonly string[] Labels = {
-            "Capture", "Interval", "Last frame", "Next frame", "Frame age", "Images served", "Uptime",
+            "Capture", "Interval", "Last frame", "Next frame",
         };
 
         /// <summary>Formats one poll's statistics.</summary>
@@ -32,14 +37,11 @@ namespace PFRSentinel.NINA.SentinelDockables {
                 return unknown;
             }
 
-            var rows = new List<SentinelStat>(8) {
+            var rows = new List<SentinelStat>(5) {
                 new("Capture", Capture(snapshot)),
                 new("Interval", Interval(snapshot)),
                 new("Last frame", Ago(snapshot.LastCaptureAgeSeconds)),
                 new("Next frame", Next(snapshot.NextCaptureInSeconds)),
-                new("Frame age", FrameAge(snapshot)),
-                new("Images served", SentinelPanelText.Count(snapshot.ImagesServed)),
-                new("Uptime", SentinelPanelText.Span(snapshot.UptimeSeconds)),
             };
 
             string? recovery = Recovery(snapshot);
@@ -87,15 +89,6 @@ namespace PFRSentinel.NINA.SentinelDockables {
 
         private static string Next(int? seconds) =>
             seconds is int s ? $"in {SentinelPanelText.Duration(s)}" : SentinelStat.Unknown;
-
-        private static string FrameAge(SentinelPanelSnapshot snapshot) {
-            if (snapshot.AgeSeconds is not int age) {
-                return SentinelStat.Unknown;
-            }
-
-            string text = SentinelPanelText.Duration(age);
-            return snapshot.Stale ? $"{text} (stale)" : text;
-        }
 
         private static string? Recovery(SentinelPanelSnapshot snapshot) {
             if (snapshot.RecoveryUnrecoverable) {

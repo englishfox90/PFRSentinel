@@ -263,6 +263,48 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
             }
         }
 
+        /// <summary>
+        /// Sends the current sequencer target to Sentinel, or clears it, over the shared
+        /// client.
+        /// </summary>
+        /// <param name="report">The target, or null to clear Sentinel's copy.</param>
+        /// <param name="reloadConfiguration">
+        /// Re-read Sentinel's config.json first. The reporter asks for this only after a
+        /// failure: the fixes for most failures (enable control, regenerate the token)
+        /// rewrite that file, but re-reading it on every heartbeat would be wasted I/O.
+        /// </param>
+        /// <param name="cancellationToken">The reporter's lifetime token.</param>
+        /// <remarks>
+        /// <para>
+        /// Bracketed like <see cref="SendAsync"/> so an endpoint swap never disposes the
+        /// client under an in-flight push.
+        /// </para>
+        /// <para>
+        /// Deliberately leaves the cached readiness alone: the target route proves the
+        /// token and reachability but not that a capture command handler is wired, which
+        /// is half of what the sequence items' <c>Validate()</c> reports.
+        /// </para>
+        /// <para>Sentinel failures propagate as <see cref="SentinelException"/>; the caller logs them.</para>
+        /// </remarks>
+        public async Task<SentinelTargetResult> PostTargetAsync(
+            SentinelTargetReport? report,
+            bool reloadConfiguration,
+            CancellationToken cancellationToken) {
+
+            Endpoint current = Current();
+            Interlocked.Increment(ref inFlight);
+
+            try {
+                if (reloadConfiguration) {
+                    current.Client.ReloadConfiguration();
+                }
+
+                return await current.Client.PostTargetAsync(report, cancellationToken).ConfigureAwait(false);
+            } finally {
+                Release();
+            }
+        }
+
         private Endpoint Current() {
             lock (gate) {
                 return endpoint;

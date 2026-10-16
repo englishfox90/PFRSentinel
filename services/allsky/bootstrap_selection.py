@@ -21,9 +21,18 @@ orientation once the tolerance disc is a large enough share of the sky disc
    leading — it is a coarse integer count over at most 12 anchors and would
    throw away the finer excess signal if it went first.
 
+3. **Rival test** (issue #93, 5e). After the winner is chosen, a second
+   survivor that explains the frames with a mostly *different* star set and
+   at least half the winner's excess means two incompatible solutions fit
+   the same night — the frames cannot tell them apart, and picking one is
+   the wrong-basin install this module exists to prevent. The escape then
+   yields no candidate at all (`find_rival`).
+
 Pure: numpy/statistics only, no I/O, no Qt.
 """
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
+
+import numpy as np
 
 from .calibration_validate import count_anchor_hits, tol_scale
 from .chance_matches import excess_over_chance
@@ -42,6 +51,16 @@ ANCHOR_MISS_PX = 40.0
 # validates on, so a candidate cannot win the tie-break on frames the gate
 # never saw.
 ANCHOR_FRAMES = 3
+
+# Rival test. A rival shares fewer than this fraction of its matched stars
+# with the winner (two fits of one basin share nearly all of theirs — the
+# same stars land on the same detections — while a different basin lands
+# other catalogue stars on those detections) and carries at least this
+# fraction of the winner's excess over chance (the plan's "≥ 0.5×": a
+# rival at a tenth of the winner's excess is a weak fit the ranking
+# already settled, one at half is a solution the frames support).
+RIVAL_MAX_STAR_OVERLAP = 0.5
+RIVAL_MIN_EXCESS_FRACTION = 0.5
 
 
 def chance_excess(model) -> float:
@@ -93,3 +112,49 @@ def select_bootstrap_winner(passed: List, frames: List[dict],
                   f"excess={chance_excess(best):.0f}, "
                   f"anchors={recent_anchor_hits(best, frames)}, "
                   f"tied={len(shortlist)}")
+
+
+def matched_star_ids(model) -> Set[str]:
+    """Identities of the stars a fit matched (joint_fit_diagnostics): the HR
+    number when recorded, else the name; unnamed, unnumbered entries are
+    left out rather than collapsed into one."""
+    ids = set()
+    for rec in getattr(model, 'matched_stars', None) or ():
+        key = str(rec.get('hr') or '') or str(rec.get('name') or '')
+        if key:
+            ids.add(key)
+    return ids
+
+
+def star_overlap(model, other) -> Optional[float]:
+    """Fraction of `model`'s matched stars also matched by `other`, or None
+    when either recorded no identifiable stars."""
+    a, b = matched_star_ids(model), matched_star_ids(other)
+    if not a or not b:
+        return None
+    return len(a & b) / len(a)
+
+
+def find_rival(passed: List, winner) -> Optional[object]:
+    """The strongest survivor that explains the frames with a different star
+    set at a comparable excess, or None (see module doc, rule 3)."""
+    best_excess = chance_excess(winner)
+    rivals = []
+    for m in passed:
+        if m is winner:
+            continue
+        overlap = star_overlap(m, winner)
+        if overlap is None or overlap >= RIVAL_MAX_STAR_OVERLAP:
+            continue
+        if chance_excess(m) >= RIVAL_MIN_EXCESS_FRACTION * max(best_excess, 0.0):
+            rivals.append(m)
+    if not rivals:
+        return None
+    return max(rivals, key=chance_excess)
+
+
+def describe_orientation(model) -> str:
+    return (f"east_left={model.east_left} axis_alt={model.axis_alt:.1f} "
+            f"axis_az={model.axis_az:.1f} roll={np.degrees(model.roll):.1f}° "
+            f"a1={model.a1:.0f} n_matches={model.n_matches} "
+            f"excess={chance_excess(model):.0f}")

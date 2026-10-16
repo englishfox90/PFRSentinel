@@ -17,6 +17,7 @@ Developer-facing technical reference. End-user content lives on the project wiki
 | [ZWO_SDK_PLATFORMS.md](ZWO_SDK_PLATFORMS.md) | Finding and loading the ZWO SDK library on Windows, macOS and Linux; Linux udev rule + `usbfs_memory_mb`; why the non-Windows libraries are not in git |
 | [CAMERA_LOGGING_REFERENCE.md](CAMERA_LOGGING_REFERENCE.md) | Log-search cheat sheet for diagnosing camera issues |
 | [DIAGNOSTICS_BUNDLE.md](DIAGNOSTICS_BUNDLE.md) | Logs → Export Diagnostics: bundle contents, redaction, fresh raw-frame capture |
+| [RESOURCE_MONITOR.md](RESOURCE_MONITOR.md) | Dev-build memory/CPU log line: working set vs private bytes, gauges, growth warning, opt-in tracemalloc |
 
 ## Build & release tooling
 

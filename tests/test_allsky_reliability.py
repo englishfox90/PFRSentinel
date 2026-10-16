@@ -109,7 +109,7 @@ class TestBasinEscape:
     def _service(self):
         from services.allsky.calibration_service import CalibrationService
         svc = CalibrationService()
-        svc._save_model = lambda m: None   # never touch the real cal file
+        svc._save_model = lambda m, **kw: None   # never touch the real cal file
         return svc
 
     def test_consecutive_failures_counted_and_reset_on_success(self):
@@ -177,7 +177,7 @@ class TestBasinEscape:
 
         svc = self._service()
         saved = []
-        svc._save_model = lambda m: saved.append(m)
+        svc._save_model = lambda m, **kw: saved.append(m)
         svc.load_model(str(p))
         assert svc.current_model.provenance == ''
         assert incumbent_authority(svc.current_model) is None
@@ -267,7 +267,7 @@ class TestManualPathMeasuresThePole:
         from datetime import datetime, timezone
         from services.allsky import calibration_service as cs
         svc = cs.CalibrationService()
-        svc._save_model = lambda m: None
+        svc._save_model = lambda m, **kw: None
         svc._lat = self.LAT
         svc._frames.append({
             'dt': datetime(2026, 1, 16, 8, 0, tzinfo=timezone.utc),
@@ -345,7 +345,7 @@ class TestGuidedIncumbentRefinement:
     def _service(self):
         from services.allsky.calibration_service import CalibrationService
         svc = CalibrationService()
-        svc._save_model = lambda m: None
+        svc._save_model = lambda m, **kw: None
         return svc
 
     def _guided_incumbent(self, svc):
@@ -424,7 +424,7 @@ class TestCalibrationReset:
     def _service(self):
         from services.allsky.calibration_service import CalibrationService
         svc = CalibrationService()
-        svc._save_model = lambda m: None
+        svc._save_model = lambda m, **kw: None
         return svc
 
     def test_clear_model_keeps_buffer_and_bumps_generation(self):
@@ -474,7 +474,7 @@ class TestCalibrationReset:
         mw.config.set('allsky_overlay', {'calibration_file': str(cal)})
         ctrl = AllSkyController(mw)
         ctrl._model = _model(rms=4.0, n_matches=11)
-        ctrl._cal_service._save_model = lambda m: None
+        ctrl._cal_service._save_model = lambda m, **kw: None
         ctrl._cal_service._model = _model(rms=4.0, n_matches=11)
 
         ctrl.reset_calibration()

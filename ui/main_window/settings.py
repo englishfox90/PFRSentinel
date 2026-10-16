@@ -157,8 +157,17 @@ class _MainWindowSettingsMixin:
         if cfg.get('_action') == 'guided_calibrate':
             self._open_guided_calibration()
             return
+        if cfg.get('_action') == 'calibration_history':
+            self._open_calibration_history()
+            return
         if cfg.get('_action') == 'reset_calibration':
             self.allsky_controller.reset_calibration()
+            return
+        if cfg.get('_action') == 'dump_buffer':
+            self.allsky_controller.dump_calibration_buffer()
+            return
+        if cfg.get('_action') == 'reset_equipment_map':
+            self.allsky_controller.reset_equipment_map()
             return
         # Preserve calibration_file from existing config
         existing = self.config.get('allsky_overlay', {})
@@ -171,13 +180,60 @@ class _MainWindowSettingsMixin:
         prep = self.allsky_controller.prepare_guided_calibration()
         if not prep:
             return  # controller already emitted a status explaining why
+        session = dlg = None
         try:
             from ui.panels.allsky_guided_dialog import GuidedCalibrationDialog
+            session = self.allsky_controller.begin_guided_session(prep)
             dlg = GuidedCalibrationDialog(prep, parent=self)
-            if dlg.exec() and dlg.anchors:
-                self.allsky_controller.start_guided_calibration(dlg.anchors, prep)
+            dlg.solve_requested.connect(session.solve)
+            dlg.hints_requested.connect(session.request_hints)
+            dlg.discard_requested.connect(session.discard)
+            dlg.display_stretch_changed.connect(
+                self.allsky_controller.remember_display_stretch)
+            session.solving.connect(dlg.show_solving)
+            session.solved.connect(dlg.show_solved)
+            session.failed.connect(dlg.show_failed)
+            session.hints_ready.connect(dlg.show_hints)
+            # Bound methods only. A closure over dlg connected to dlg's own
+            # signal is a cycle Python's GC cannot see through Qt, and it
+            # kept the dialog, its full-resolution pixmap and both prep
+            # frames alive for the life of the process.
+            dlg.save_requested.connect(session.save)
+            session.saved.connect(dlg.show_saved)
+
+            if dlg.exec() and dlg.saved:
+                self._notify("Guided calibration saved — the all-sky overlay "
+                             "now uses it.", 'info')
         except Exception as e:
             app_logger.error(f"Guided calibration dialog failed: {e}")
+        finally:
+            if session is not None:
+                session.close()
+            if dlg is not None:
+                dlg.deleteLater()
+
+    def _open_calibration_history(self) -> None:
+        """Open the calibration history; a restore goes through its controller."""
+        dlg = None
+        try:
+            from ui.controllers.calibration_history_controller import (
+                CalibrationHistoryController)
+            from ui.panels.allsky_calibration_history_dialog import (
+                CalibrationHistoryDialog)
+            history = CalibrationHistoryController(self.allsky_controller)
+            dlg = CalibrationHistoryDialog(history.entries(), parent=self)
+            # Bound methods only: a closure over dlg on its own signal is a
+            # cycle the GC cannot see through Qt (see the guided dialog).
+            dlg.restore_requested.connect(history.restore)
+            history.restore_finished.connect(dlg.show_result)
+            if dlg.exec() and dlg.restored:
+                self._notify("Calibration restored — the all-sky overlay now "
+                             "uses it.", 'info')
+        except Exception as e:
+            app_logger.error(f"Calibration history dialog failed: {e}")
+        finally:
+            if dlg is not None:
+                dlg.deleteLater()
 
     def _on_allsky_settings_changed(self) -> None:
         try:
@@ -258,6 +314,11 @@ class _MainWindowSettingsMixin:
         except Exception as e:
             app_logger.error(f"Failed to initialize weather service: {e}")
             self.weather_service = None
+        # A running watcher copied the previous instance at start; hand it the
+        # rebuilt one so an edit reaches the next frame, not the next restart.
+        watcher = getattr(getattr(self, 'watch_controller', None), 'watcher', None)
+        if watcher is not None:
+            watcher.set_weather_service(self.weather_service)
 
     def _update_service_status(self):
         output_config = self.config.get('output', {})

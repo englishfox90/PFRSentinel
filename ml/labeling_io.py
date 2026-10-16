@@ -6,6 +6,8 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QImage
 
+from .dataset_files import find_sample_sets  # noqa: F401  re-exported for existing callers
+
 try:
     from astropy.io import fits
     ASTROPY_AVAILABLE = True
@@ -17,36 +19,6 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-
-
-def find_sample_sets(data_dir: Path) -> list:
-    """Find all sample sets by timestamp (searches recursively).
-
-    Returns list of dicts with paths to each file type.
-    """
-    samples = {}
-
-    for cal_file in data_dir.rglob("calibration_*.json"):
-        name = cal_file.stem
-        if name.startswith("calibration_"):
-            timestamp = name[len("calibration_"):]
-
-            if timestamp not in samples:
-                samples[timestamp] = {
-                    'timestamp': timestamp,
-                    'folder': cal_file.parent
-                }
-
-            samples[timestamp]['calibration'] = cal_file
-
-    for timestamp, sample in samples.items():
-        folder = sample['folder']
-        lum_path = folder / f"lum_{timestamp}.fits"
-
-        if lum_path.exists():
-            sample['lum'] = lum_path
-
-    return [samples[ts] for ts in sorted(samples.keys())]
 
 
 def remove_sample_files(sample: dict, trash_dir: Path) -> list:

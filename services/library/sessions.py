@@ -22,7 +22,8 @@ from datetime import datetime, timedelta
 
 # A frame captured before local noon belongs to the previous calendar day's
 # night (the run that started the evening before).
-_NIGHT_CUTOFF_HOUR = 12
+NIGHT_CUTOFF_HOUR = 12
+_NIGHT_CUTOFF_HOUR = NIGHT_CUTOFF_HOUR  # old private name, kept for existing callers
 
 # A break between consecutive frames longer than this counts as a capture gap —
 # an event worth surfacing (capture stopped, app restart), not normal cadence.
@@ -47,7 +48,7 @@ _TEMP_RE = re.compile(r"-?\d+(?:\.\d+)?")
 def night_key(epoch):
     """Local 'YYYY-MM-DD' key for the night a capture epoch belongs to."""
     dt = datetime.fromtimestamp(int(epoch))
-    if dt.hour < _NIGHT_CUTOFF_HOUR:
+    if dt.hour < NIGHT_CUTOFF_HOUR:
         dt = dt - timedelta(days=1)
     return dt.strftime("%Y-%m-%d")
 

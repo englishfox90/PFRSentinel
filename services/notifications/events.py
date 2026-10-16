@@ -11,6 +11,9 @@ LIFECYCLE = "lifecycle"          # data.phase: startup | shutdown | capture_star
 PERIODIC_IMAGE = "periodic_image"
 TIMELAPSE_DONE = "timelapse_done"
 CALIBRATION_DONE = "calibration_done"
+# The saved all-sky model matched the live buffer at chance level in
+# consecutive runs (allsky.discredit_policy); once per episode.
+CALIBRATION_DISCREDITED = "calibration_discredited"
 
 
 @dataclass

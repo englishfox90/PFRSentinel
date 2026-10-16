@@ -483,3 +483,146 @@ def test_worker_reuses_one_overlay_image_cache_across_frames(worker, tmp_path):
     assert len(seen) == 2
     assert seen[0] is not None and seen[0] is seen[1]
     assert seen[0] is worker._overlay_image_cache
+
+
+def test_reprocess_marks_the_capture_so_per_capture_state_is_not_advanced(worker, tmp_path, monkeypatch):
+    """The roof gate counts consecutive Closed frames. A reprocess re-runs the
+    same capture from fresh metadata, so the processor has to say so — or one
+    misread frame confirms itself the moment a setting is nudged."""
+    from services import observing_window
+    from services.observing_window import SAME_CAPTURE_KEY
+
+    worker._main_window = None
+    cfg = _base_config(tmp_path, {'enabled': False})
+    seen = []
+    real = observing_window.is_observing_window
+
+    def spy(config, metadata, feature="feature"):
+        seen.append(bool(metadata.get(SAME_CAPTURE_KEY)))
+        return real(config, metadata, feature=feature)
+
+    monkeypatch.setattr(observing_window, 'is_observing_window', spy)
+
+    for reprocess in (False, True):
+        seen.clear()
+        worker._process_task(ImageProcessingTask(
+            Image.new('RGB', (64, 64), (30, 40, 50)), {'FILENAME': 'f.png'}, cfg,
+            reprocess=reprocess))
+        assert seen, "the gate was never consulted"
+        assert all(flag is reprocess for flag in seen)
+
+
+# --- observable-sky gate wiring (issue #93) ---------------------------------
+
+def test_sky_evidence_is_measured_before_the_gate_is_first_consulted(worker, tmp_path, monkeypatch):
+    from services import observing_window
+    import ui.controllers.image_processor as ip
+    from services.sky_evidence import EVIDENCE_KEY
+
+    worker._main_window = None
+    order = []
+    real_gate = observing_window.is_observing_window
+
+    def evidence(image, metadata, config):
+        order.append('evidence')
+        metadata[EVIDENCE_KEY] = {'star_count': 40, 'exposure_s': 10.0,
+                                  'sky_circle': None, 'frame_size': image.size}
+        return metadata[EVIDENCE_KEY]
+
+    def gate(config, metadata, feature="feature"):
+        order.append('gate')
+        assert EVIDENCE_KEY in metadata
+        return real_gate(config, metadata, feature=feature)
+
+    monkeypatch.setattr(ip, 'compute_sky_evidence', evidence)
+    monkeypatch.setattr(observing_window, 'is_observing_window', gate)
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (64, 64), (30, 40, 50)), {'FILENAME': 'f.png', 'EXPOSURE': '10.0s'},
+        _base_config(tmp_path, {'enabled': False})))
+
+    assert order[0] == 'evidence' and 'gate' in order
+
+
+def test_no_stars_blanks_sky_features_but_not_the_roof_consumers(worker, tmp_path, monkeypatch):
+    """Three Open frames with no stars: star tokens go N/A and the reason is
+    recorded, while the ASCOM safety file certifies SAFE from the very same
+    ML verdict and the results the meteor gate reads still say Open."""
+    from services.observing_window import NO_STARS_CONFIRM_FRAMES, REASON_KEY, reset_roof_gate
+    from services.sky_evidence import EVIDENCE_KEY
+    import ui.controllers.image_processor as ip
+
+    reset_roof_gate()
+    writes = []
+    worker._safety_fsm._writer = lambda ml, cfg: (writes.append(dict(ml)), True)[1]
+    worker._main_window = None
+
+    class _Svc:
+        def is_available(self):
+            return True
+
+        def initialize(self):
+            return True
+
+        def get_last_results(self):
+            return {'roof_status': 'Open', 'roof_confidence': 0.95, 'stars_visible': False}
+
+    monkeypatch.setattr(ip, 'get_ml_service', lambda: _Svc())
+    monkeypatch.setattr(ip, 'analyze_image_for_tokens',
+                        lambda arr, config=None: {'ROOF_STATUS': 'Open (95%)', 'STARS_VISIBLE': 'No'})
+    monkeypatch.setattr(ip, 'compute_sky_evidence', lambda image, metadata, config:
+                        metadata.setdefault(EVIDENCE_KEY, {'star_count': 0, 'exposure_s': 13.0,
+                                                           'sky_circle': None, 'frame_size': image.size}))
+    metadata_out = []
+    worker.processing_complete.connect(lambda p, o, m, path, d: metadata_out.append(m))
+
+    cfg = _base_config(tmp_path, {'enabled': True, 'ascom_safety_file': _ascom(tmp_path)})
+    cfg['allsky_overlay'] = {'min_exposure_s': 0.5, 'min_star_detections': 15}
+    try:
+        for _ in range(NO_STARS_CONFIRM_FRAMES):
+            worker._process_task(ImageProcessingTask(
+                Image.new('RGB', (32, 32), (40, 40, 40)), {'FILENAME': 'x.png', 'EXPOSURE': '13.0s'}, cfg))
+    finally:
+        reset_roof_gate()
+
+    last = metadata_out[-1]
+    assert last[REASON_KEY] == 'no_stars' and last['STAR_COUNT'] == 'N/A'
+    assert metadata_out[0][REASON_KEY] == ''
+    assert last['_ML_RESULTS']['roof_status'] == 'Open'
+    assert worker._safety_fsm._confirmed_safe is True
+    assert writes[-1]['roof_status'] == 'Open'
+
+
+def test_a_static_frame_is_gated_without_a_star_scan(worker, tmp_path, monkeypatch):
+    from services import sky_evidence
+    from services.observing_window import REASON_KEY, reset_roof_gate
+    import ui.controllers.image_processor as ip
+
+    reset_roof_gate()
+    worker._main_window = None
+    scans = []
+    monkeypatch.setattr(sky_evidence, '_scan', lambda image, rects=None: (scans.append(1), (0, None))[1])
+
+    class _Svc:
+        def is_available(self):
+            return True
+
+        def initialize(self):
+            return True
+
+        def get_last_results(self):
+            return {'roof_status': 'Open', 'roof_confidence': 0.95, 'frame_is_static': True}
+
+    monkeypatch.setattr(ip, 'get_ml_service', lambda: _Svc())
+    monkeypatch.setattr(ip, 'analyze_image_for_tokens', lambda arr, config=None: {'ROOF_STATUS': 'Open (95%)'})
+    metadata_out = []
+    worker.processing_complete.connect(lambda p, o, m, path, d: metadata_out.append(m))
+
+    cfg = _base_config(tmp_path, {'enabled': True})
+    cfg['allsky_overlay'] = {'min_exposure_s': 0.5, 'min_star_detections': 15}
+    worker._process_task(ImageProcessingTask(
+        Image.new('RGB', (32, 32), (40, 40, 40)), {'FILENAME': 'x.png', 'EXPOSURE': '13.0s'}, cfg))
+    reset_roof_gate()
+
+    assert scans == []
+    assert metadata_out[-1][REASON_KEY] == 'static'
+    assert metadata_out[-1]['STAR_COUNT'] == 'N/A'

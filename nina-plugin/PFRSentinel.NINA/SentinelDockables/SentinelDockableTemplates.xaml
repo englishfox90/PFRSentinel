@@ -107,33 +107,79 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!--  Read-only statistics, straight from /status. No derived figures.  -->
-            <ItemsControl
+            <!--
+                Two columns when the dock is wide enough, stacked when it is not: a
+                WrapPanel moves the target column under the statistics instead of
+                squeezing either. The row template is repeated rather than shared,
+                because a shared one would be a StaticResource lookup (see the top).
+            -->
+            <WrapPanel
                 Grid.Row="4"
                 Margin="1,6,1,0"
-                ItemsSource="{Binding Statistics}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Margin="0,1,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="92" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                Grid.Column="0"
-                                FontSize="11"
-                                Foreground="#FF6E6E6E"
-                                Text="{Binding Label}" />
-                            <TextBlock
-                                Grid.Column="1"
-                                FontSize="11"
-                                Foreground="#FF8A8A8A"
-                                Text="{Binding Value}"
-                                TextTrimming="CharacterEllipsis" />
-                        </Grid>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                Orientation="Horizontal">
+
+                <!--  Read-only statistics, straight from /status. No derived figures.  -->
+                <ItemsControl
+                    Width="250"
+                    Margin="0,0,16,6"
+                    ItemsSource="{Binding Statistics}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,1,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="92" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    FontSize="11"
+                                    Foreground="#FF6E6E6E"
+                                    Text="{Binding Label}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    FontSize="11"
+                                    Foreground="#FF8A8A8A"
+                                    Text="{Binding Value}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!--  What the plugin last sent to Sentinel's all-sky overlay (SentinelTargetRows).  -->
+                <StackPanel Width="280">
+                    <ItemsControl ItemsSource="{Binding TargetRows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,1,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="92" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        FontSize="11"
+                                        Foreground="#FF6E6E6E"
+                                        Text="{Binding Label}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        FontSize="11"
+                                        Foreground="#FF8A8A8A"
+                                        Text="{Binding Value}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock
+                        Margin="0,2,0,0"
+                        FontSize="11"
+                        Foreground="#FFFFB300"
+                        Text="{Binding TargetProblemText}"
+                        TextWrapping="Wrap"
+                        Visibility="{Binding TargetProblemVisibility}" />
+                </StackPanel>
+            </WrapPanel>
 
             <TextBlock
                 Grid.Row="5"

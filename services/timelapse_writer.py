@@ -12,7 +12,6 @@ from datetime import datetime, date, timedelta
 from typing import Optional, Tuple
 
 from PIL import Image
-import numpy as np
 
 from .logger import app_logger
 from .utils_paths import get_app_data_dir
@@ -177,7 +176,11 @@ class TimelapseWriter:
         now = datetime.now()
         try:
             frame_size = (image.width, image.height)
-            frame_bytes = np.array(image.convert('RGB'), dtype=np.uint8).tobytes()
+            # Pillow packs RGB to 3 bytes/px on tobytes(), which is exactly the
+            # rgb24 ffmpeg reads. Going through np.array(convert('RGB')) made
+            # four full-frame copies (~150 MB at 3552² per frame) for the same bytes.
+            rgb = image if image.mode == 'RGB' else image.convert('RGB')
+            frame_bytes = rgb.tobytes()
         except Exception as e:
             app_logger.error(f"Timelapse: frame convert error: {e}")
             return

@@ -1,7 +1,7 @@
 """Tests for services.coordinates — coordinate text parsing/normalisation."""
 import pytest
 
-from services.coordinates import parse_coordinate, to_decimal_string
+from services.coordinates import is_unsigned_dms, parse_coordinate, to_decimal_string
 
 
 class TestParseDecimal:
@@ -81,3 +81,17 @@ class TestRoundTrip:
 
     def test_negative_zero(self):
         assert to_decimal_string(-0.0) == "0"
+
+
+class TestIsUnsignedDms:
+    """The hemisphere of these values is an assumption, so the config
+    migration warns on them and on nothing else."""
+
+    @pytest.mark.parametrize("text", ["31 32 51", "31:32:51", "31° 32' 51\"", "100 27", " 31 32 51 "])
+    def test_bare_dms_is_unsigned(self, text):
+        assert is_unsigned_dms(text) is True
+
+    @pytest.mark.parametrize("text", ["31.33", "-100.457", "100.457", "-100 27 25", "100 27 25 W",
+                                      "N 31 32 51", "31 32 51 s", "", "   ", None])
+    def test_decimal_signed_lettered_and_blank_are_not(self, text):
+        assert is_unsigned_dms(text) is False

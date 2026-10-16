@@ -174,21 +174,15 @@ class TestMultiCalibrateRegularization:
                 'sky_cx': 1137.0, 'sky_cy': 1306.0, 'sky_r': 968.0,
                 'image_width': 2628, 'image_height': 2628}
 
-    def test_cold_start_bootstrap_no_seed(self, monkeypatch):
+    def test_cold_start_bootstrap_no_seed(self):
         """With no prior model (fresh install, any site), the cross-frame
         orientation search + joint fit must recover a valid model from cold.
-        The grid is narrowed here for speed; the full-grid discrimination is
-        exercised offline."""
+        The full unseeded roll-vote search runs here (orientation_search):
+        both mirrors, the whole axis grid and the scale scan."""
         pytest.importorskip('scipy')
         from datetime import datetime, timezone, timedelta
         from services.allsky import multi_calibrate as MC
         from services.allsky.calibration_validate import validate_lens_polynomial
-
-        # Narrow the coarse grid to a focused window around the true pose so the
-        # test runs fast while still exercising search -> top-k -> fit -> gate.
-        monkeypatch.setattr(MC, 'ORIENT_AXIS_ALT', range(75, 91, 5))
-        monkeypatch.setattr(MC, 'ORIENT_AXIS_AZ', range(0, 60, 15))
-        monkeypatch.setattr(MC, 'ORIENT_ROLL_DEG', range(-45, 15, 15))
 
         true_model = FisheyeModel(
             cx=1137.44, cy=1306.0, a1=643.39, a3=1.30, a5=-7.73,

@@ -16,7 +16,7 @@ Decides whether the roof is open or closed from the pier camera image.
 |----------|-------|
 | Input | Frame reduced to 128x128 greyscale, plus 4 context values |
 | Output | Open or Closed, with a confidence percentage |
-| Accuracy | 99.8% validation accuracy (June 27, 2026 model) |
+| Accuracy | 99.8% on a held-out test set of 1,120 frames, and 327 of 327 on frames added after the June model (September 27, 2026 model) |
 
 Alongside the image, the model uses:
 
@@ -24,8 +24,12 @@ Alongside the image, the model uses:
 |---------------|-------------|
 | Corner-to-centre ratio | Brightness of the frame corners compared with the centre. A closed roof tends to be evenly dark; an open sky has a gradient. |
 | Median brightness | Overall frame brightness, scaled correctly for 8-bit and 16-bit frames. |
-| Night flag | Whether the PC clock is between 20:00 and 06:00. |
+| Night flag | Whether it is astronomical night at your location (sun more than 18° below the horizon), from the latitude and longitude in [Weather Setup](Weather-Setup). With no location set, the PC clock between 22:00 and 05:00. |
 | Hour | Hour of day from the PC clock. |
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> The night flag follows real twilight at the observatory. Earlier versions used the PC clock (20:00 to 06:00), which disagrees with the sky by up to several hours depending on season and latitude, and this flag is what tips a borderline frame. Set your location under Weather Setup for it to apply. The September 27, 2026 models were trained with the corrected flag; the models shipped before that were trained on the clock-based one, for which the corrected flag is still closer to what they learned than the clock was.
 
 ### Sky Classifier
 
@@ -35,7 +39,11 @@ Assesses the sky. It only runs when the roof classifier reports Open, because wi
 |----------|-------|
 | Input | Frame reduced to 384x384 greyscale, plus 6 context values |
 | Output | Sky condition, whether stars are visible, star density, whether the moon is visible |
-| Accuracy (sky condition) | 90.4% overall on the held-out test set: Clear 92.7% (204 of 220), Partly Cloudy 15 of 23, Overcast 6 of 6 (June 27, 2026 model) |
+| Accuracy (sky condition) | 93.2% overall on a held-out test set of 340 frames: Clear 95.4% (269 of 282), Partly Cloudy 39 of 47, Overcast 9 of 11; 86.0% on the 93 test frames added after the June model (September 27, 2026 model) |
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> The sky classifier is now built on an image-recognition network pre-trained on general photographs and fine-tuned on pier camera frames, instead of a network trained from nothing. On frames neither model had seen, it is right 86% of the time against 70% for the June model, and Partly Cloudy went from 54% to 71%. The same network trained from nothing scores exactly like the June model, so the gain comes from the pre-training. It costs about 4 ms more per frame on a CPU.
 
 | Output | Values |
 |--------|--------|
@@ -62,7 +70,7 @@ Non-square frames are centre-cropped to a square before they are reduced, so the
 - **Trained on one observatory.** Both models were trained on frames from a single pier camera (a ZWO ASI676MC with square frames). Other cameras, lenses, fields of view and enclosures may give noticeably different results. Watch the predictions for a few nights before relying on them.
 - **Overexposure hurts roof detection.** In testing, the roof classifier's remaining errors were overexposed frames, typically bright daytime frames with the roof open. Bright moonlight on its own was not a significant cause of errors.
 - **Moonlit clear nights can read as Partly Cloudy.** Moon glow and twilight wash out the sky in a way that looks like thin cloud. Much of the training data carries the same ambiguity, so treat Partly Cloudy on a bright-moon night with caution.
-- **Partly Cloudy is the weakest class.** It was right on 15 of 23 test frames (about 65%), limited by how few partly cloudy frames exist in the training data. Overcast has only a handful of test frames, so its score is not a reliable estimate.
+- **Partly Cloudy is the weakest class.** The September 27, 2026 model was right on 39 of 47 test frames (83%), up from about 65% for the June model, but thin cloud against a clear sky is a judgement call even for a person, and the labels carry that ambiguity. Overcast has only a handful of test frames, so its score is not a reliable estimate.
 - **Time features use the PC clock.** Make sure the observatory PC's time and time zone are correct.
 - **The models see the raw frame.** Predictions are made before stretching, brightness and overlays, so image processing settings don't affect them. Very underexposed or overexposed raw frames do.
 
@@ -87,11 +95,25 @@ While the roof is closed, the three sky tokens show `N/A`. **Star density** is l
 
 The status strip in [Live Monitoring](Live-Monitoring) has **Roof** and **Sky** tiles. Roof shows Open or Closed, and Sky shows the sky condition, each colour-coded. While the roof is closed, the Sky and Seeing tiles show "Roof closed". Both tiles show "Not configured" when ML is off.
 
+#### Too Much Static
+
+> **New in the next release** — not available in version 3.7.7 or earlier.
+
+A frame that is almost entirely sensor noise gives the models nothing to judge. This is typical of a closed roof at night with the exposure at its maximum. On such a frame the roof model can report a low-confidence **Open**, and the sky model a confident **Clear**, when neither is true.
+
+PFR Sentinel measures each frame for this. When a frame is only noise, the Roof tile turns amber and reads **Open · unreliable** or **Closed · unreliable**, the Sky tile reads **Too much static**, and hovering either tile explains why. The log records when it starts and stops.
+
+This is a warning only. The roof reading, the overlay tokens, roof change notifications and the ASCOM safety file all still use whatever the models reported.
+
 ### Skipping Sky Features While the Roof Is Closed
 
-With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
+> **New in the next release** — not available in version 3.7.7 or earlier.
 
-The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details.
+With **Skip Sky Features When Roof Closed** on (the default), star detection and the [All-Sky Overlay](All-Sky-Overlay), including its background calibration, pause while the roof reads Closed. The roof has to read Closed on two frames in a row before they pause, matching the safety file and the roof alert, so one misread frame — typically when the exposure changes — does not blank the overlay. If your camera has no roof, for example an open-air all-sky camera, turn this off so a mistaken Closed reading can't switch those features off.
+
+The roof reading is now corroborated by the frame itself. A frame flagged as sensor noise only, a frame exposed for less than the **Minimum exposure** floor, or a roof that reads Open while no stars are detected on three frames in a row also pauses those features — a misread Open on a lit roof, or an overcast sky, no longer gets constellation labels. The floors are on the All-Sky page; see [When the overlay is drawn](All-Sky-Overlay#when-the-overlay-is-drawn). A Closed reading is never overridden by detected stars.
+
+The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting or the star check. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details. The roof change notifications, the timelapse roof mode and the ASCOM safety file likewise follow the roof classifier alone.
 
 ### Roof Change Notifications
 
@@ -163,7 +185,7 @@ Development builds can additionally save per-frame calibration data (FITS and JS
 
 ## Training Data
 
-As of the June 27, 2026 models, the roof classifier was trained on about 4,000 labelled pier camera frames. The sky classifier was trained on the roof-open subset of those frames, which is dominated by clear nights. Labels were reviewed to remove moon-glow and closed-roof mislabels before retraining.
+As of the September 27, 2026 models, the roof classifier was trained on 5,598 labelled pier camera frames, 1,000 of them new since June, with 1,632 sky labels rechecked by hand before the retrain. The sky classifier was trained on the 2,262 roof-open frames among them, which are dominated by clear nights. The June 2026 models used about 4,000 frames, reviewed to remove moon-glow and closed-roof mislabels.
 
 Ground truth came from:
 

@@ -223,7 +223,7 @@ def main():
                 sdk_path = config.get('zwo_sdk_path', sdk_path)
         except:
             pass
-    
+
     # Detect cameras
     cameras = detect_cameras(resolve_library_path(sdk_path))
     

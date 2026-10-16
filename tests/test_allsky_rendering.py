@@ -409,3 +409,240 @@ class TestOutputCropTranslation:
         assert result is img, "must return the image unchanged, not attempt a render"
         assert seen == [], "no render layer should have run"
         assert warnings and 'OUTPUT_CROP' in warnings[0]
+
+
+# ===================================================================
+# Visibility plane (issue #93, package 1): vote, equipment map, model disc.
+# The raw-grayscale fallback is gone — a bright frame with no stars must
+# not put labels everywhere, and a dark one must not put them nowhere.
+# ===================================================================
+
+@pytest.fixture
+def _fresh_map():
+    from services.allsky.obstruction_map import get_obstruction_map
+    get_obstruction_map().reset()
+    yield get_obstruction_map()
+    get_obstruction_map().reset()
+
+
+def _square_model(size=750, a1=215.0) -> FisheyeModel:
+    return FisheyeModel(
+        cx=size / 2, cy=size / 2, a1=a1, a3=0.0, a5=0.0,
+        roll=0.0, axis_alt=90.0, axis_az=0.0,
+        rms_residual=1.0, n_matches=50,
+        calibrated_at="2024-01-01T00:00:00+00:00",
+        image_width=size, image_height=size,
+    )
+
+
+def _plane(img, model, stab, obs_map, **kw):
+    from services.allsky.sky_region import visibility_plane
+    return visibility_plane(img, model, DT, LAT, LON, stab, obs_map, **kw)
+
+
+class TestVisibilityPlane:
+    def test_no_vote_and_no_map_gives_the_model_disc_never_grayscale(self, _fresh_map):
+        from services.allsky.label_stability import LabelStabilizer
+        from services.allsky.sky_region import model_sky_radius
+        model = _square_model()
+        stab = LabelStabilizer()
+        for level in (0, 200):                       # black frame, then glare
+            img = Image.new('RGBA', (750, 750), (level, level, level, 255))
+            plane = _plane(img, model, stab, _fresh_map)
+            r = model_sky_radius(model)
+            assert plane[375, 375] == 255
+            assert plane[375, int(375 + r) - 8] == 255
+            assert plane[375, int(375 + r) + 8] == 0
+            assert plane[5, 5] == 0, f"corner passed at grey level {level}"
+
+    def test_model_sky_radius_inverts_the_calibration_seed(self):
+        from services.allsky.calibration_validate import a1_from_sky_radius
+        from services.allsky.sky_region import model_sky_radius
+        model = _square_model(a1=1259.0)
+        assert a1_from_sky_radius(model_sky_radius(model)) == pytest.approx(1259.0)
+
+    def test_fresh_vote_and_map_must_both_say_sky(self, _fresh_map):
+        from services.allsky.label_stability import LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        model = _square_model()
+        stab = LabelStabilizer()
+        img = Image.new('RGBA', (750, 750), (60, 60, 60, 255))
+        _, grid = vote_grid((750, 750))
+        vote_mask = np.zeros(grid, dtype=np.uint8)
+        vote_mask[:, : grid[1] // 2] = 255              # vote: left half is sky
+        ev = SkyEvidence(vote_mask, vote_mask > 0, 60, (750, 750))
+        map_mask = np.zeros(grid, dtype=np.uint8)
+        map_mask[: grid[0] // 2, :] = 255               # map: top half is sky
+        _fresh_map.update(map_mask, n_detections=60, frame_is_observable=True,
+                          full_shape=(750, 750), reach_mask=map_mask > 0,
+                          sky_region=np.ones(grid, dtype=bool))
+        plane = _plane(img, model, stab, _fresh_map, evidence=ev)
+        # all three probes lie inside the model's sky disc (r ≈ 287 px)
+        assert plane[250, 250] == 255                   # sky in both
+        assert plane[500, 250] == 0                     # vote yes, map no
+        assert plane[250, 500] == 0                     # map yes, vote no
+
+    def test_stale_vote_hands_over_to_the_map(self, _fresh_map):
+        from services.allsky.label_stability import MASK_HOLD_FRAMES, LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        model = _square_model()
+        stab = LabelStabilizer()
+        img = Image.new('RGBA', (750, 750), (60, 60, 60, 255))
+        _, grid = vote_grid((750, 750))
+        vote_mask = np.zeros(grid, dtype=np.uint8)
+        vote_mask[:, : grid[1] // 2] = 255
+        map_mask = np.zeros(grid, dtype=np.uint8)
+        map_mask[: grid[0] // 2, :] = 255
+        _fresh_map.update(map_mask, n_detections=60, frame_is_observable=True,
+                          full_shape=(750, 750), reach_mask=map_mask > 0,
+                          sky_region=np.ones(grid, dtype=bool))
+        _plane(img, model, stab, _fresh_map,
+               evidence=SkyEvidence(vote_mask, vote_mask > 0, 60, (750, 750)))
+        miss = SkyEvidence(None, None, 0, (750, 750))
+        for _ in range(MASK_HOLD_FRAMES + 1):
+            plane = _plane(img, model, stab, _fresh_map, evidence=miss)
+        assert stab.masks.is_stale
+        assert plane[250, 500] == 255, "the map alone decides once the vote is stale"
+        assert plane[500, 250] == 0
+
+    def test_every_source_stays_inside_the_model_disc(self, _fresh_map):
+        """Unjudged pixels are sky to the vote and to the map; the frame
+        corners must still never get a label."""
+        from services.allsky.label_stability import MASK_HOLD_FRAMES, LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        model = _square_model()
+        stab = LabelStabilizer()
+        img = Image.new('RGBA', (750, 750), (60, 60, 60, 255))
+        _, grid = vote_grid((750, 750))
+        ones = np.full(grid, 255, dtype=np.uint8)
+        partial = np.zeros(grid, dtype=np.uint8)
+        partial[180:190, 180:190] = 255
+        # partial-only vote: everything else is unjudged
+        plane = _plane(img, model, stab, _fresh_map,
+                       evidence=SkyEvidence(partial, partial > 0, 5, (750, 750)))
+        assert plane[375, 375] == 255 and plane[5, 5] == 0
+        # map that judged the whole frame as sky, vote stale
+        _fresh_map.update(ones, n_detections=60, frame_is_observable=True,
+                          full_shape=(750, 750), reach_mask=ones > 0,
+                          sky_region=np.ones(grid, dtype=bool))
+        for _ in range(MASK_HOLD_FRAMES + 1):
+            plane = _plane(img, model, stab, _fresh_map,
+                           evidence=SkyEvidence(None, None, 0, (750, 750)))
+        assert stab.masks.is_stale
+        assert plane[375, 375] == 255 and plane[5, 5] == 0
+
+    def test_a_vote_for_another_frame_size_is_ignored_on_a_reprocess(self, _fresh_map):
+        from services.allsky.label_stability import LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        model = _square_model()
+        stab = LabelStabilizer()
+        _, grid = vote_grid((750, 750))
+        ones = np.full(grid, 255, dtype=np.uint8)
+        _plane(Image.new('RGBA', (750, 750), (60, 60, 60, 255)), model, stab, _fresh_map,
+               evidence=SkyEvidence(ones, ones > 0, 60, (750, 750)))
+        smaller = Image.new('RGBA', (600, 600), (60, 60, 60, 255))
+        plane = _plane(smaller, _square_model(size=600, a1=172.0), stab, _fresh_map,
+                       advance=False)
+        assert plane.shape == (600, 600) and plane[300, 300] == 255
+
+    def test_a_reprocess_reads_without_advancing(self, _fresh_map):
+        from services.allsky.label_stability import LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        model = _square_model()
+        stab = LabelStabilizer()
+        img = Image.new('RGBA', (750, 750), (60, 60, 60, 255))
+        _, grid = vote_grid((750, 750))
+        m = np.full(grid, 255, dtype=np.uint8)
+        ev = SkyEvidence(m, m > 0, 60, (750, 750))
+        _plane(img, model, stab, _fresh_map, evidence=ev, frame_is_observable=True)
+        _plane(img, model, stab, _fresh_map, evidence=ev, frame_is_observable=True,
+               advance=False)
+        assert stab.masks.depth == 1 and _fresh_map.frames_seen == 1
+
+    def test_map_learns_only_from_observable_frames(self, _fresh_map):
+        from services.allsky.label_stability import LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        model = _square_model()
+        stab = LabelStabilizer()
+        img = Image.new('RGBA', (750, 750), (60, 60, 60, 255))
+        _, grid = vote_grid((750, 750))
+        m = np.full(grid, 255, dtype=np.uint8)
+        ev = SkyEvidence(m, m > 0, 60, (750, 750))
+        _plane(img, model, stab, _fresh_map, evidence=ev, frame_is_observable=False)
+        assert stab.masks.depth == 1, "the vote follows every rendered frame"
+        assert _fresh_map.frames_seen == 0
+
+    @pytest.mark.slow
+    def test_per_frame_cost_at_full_sensor_resolution(self, _fresh_map):
+        """Plan §8: 30 ms per frame at 3552 px for the new capture-path work,
+        star detection excluded (it ran before this change too). Measured
+        idle on the development container: p50 10.8 ms, p95 15.5 ms. The
+        assertion is a loose 5x ceiling so a loaded xdist runner never fails
+        it and a real regression still does; the budget itself is checked
+        from the logged numbers."""
+        import time
+        from services.allsky.label_stability import LabelStabilizer, vote_grid
+        from services.allsky.sky_region import SkyEvidence
+        from services.logger import app_logger
+        size = 3552
+        model = _square_model(size=size, a1=1097.0)
+        stab = LabelStabilizer()
+        img = Image.new('RGBA', (size, size), (60, 60, 60, 255))
+        _, grid = vote_grid((size, size))
+        rng = np.random.default_rng(3)
+        m = np.where(rng.random(grid) > 0.4, 255, 0).astype(np.uint8)
+        ev = SkyEvidence(m, m > 0, 120, (size, size))
+        _plane(img, model, stab, _fresh_map, evidence=ev, frame_is_observable=True)
+        samples = []
+        for _ in range(50):
+            t0 = time.perf_counter()
+            _plane(img, model, stab, _fresh_map, evidence=ev, frame_is_observable=True)
+            samples.append((time.perf_counter() - t0) * 1000.0)
+        p50, p95 = np.percentile(samples, 50), np.percentile(samples, 95)
+        app_logger.info(f"visibility_plane at {size} px: p50={p50:.1f} ms p95={p95:.1f} ms")
+        assert p50 < 150.0, f"p50 {p50:.1f} ms is over 5x the 30 ms budget"
+
+
+class TestMoonGlare:
+    def _moon_pixel(self, model, dt):
+        from services.allsky.coords import radec_to_altaz
+        from services.allsky.planets import moon_radec_topocentric
+        ra, dec = moon_radec_topocentric(dt, LAT, LON)
+        alt, az = radec_to_altaz(ra, dec, LAT, LON, dt, refraction=True)
+        return model.altaz_to_pixel(float(alt), float(az))
+
+    MOON_UP = datetime(2024, 12, 15, 22, 0, 0, tzinfo=timezone.utc)   # alt ≈ 54°
+
+    def test_default_disc_is_a_fraction_of_the_sky_radius(self):
+        from services.allsky.label_stability import vote_grid
+        from services.allsky.sky_region import (
+            MOON_GLARE_FRACTION, model_sky_radius, moon_glare_disc)
+        model = _square_model()
+        img = Image.new('RGB', (750, 750), (60, 60, 60))
+        disc = moon_glare_disc(img, model, self.MOON_UP, LAT, LON)
+        assert disc is not None
+        step, _ = vote_grid((750, 750))
+        r = MOON_GLARE_FRACTION * model_sky_radius(model) / step
+        assert disc.sum() == pytest.approx(np.pi * r * r, rel=0.15)
+        mx, my = self._moon_pixel(model, self.MOON_UP)
+        assert disc[int(my / step), int(mx / step)]
+
+    def test_saturated_core_sets_the_disc(self):
+        from services.allsky.label_stability import vote_grid
+        from services.allsky.sky_region import MOON_HALO_OVER_CORE, moon_glare_disc
+        model = _square_model()
+        gray = np.full((750, 750), 60, dtype=np.uint8)
+        mx, my = self._moon_pixel(model, self.MOON_UP)
+        yy, xx = np.mgrid[0:750, 0:750]
+        core = ((xx - mx) ** 2 + (yy - my) ** 2) <= 8 * 8
+        gray[core] = 255
+        disc = moon_glare_disc(Image.fromarray(gray), model, self.MOON_UP, LAT, LON)
+        step, _ = vote_grid((750, 750))
+        r = MOON_HALO_OVER_CORE * np.sqrt(core.sum() / np.pi) / step
+        assert disc.sum() == pytest.approx(np.pi * r * r, rel=0.25)
+
+    def test_no_disc_when_the_moon_is_down(self):
+        from services.allsky.sky_region import moon_glare_disc
+        img = Image.new('RGB', (750, 750), (60, 60, 60))
+        noon = datetime(2024, 12, 15, 12, 0, 0, tzinfo=timezone.utc)   # Moon alt ≈ -50°
+        assert moon_glare_disc(img, _square_model(), noon, LAT, LON) is None

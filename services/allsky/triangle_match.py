@@ -33,6 +33,7 @@ from .calibration import (
 )
 from .star_centroid import detect_stars, estimate_sky_circle
 from .catalogs import get_bright_stars
+from .single_frame_chance import judge_single_frame_fit, single_frame
 from .calibration_validate import (
     validate_a1_scale,
     validate_bright_anchors,
@@ -603,13 +604,25 @@ def triangle_calibrate(
         )
         raise CalibrationError(f"Triangle match failed sanity check: {reason}")
 
+    # The chance judgement the joint fit applies (single_frame_chance). This
+    # is the path that fills an EMPTY slot, so nothing behind it can catch a
+    # coincidence fit: 2026-09-28, 10 matches at RMS = tol/√2 with 5/12
+    # anchors passed everything above and drew Polaris at the south edge.
+    img_h, img_w = _get_image_size(image) if image is not None else (0, 0)
+    chance_ok, chance_msg, _est = judge_single_frame_fit(
+        model, single_frame(detected, above_horizon, sky_cx, sky_cy, sky_radius,
+                            image_width=img_w, image_height=img_h))
+    if not chance_ok:
+        raise CalibrationError(
+            f"Triangle match is at chance level: {chance_msg} — the match "
+            "count carries no orientation information at this resolution.")
+
     elapsed = _time.monotonic() - t0
     # Resolution-bind the model (F5): the renderer scales cx/cy/a1/a3/a5 by the
     # ratio of render size to these dims. Without them the triangle-fallback path
     # would save a model with dims 0,0 — treated as "legacy, never scale" — and
     # reintroduce the resize_percent misalignment in exactly the hard-to-solve
     # frames the fallback exists for.
-    img_h, img_w = _get_image_size(image)
     model.image_width = img_w
     model.image_height = img_h
     model.calibrated_at = datetime.now(timezone.utc).isoformat()

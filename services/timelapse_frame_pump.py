@@ -31,6 +31,11 @@ class FramePump:
         self._thread = threading.Thread(target=self._run, daemon=True, name=name)
         self._thread.start()
 
+    @property
+    def queued(self) -> int:
+        """Items waiting in the queue (not counting one the worker is running)."""
+        return self._queue.qsize()
+
     def submit(self, item: Any) -> None:
         """Enqueue ``item`` for background processing. Never blocks the caller.
 

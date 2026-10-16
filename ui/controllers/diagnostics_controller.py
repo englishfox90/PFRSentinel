@@ -17,7 +17,9 @@ import time
 from PySide6.QtCore import QObject, Signal
 
 from services import app_config
-from services.diagnostics_bundle import build_bundle, default_bundle_path, environment_info
+from services.diagnostics_bundle import (
+    allsky_buffer_dump_files, allsky_calibration_history_files, build_bundle,
+    default_bundle_path, environment_info)
 from services.logger import app_logger
 from services.raw_frame_export import export_raw_frame
 from services.reveal_in_file_manager import reveal_path
@@ -162,10 +164,13 @@ class DiagnosticsController(QObject):
         files = {
             'allsky/allsky_calibration.json': app_config.get_calibration_path(),
             'allsky/allsky_calibration.previous.json': app_config.get_calibration_backup_path(),
+            'allsky/allsky_calibration.guided.json': app_config.get_guided_calibration_path(),
         }
         custom = (config_data.get('allsky_overlay') or {}).get('calibration_file')
         if custom and os.path.abspath(custom) != os.path.abspath(files['allsky/allsky_calibration.json']):
             files[f'allsky/custom_{os.path.basename(custom)}'] = custom
+        files.update(allsky_buffer_dump_files(app_config.get_allsky_buffer_dir(create=False)))
+        files.update(allsky_calibration_history_files())
         return files
 
     def _summary(self, config_data, notes) -> dict:
@@ -179,9 +184,18 @@ class DiagnosticsController(QObject):
                                          'is_watching', False)),
             'selected_camera': cfg.get('zwo_selected_camera_name', ''),
             'live_camera': self._live_camera_settings(),
+            'resources': self._resource_snapshot(),
             'notes': notes,
         })
         return info
+
+    def _resource_snapshot(self) -> dict:
+        """Latest memory/CPU sample (services/resource_monitor.py); {} if none."""
+        monitor = getattr(self._mw, 'resource_monitor', None)
+        try:
+            return monitor.snapshot() if monitor is not None else {}
+        except Exception:
+            return {}
 
     def _live_camera_settings(self):
         zwo = getattr(getattr(self._mw, 'camera_controller', None), 'zwo_camera', None)

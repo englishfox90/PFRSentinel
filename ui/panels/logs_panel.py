@@ -2,15 +2,22 @@
 Logs Panel
 Full log viewer with filtering
 """
+import html
+from collections import deque
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
     QTextEdit, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from qfluentwidgets import (
     CardWidget, SubtitleLabel, BodyLabel, CaptionLabel,
     PushButton, ComboBox, LineEdit, SwitchButton,
     InfoBar, InfoBarPosition
+)
+
+from services.log_line_level import (
+    DEFAULT_LEVEL, LEVELS, at_or_above, line_level, normalise_threshold,
 )
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
@@ -35,7 +42,16 @@ class LogsPanel(QScrollArea):
         super().__init__(parent)
         self.main_window = parent
         self._max_lines = 1000
+        # Raw lines kept apart from the document so a new search or level can
+        # re-filter history. Deeper than the view: a rare keyword should still
+        # find lines that DEBUG chatter has pushed off the visible 1000.
+        self._history = deque(maxlen=10000)
+        self._match_count = 0
         self._auto_scroll = True
+        self._refilter_timer = QTimer(self)
+        self._refilter_timer.setSingleShot(True)
+        self._refilter_timer.setInterval(200)
+        self._refilter_timer.timeout.connect(self._rerender)
         self._setup_ui()
     
     def _setup_ui(self):
@@ -68,8 +84,12 @@ class LogsPanel(QScrollArea):
         controls_layout.addWidget(filter_label)
         
         self.level_filter = ComboBox()
-        self.level_filter.addItems(["Info+", "All", "INFO", "WARN", "ERROR", "DEBUG"])
-        self.level_filter.setCurrentText("Info+")
+        self.level_filter.addItems(list(LEVELS))
+        self.level_filter.setCurrentText(DEFAULT_LEVEL)
+        self.level_filter.setToolTip(
+            "Shows this level and everything more severe: DEBUG shows all, "
+            "INFO hides DEBUG, WARN shows warnings and errors, ERROR only errors"
+        )
         self.level_filter.currentTextChanged.connect(self._on_filter_changed)
         self.level_filter.setFixedWidth(100)
         controls_layout.addWidget(self.level_filter)
@@ -77,11 +97,20 @@ class LogsPanel(QScrollArea):
         # Search
         self.search_input = LineEdit()
         self.search_input.setPlaceholderText("Search logs...")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setToolTip(
+            "Shows only lines containing this text (not case-sensitive), "
+            "both past lines and new ones as they arrive"
+        )
         self.search_input.textChanged.connect(self._on_search_changed)
         self.search_input.setMinimumWidth(100)
         self.search_input.setMaximumWidth(250)
         controls_layout.addWidget(self.search_input)
-        
+
+        self.match_label = CaptionLabel("")
+        self.match_label.setStyleSheet(f"color: {Colors.text_muted};")
+        controls_layout.addWidget(self.match_label)
+
         controls_layout.addStretch()
         
         # Auto-scroll
@@ -159,12 +188,11 @@ class LogsPanel(QScrollArea):
         layout.addWidget(log_card, 1)
     
     def load_from_config(self, config):
-        saved = config.get('ui_log_level', 'Info+')
-        index = self.level_filter.findText(saved)
-        if index >= 0:
-            self.level_filter.setCurrentIndex(index)
+        saved = normalise_threshold(config.get('ui_log_level', DEFAULT_LEVEL))
+        self.level_filter.setCurrentIndex(self.level_filter.findText(saved))
 
     def _on_filter_changed(self, level):
+        self._rerender()
         if self.main_window and hasattr(self.main_window, 'config'):
             self.main_window.config.set('ui_log_level', level)
             if hasattr(self.main_window, 'save_config'):
@@ -173,9 +201,8 @@ class LogsPanel(QScrollArea):
                 self.main_window.config.save()
     
     def _on_search_changed(self, text):
-        """Handle search text change"""
-        # Will be implemented with actual searching
-        pass
+        # Debounced: re-filtering 10k lines on every keystroke stutters.
+        self._refilter_timer.start()
     
     def _on_auto_scroll_changed(self, checked):
         """Handle auto-scroll toggle"""
@@ -185,7 +212,9 @@ class LogsPanel(QScrollArea):
     
     def _clear_logs(self):
         """Clear log display"""
+        self._history.clear()
         self.log_text.clear()
+        self._update_match_label()
     
     def _open_log_folder(self):
         """Open log folder in the OS file manager"""
@@ -233,34 +262,50 @@ class LogsPanel(QScrollArea):
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def _passes(self, message: str, level: str, needle: str) -> bool:
+        if not at_or_above(message, level):
+            return False
+        return not needle or needle in message.lower()
+
     def _append_one(self, message: str):
         """Render one message into the document. No scrolling — see append_logs."""
-        # Color coding based on level
-        if "ERROR" in message:
-            color = Colors.error_text
-        elif "WARN" in message:
-            color = Colors.warning_text
-        elif "DEBUG" in message:
-            color = Colors.text_muted
-        else:
-            color = Colors.text_secondary
-        
-        # Apply filter
-        current_filter = self.level_filter.currentText()
-        if current_filter == "Info+":
-            if "DEBUG" in message:
-                return
-        elif current_filter != "All":
-            if current_filter not in message:
-                return
-        
-        # Apply search
-        search_text = self.search_input.text()
-        if search_text and search_text.lower() not in message.lower():
+        color = {
+            "ERROR": Colors.error_text,
+            "WARN": Colors.warning_text,
+            "DEBUG": Colors.text_muted,
+        }.get(line_level(message), Colors.text_secondary)
+        # Escaped: a line holding "<lambda>" or a URL with "<id>" vanished as a tag.
+        self.log_text.append(f'<span style="color: {color};">{html.escape(message)}</span>')
+
+    def _rerender(self):
+        """Rebuild the view from history under the current level and search."""
+        self._refilter_timer.stop()
+        level = self.level_filter.currentText()
+        needle = self.search_input.text().strip().lower()
+        matches = [m for m in self._history if self._passes(m, level, needle)]
+        self._match_count = len(matches)
+        self.log_text.setUpdatesEnabled(False)
+        try:
+            self.log_text.clear()
+            for msg in matches[-self._max_lines:]:
+                self._append_one(msg)
+        finally:
+            self.log_text.setUpdatesEnabled(True)
+        self._update_match_label()
+        if self._auto_scroll:
+            self._scroll_to_bottom()
+
+    def _update_match_label(self):
+        needle = self.search_input.text().strip()
+        if not needle:
+            self.match_label.setText("")
+            self.log_text.setPlaceholderText("")
             return
-        
-        # Append with color
-        self.log_text.append(f'<span style="color: {color};">{message}</span>')
+        count = self._match_count
+        self.match_label.setText(f"{count} match" + ("" if count == 1 else "es"))
+        self.log_text.setPlaceholderText(
+            f"No lines containing \"{needle}\" yet. New ones will appear here as they're logged."
+        )
 
     def append_log(self, message: str):
         """Append a single log message"""
@@ -270,15 +315,24 @@ class LogsPanel(QScrollArea):
         """Append a batch of log messages with one repaint and one scroll."""
         if not messages:
             return
+        self._history.extend(messages)
+        level = self.level_filter.currentText()
+        needle = self.search_input.text().strip().lower()
         # The switch is the only gate: a resize leaves the scrollbar short of
         # its new maximum, so an "already at bottom" check would silently stop
         # following after any window/splitter change.
         follow = self._auto_scroll
+        added = 0
         self.log_text.setUpdatesEnabled(False)
         try:
             for msg in messages:
-                self._append_one(msg)
+                if self._passes(msg, level, needle):
+                    self._append_one(msg)
+                    added += 1
         finally:
             self.log_text.setUpdatesEnabled(True)
+        if added and needle:
+            self._match_count = self._match_count + added
+            self._update_match_label()
         if follow:
             self._scroll_to_bottom()

@@ -258,6 +258,12 @@ class FileWatcher:
         self.weather_service = weather_service
         self.observer = None
         self.handler = None
+
+    def set_weather_service(self, weather_service):
+        """Swap in a rebuilt service mid-watch so a settings edit reaches the next frame."""
+        self.weather_service = weather_service
+        if self.handler is not None:
+            self.handler.weather_service = weather_service
     
     def start(self):
         """Start watching the directory"""

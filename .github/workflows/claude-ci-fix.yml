@@ -32,12 +32,64 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # First, before any checkout or install: read the log of the attempt that
+      # actually failed. The event names that attempt (run_attempt). Listing the
+      # run's jobs without pinning it returns the LATEST attempt, so a manual
+      # re-run started in the minute between the failure and this step made
+      # the failed job read "in progress", the log came out empty, and Claude
+      # was asked to fix a failure it could not see (PR #113, 2026-09-29).
+      # If a newer attempt already exists the failure is being retried by a
+      # human; there is nothing for this job to do, so it stops here without
+      # installing anything.
+      - name: Collect failed job logs
+        id: failure
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const run_id = ${{ github.event.workflow_run.id }};
+            const attempt_number = ${{ github.event.workflow_run.run_attempt }};
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner, repo: context.repo.repo, run_id });
+            if (run.data.run_attempt !== attempt_number) {
+              core.info(`Attempt ${attempt_number} failed but attempt `
+                + `${run.data.run_attempt} already exists — someone re-ran it; `
+                + 'leaving the retry to decide.');
+              core.setOutput('proceed', 'false');
+              core.setOutput('jobs', '');
+              return;
+            }
+            const jobs = await github.rest.actions.listJobsForWorkflowRunAttempt({
+              owner: context.repo.owner, repo: context.repo.repo, run_id,
+              attempt_number, per_page: 50 });
+            const failed = jobs.data.jobs.filter(j => j.conclusion === 'failure');
+            let text = '';
+            for (const job of failed) {
+              const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                owner: context.repo.owner, repo: context.repo.repo, job_id: job.id });
+              const body = String(logs.data);
+              // Keep the tail: that is where pytest/ruff summaries live.
+              text += `\n\n===== JOB: ${job.name} =====\n` + body.slice(-12000);
+            }
+            if (!failed.length) {
+              // A failed run with no failed job: a cancelled or infrastructure
+              // failure. Say so rather than hand Claude an empty file.
+              core.info('No job on this attempt concluded "failure"; nothing to fix.');
+              core.setOutput('proceed', 'false');
+              core.setOutput('jobs', '');
+              return;
+            }
+            require('fs').writeFileSync('/tmp/ci-failure.log', text);
+            core.setOutput('proceed', 'true');
+            core.setOutput('jobs', failed.map(j => j.name).join(', '));
+
       - uses: actions/checkout@v7
+        if: steps.failure.outputs.proceed == 'true'
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v7
+        if: steps.failure.outputs.proceed == 'true'
         with:
           python-version: "3.13"
           cache: pip
@@ -46,6 +98,7 @@ jobs:
             requirements-dev.txt
 
       - name: Install dependencies so Claude can run the checks
+        if: steps.failure.outputs.proceed == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libglib2.0-0 > /dev/null
@@ -54,6 +107,7 @@ jobs:
 
       - name: Create fix branch
         id: branch
+        if: steps.failure.outputs.proceed == 'true'
         env:
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           RUN_ID: ${{ github.event.workflow_run.id }}
@@ -65,27 +119,8 @@ jobs:
           git checkout -b "$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Collect failed job logs
-        id: failure
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const run_id = ${{ github.event.workflow_run.id }};
-            const jobs = await github.rest.actions.listJobsForWorkflowRun({
-              owner: context.repo.owner, repo: context.repo.repo, run_id, per_page: 50 });
-            const failed = jobs.data.jobs.filter(j => j.conclusion === 'failure');
-            let text = '';
-            for (const job of failed) {
-              const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                owner: context.repo.owner, repo: context.repo.repo, job_id: job.id });
-              const body = String(logs.data);
-              // Keep the tail: that is where pytest/ruff summaries live.
-              text += `\n\n===== JOB: ${job.name} =====\n` + body.slice(-12000);
-            }
-            require('fs').writeFileSync('/tmp/ci-failure.log', text);
-            core.setOutput('jobs', failed.map(j => j.name).join(', '));
-
       - name: Fix with Claude
+        if: steps.failure.outputs.proceed == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

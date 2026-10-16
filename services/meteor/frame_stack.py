@@ -70,6 +70,14 @@ class FrameStack:
         return len(self._frames)
 
     @property
+    def nbytes(self) -> int:
+        """Bytes held by the retained frames and the running sum."""
+        total = sum(int(f.nbytes) for f in self._frames)
+        if self._running_sum is not None:
+            total += int(self._running_sum.nbytes)
+        return total
+
+    @property
     def maxlen(self) -> int:
         return self._maxlen
 

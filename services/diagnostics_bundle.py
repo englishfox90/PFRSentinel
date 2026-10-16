@@ -31,6 +31,9 @@ REDACTED = '<redacted>'
 
 BUNDLE_PREFIX = 'PFRSentinel_diagnostics'
 DEFAULT_LOG_DAYS = 3
+# Recorded under ``missing`` when a rig has never written a buffer dump, so
+# the summary says so the same way it does for an absent calibration file.
+BUFFER_DUMP_PLACEHOLDER = 'allsky/buffer_*.json'
 
 
 def redact_config(data):
@@ -87,6 +90,35 @@ def environment_info(version) -> dict:
         'frozen': bool(getattr(sys, 'frozen', False)),
         'created_at': datetime.now().astimezone().isoformat(timespec='seconds'),
     }
+
+
+def allsky_buffer_dump_files(dump_dir) -> dict:
+    """``{arcname: path}`` for the newest calibration buffer dump.
+
+    Same shape as the calibration entries the controller builds, so it drops
+    straight into ``extra_files``. Only the newest dump goes in: the older
+    ones are the same rig on earlier escapes, and the bundle is attached to
+    a GitHub issue with a size limit.
+    """
+    # Function-level: this module stays a light, pure file assembler; the
+    # dump's naming lives with the dump, behind the whole allsky package.
+    from .allsky.buffer_dump import newest_dump
+    newest = newest_dump(dump_dir)
+    if newest is None:
+        return {BUFFER_DUMP_PLACEHOLDER: None}
+    return {f'allsky/{newest.name}': str(newest)}
+
+
+def allsky_calibration_history_files() -> dict:
+    """``{arcname: path}`` for every calibration history entry
+    (allsky/calibration_history.py): which model was live when, and what
+    replaced it — the question a "my calibration is gone" report asks.
+    Retention bounds the count to a few dozen ~2 KB files."""
+    from .allsky.calibration_history import bundle_files
+    try:
+        return bundle_files()
+    except Exception:
+        return {}
 
 
 def default_bundle_path(base_dir) -> Path:

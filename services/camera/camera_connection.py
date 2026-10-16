@@ -49,7 +49,7 @@ class CameraConnection:
         Initialize connection manager.
 
         Args:
-            sdk_path: Path to ASICamera2.dll (optional, will search defaults)
+            sdk_path: Path to the ZWO SDK library (optional, will search defaults)
             logger: Callback function for logging messages
         """
         self.sdk_path = sdk_path

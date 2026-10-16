@@ -16,5 +16,7 @@ Prefer the production calibration path in `services/allsky/` for any runtime wor
 | `analyze_calibration_data.py` | Batch stats over calibration JSON files |
 | `analyze_modes.py` | Mode classification stats for FITS-file threshold tuning |
 | `backfill_calibration.py` | One-off — add missing fields to historical calibration JSONs |
+| `library_to_buffer.py` | Image-library night (+ `library.db`) → calibration buffer dump, the same JSON the app writes (issue #93) |
+| `replay_buffer.py` | Replay a buffer dump through pole finder, joint fit, chance gate, admission and replacement — prints what the service would have logged (issue #93) |
 | `plate_solve_export.py` | Export a crop of an all-sky FITS for external plate solving |
 | `validate_calibration.py` | Regression tests calibration quality against sample FITS set |

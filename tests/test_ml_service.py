@@ -108,3 +108,120 @@ def test_analyze_image_for_tokens_stays_under_memory_ceiling(monkeypatch):
         f"analyze_image_for_tokens peaked at {peak / 1e6:.1f} MB, "
         f"ceiling is {MEMORY_CEILING_BYTES / 1e6:.0f} MB"
     )
+
+
+# --- Frame static score: reporting only ---------------------------------------
+
+def _static_frame():
+    rng = np.random.default_rng(21)
+    return np.clip(rng.normal(4, 3, (1080, 1920, 3)), 0, 255).astype(np.uint8)
+
+
+def _structured_frame():
+    frame = _static_frame()
+    frame[300:800, 500:1400, :] = 160
+    frame[:, :250, :] = 0
+    return frame
+
+
+@pytest.fixture
+def ml_without_models(monkeypatch):
+    # MLService is a singleton: pin the pieces this test depends on so neither
+    # loaded models nor a previous test's static state leak in.
+    ml = MLService()
+    monkeypatch.setattr(ml, "_roof_classifier", None)
+    monkeypatch.setattr(ml, "_sky_classifier", None)
+    monkeypatch.setattr(ml, "_frame_was_static", False)
+    return ml
+
+
+def test_static_frame_is_reported_in_results(ml_without_models):
+    results = ml_without_models.analyze_image(_static_frame())
+    assert results['frame_is_static'] is True
+    assert results['static_ratio'] == pytest.approx(0.25, abs=0.05)
+
+
+def test_structured_frame_is_not_reported_static(ml_without_models):
+    results = ml_without_models.analyze_image(_structured_frame())
+    assert results['frame_is_static'] is False
+    assert results['static_ratio'] > 0.5
+
+
+def test_static_verdict_never_changes_the_roof_reading(ml_without_models, monkeypatch):
+    # Reporting only: a frame scored as static must still go to the roof model
+    # and come back with whatever the model said.
+    class _Roof:
+        def predict(self, image, metadata):
+            from types import SimpleNamespace
+            return SimpleNamespace(roof_open=True, confidence=0.68)
+
+    monkeypatch.setattr(ml_without_models, "_roof_classifier", _Roof())
+    results = ml_without_models.analyze_image(_static_frame(), config={'sky_classifier': False})
+    assert results['frame_is_static'] is True
+    assert results['roof_status'] == 'Open'
+    assert results['roof_confidence'] == pytest.approx(0.68)
+
+
+def test_static_is_logged_on_transition_not_every_frame(ml_without_models, monkeypatch):
+    import services.ml_service as ml_service_module
+    lines = []
+    monkeypatch.setattr(ml_service_module.app_logger, "info", lines.append)
+
+    for frame in (_static_frame(), _static_frame(), _structured_frame(), _structured_frame()):
+        ml_without_models.analyze_image(frame)
+
+    assert len(lines) == 2
+    assert "sensor noise" in lines[0]
+    assert "structure again" in lines[1]
+
+
+# --- time context feeds the models the training-side flag (issue #86) --------
+
+def test_time_context_comes_from_the_shared_service(monkeypatch):
+    import services.ml_service as ml_service_module
+    seen = {}
+
+    def fake_compute(now=None, location=None):
+        seen['location'] = location
+        return {'hour': 22, 'is_astronomical_night': True, 'calculation_method': 'astral'}
+    monkeypatch.setattr(ml_service_module, 'compute_time_context', fake_compute)
+    monkeypatch.setattr(ml_service_module, 'get_configured_location',
+                        lambda: (31.55, -100.46, 'obs'))
+
+    service = MLService()
+    service._location_cache = None
+    ctx = service._compute_time_context()
+    assert ctx['is_astronomical_night'] is True
+    assert seen['location'] == (31.55, -100.46, 'obs')
+
+
+def test_configured_location_is_cached_between_frames(monkeypatch):
+    import services.ml_service as ml_service_module
+    reads = []
+    monkeypatch.setattr(ml_service_module, 'get_configured_location',
+                        lambda: reads.append(1) or (1.0, 2.0, 'obs'))
+    monkeypatch.setattr(ml_service_module, 'compute_time_context',
+                        lambda now=None, location=None: {'hour': 1, 'is_astronomical_night': True})
+
+    service = MLService()
+    service._location_cache = None
+    service._compute_time_context()
+    service._compute_time_context()
+    assert len(reads) == 1
+
+    service._location_cache = (time.time() - 301, (1.0, 2.0, 'obs'))
+    service._compute_time_context()
+    assert len(reads) == 2
+
+
+def test_time_context_failure_yields_daytime_defaults(monkeypatch):
+    import services.ml_service as ml_service_module
+
+    def boom(now=None, location=None):
+        raise RuntimeError("astral exploded")
+    monkeypatch.setattr(ml_service_module, 'compute_time_context', boom)
+    monkeypatch.setattr(ml_service_module, 'get_configured_location', lambda: (None, None, None))
+
+    service = MLService()
+    service._location_cache = None
+    assert service._compute_time_context() == {'hour': 12, 'is_astronomical_night': False}

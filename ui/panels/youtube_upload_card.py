@@ -17,7 +17,9 @@ from qfluentwidgets import (
 from ..components.cards import CollapsibleCard, SwitchRow
 from ..theme.icons import mdi
 from ..theme.tokens import Colors, Spacing
-from services.youtube_config import normalize_youtube_config
+from services.youtube_config import (
+    BASE_PLACEHOLDERS, NIGHT_PLACEHOLDERS, PLACEHOLDER_DESCRIPTIONS, normalize_youtube_config,
+)
 
 
 class YouTubeSetupGuideDialog(QDialog):
@@ -171,14 +173,24 @@ class YouTubeUploadCard(CollapsibleCard):
         self.privacy_combo.currentTextChanged.connect(self._emit_changed)
         advanced_layout.addWidget(self._build_row("Privacy", self.privacy_combo, "Private is safest for first tests and unverified apps."))
 
+        placeholder_tip = self._placeholder_tooltip()
         self.title_input = LineEdit()
+        self.title_input.setToolTip(placeholder_tip)
         self.title_input.textChanged.connect(self._emit_changed)
-        advanced_layout.addWidget(self._build_row("Title", self.title_input, "Supported: {date}, {filename}, {frame_count}, {duration}, {size_mb}"))
+        advanced_layout.addWidget(self._build_row(
+            "Title", self.title_input, "Supported: " + self._placeholder_list(BASE_PLACEHOLDERS),
+        ))
 
         self.description_input = QPlainTextEdit()
-        self.description_input.setFixedHeight(72)
+        self.description_input.setFixedHeight(96)
+        self.description_input.setToolTip(placeholder_tip)
         self.description_input.textChanged.connect(self._emit_changed)
-        advanced_layout.addWidget(self._build_row("Description", self.description_input))
+        advanced_layout.addWidget(self._build_row(
+            "Description", self.description_input,
+            "Night statistics from the image library (empty when it has no frames "
+            "for that night): " + self._placeholder_list(NIGHT_PLACEHOLDERS)
+            + ". Hover for details.",
+        ))
 
         self.tags_input = LineEdit()
         self.tags_input.textChanged.connect(self._emit_changed)
@@ -197,6 +209,16 @@ class YouTubeUploadCard(CollapsibleCard):
         self.status_label.setOpenExternalLinks(True)
         self.status_label.setStyleSheet(f"color: {Colors.text_muted};")
         self.add_widget(self.status_label)
+
+    @staticmethod
+    def _placeholder_list(names) -> str:
+        return ", ".join("{" + name + "}" for name in names)
+
+    @staticmethod
+    def _placeholder_tooltip() -> str:
+        lines = ["Placeholders for the title and description:"]
+        lines += ["{" + name + "}  " + text for name, text in PLACEHOLDER_DESCRIPTIONS]
+        return "\n".join(lines)
 
     def _add_action_button(self, button):
         """Add a discrete, left-aligned action button.

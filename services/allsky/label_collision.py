@@ -25,6 +25,22 @@ def default_gap(label_h: float) -> float:
     return max(_MIN_GAP_PX, label_h * GAP_RATIO)
 
 
+def marker_radius(label_px: float) -> float:
+    """Clearance kept around a named point object (star, planet) for labels
+    of height ``label_px``. Under the placement gap, so an object never
+    blocks its own label."""
+    return default_gap(label_px * 1.2) * 0.75
+
+
+def reserve_targets(grid: 'LabelGrid', targets, label_px: float) -> None:
+    """Reserve every (name, x, y, uid) target as a marker before any of
+    their labels is placed, so an early label cannot land on an object whose
+    own label comes later."""
+    r = marker_radius(label_px)
+    for _, x, y, _ in targets:
+        grid.reserve_marker(x, y, r)
+
+
 def candidate_slots(
     marker_x: float, marker_y: float,
     label_w: float, label_h: float,

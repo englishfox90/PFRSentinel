@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 from collections import defaultdict
 
+from dataset_files import iter_calibration_files
+
 data_dir = Path('D:/Pier Camera ML Data')
 stats = defaultdict(lambda: {'open': 0, 'closed': 0, 'unlabeled': 0})
 
-for cal_file in data_dir.rglob('calibration_*.json'):
+for cal_file in iter_calibration_files(data_dir):
     folder = cal_file.parent.name
     with open(cal_file) as f:
         data = json.load(f)

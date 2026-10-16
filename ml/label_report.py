@@ -15,6 +15,8 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 
+sys.path.insert(0, str(Path(__file__).parent))
+from dataset_files import iter_calibration_files  # noqa: E402
 
 # Target samples per category for a well-balanced model
 TARGETS = {
@@ -48,7 +50,7 @@ TARGETS = {
 def load_calibration_files(data_dir: Path) -> list:
     """Load all calibration JSON files."""
     samples = []
-    for cal_file in data_dir.rglob("calibration_*.json"):
+    for cal_file in iter_calibration_files(data_dir):
         try:
             with open(cal_file, 'r') as f:
                 data = json.load(f)

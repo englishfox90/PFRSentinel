@@ -206,3 +206,86 @@ class TestReferenceFrameLinearMedian2:
                                           sky_r=linear_median2['sky_r'])
         assert not ok
         assert 'skipping' not in msg
+
+
+# ---------------------------------------------------------------------------
+# Noise sigma from the SIGNED residual (issue #93, package 4)
+# ---------------------------------------------------------------------------
+
+def _old_sigma(gray, sky_cx, sky_cy, sky_r):
+    """The pre-fix estimate: residual clipped to >= 0 BEFORE the MAD."""
+    import cv2
+    h, w = gray.shape
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (int(round(sky_cx)), int(round(sky_cy))), int(round(sky_r)), 255, -1)
+    bkg_k = max(31, int(sky_r // 6)) | 1
+    background = cv2.GaussianBlur(gray, (bkg_k, bkg_k), 0).astype(np.float32)
+    resid = np.clip(gray.astype(np.float32) - background, 0, None)[mask > 0]
+    return max(1.5, 1.4826 * float(np.median(np.abs(resid - np.median(resid)))))
+
+
+def _new_sigma(gray, sky_cx, sky_cy, sky_r):
+    import cv2
+    h, w = gray.shape
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (int(round(sky_cx)), int(round(sky_cy))), int(round(sky_r)), 255, -1)
+    bkg_k = max(31, int(sky_r // 6)) | 1
+    background = cv2.GaussianBlur(gray, (bkg_k, bkg_k), 0).astype(np.float32)
+    resid = (gray.astype(np.float32) - background)[mask > 0]
+    return max(1.5, 1.4826 * float(np.median(np.abs(resid - np.median(resid)))))
+
+
+class TestSignedNoiseSigma:
+    W, CX, CY, R = 750, 375.0, 375.0, 330.0
+
+    def _noise_frame(self, seed=3, sigma=8.0, sky=60.0):
+        rng = np.random.default_rng(seed)
+        img = np.full((self.W, self.W), sky) + rng.normal(0, sigma, (self.W, self.W))
+        return np.clip(img, 0, 255).astype(np.uint8)
+
+    def test_pure_noise_yields_near_zero_detections(self):
+        """Clipping first halved the noise into zeros, so sigma sat on the
+        1.5 floor and every grain cleared a 6-level threshold (the
+        reference-rig replay hit the 200 cap on every frame)."""
+        gray = self._noise_frame()
+        old = _old_sigma(gray, self.CX, self.CY, self.R)
+        new = _new_sigma(gray, self.CX, self.CY, self.R)
+        assert old < 2.0                    # the bug: ~the floor
+        assert 6.0 < new < 10.0             # the truth: sigma 8
+        dets = sc.detect_stars(gray, max_stars=200, sky_cx=self.CX, sky_cy=self.CY,
+                               sky_radius=self.R)
+        assert len(dets) < 10
+
+    def test_star_field_count_is_unchanged_within_a_few_percent(self):
+        """On a low-noise frame both estimates sit on the 1.5 floor, so the
+        threshold — and the count — are what they were; on a noisy one the
+        old estimate stayed on the floor while the new one reads the noise."""
+        rng = np.random.default_rng(4)
+        yy, xx = np.mgrid[:self.W, :self.W]
+        stars = []
+        while len(stars) < 60:
+            x, y = rng.uniform(120, 630), rng.uniform(120, 630)
+            if all(np.hypot(x - a, y - b) > 14 for a, b in stars):
+                stars.append((x, y))
+        field = np.zeros((self.W, self.W), dtype=np.float32)
+        for x, y in stars:
+            field += 120.0 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 1.3 ** 2))
+        inside = [(x, y) for x, y in stars if np.hypot(x - self.CX, y - self.CY) < self.R - 20]
+
+        quiet = np.clip(60.0 + rng.normal(0, 0.8, field.shape) + field, 0, 255).astype(np.uint8)
+        assert _old_sigma(quiet, self.CX, self.CY, self.R) == 1.5
+        assert _new_sigma(quiet, self.CX, self.CY, self.R) == 1.5
+        dets = sc.detect_stars(quiet, max_stars=500, sky_cx=self.CX, sky_cy=self.CY,
+                               sky_radius=self.R)
+        found = sum(any(np.hypot(dx - x, dy - y) < 2.5 for dx, dy, _ in dets) for x, y in inside)
+        assert found == len(inside)
+        assert len(dets) <= len(inside) + 2
+
+        noisy = np.clip(60.0 + rng.normal(0, 8.0, field.shape) + field, 0, 255).astype(np.uint8)
+        assert _old_sigma(noisy, self.CX, self.CY, self.R) < 2.0
+        assert 6.0 < _new_sigma(noisy, self.CX, self.CY, self.R) < 10.0
+        dets = sc.detect_stars(noisy, max_stars=500, sky_cx=self.CX, sky_cy=self.CY,
+                               sky_radius=self.R)
+        found = sum(any(np.hypot(dx - x, dy - y) < 2.5 for dx, dy, _ in dets) for x, y in inside)
+        assert found >= 0.9 * len(inside)
+        assert len(dets) <= len(inside) * 1.1 + 3   # no grain in the count

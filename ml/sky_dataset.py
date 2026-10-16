@@ -98,7 +98,7 @@ class SkyDataset(Dataset):
                     'density': torch.tensor(float(sample.get('star_density', 0.0)), dtype=torch.float32),
                     'moon': torch.tensor(1.0 if sample['moon_visible'] else 0.0, dtype=torch.float32),
                 })
-            print(f"  ✓ Preloaded {len(samples)} images")
+            print(f"  Preloaded {len(samples)} images")
 
     def _load_tensor(self, sample) -> torch.Tensor:
         """Load + preprocess one image to a (1, H, W) tensor. Thread-safe."""

@@ -9,10 +9,10 @@ Layout + display formatting only. Values are pushed in from the main window's
 status timer and per-frame handlers; per-frame cells mute to "—" when idle or
 when no camera is connected.
 """
-import re
-
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt
+
+from services.sky_evidence import parse_exposure_seconds
 
 from ..theme.tokens import Colors, Typography
 from ..theme.styles import paint_border_lines
@@ -93,12 +93,9 @@ class TelemetryBar(QFrame):
         """Compact exposure: long float seconds -> 2dp, scaled to ms/s/m."""
         if raw is None or raw == _DASH:
             return _DASH
-        m = re.match(r'\s*([0-9]*\.?[0-9]+)\s*(ms|s|m)?', str(raw), re.I)
-        if not m:
+        secs = parse_exposure_seconds(raw)
+        if secs is None:
             return str(raw)
-        val = float(m.group(1))
-        unit = (m.group(2) or 's').lower()
-        secs = val / 1000.0 if unit == 'ms' else (val * 60.0 if unit == 'm' else val)
         if secs >= 60:
             return f"{secs / 60:.2f}m"
         if secs >= 1:

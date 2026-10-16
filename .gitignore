@@ -70,6 +70,8 @@ libASICamera2.so*
 output/
 watch_dir_test/
 test_output/
+# Product video workspace (brag skill) — real rig frames and calibration, never publish
+brag-output*/
 stretch_tuner_out/
 noise_models/
 colorize_out/
@@ -102,6 +104,7 @@ ml/eval_output/
 
 # ML local training/test scratch (image-size sweeps + pre-validation model backups)
 ml/models/_size_sweep/
+ml/models/_backbone_sweep/
 ml/models/backup_*/
 
 # C# / .NET build output (nina-plugin/)

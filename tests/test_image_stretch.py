@@ -278,6 +278,17 @@ def test_full_frame_peak_memory_and_runtime():
         f"chunked peak {new_peak:.0f} MB exceeds the 320 MB ceiling "
         f"(reference peak {ref_peak:.0f} MB)"
     )
+    # tracemalloc and a loaded xdist runner both distort a single wall-clock
+    # sample, so compare the best of a few interleaved untraced runs.
+    for _ in range(2):
+        for fn in ('ref', 'new'):
+            started = time.perf_counter()
+            (reference_stretch if fn == 'ref' else auto_stretch_image)(img, config, raw_16bit=raw)
+            elapsed = time.perf_counter() - started
+            if fn == 'ref':
+                ref_time = min(ref_time, elapsed)
+            else:
+                new_time = min(new_time, elapsed)
     assert new_time <= 1.5 * ref_time, (
         f"chunked run {new_time:.2f}s exceeds 1.5x the reference {ref_time:.2f}s"
     )

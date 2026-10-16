@@ -3,7 +3,8 @@ Main all-sky overlay entry point.
 
 render_allsky_overlay(img, config, metadata) → PIL.Image
 
-Orchestrates: grid → constellations → Messier → NGC → planets.
+Orchestrates: grid → constellations → planets → bright stars → Messier → NGC
+→ NINA target (whose name is placed before any other label).
 All layers share a single LabelGrid for collision avoidance.
 Fails silently if model not calibrated or any layer errors.
 """
@@ -12,88 +13,50 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from services.logger import app_logger as log
+from services.nina_target_store import get_nina_target_store
+from services.observing_window import SAME_CAPTURE_KEY
 from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, CropBox
 
-# Pre-import scipy at module level so background threads never trigger
-# a first-time import (causes segfault in PyInstaller builds).
-try:
-    from scipy.spatial.distance import cdist as _cdist
-except Exception as _e:
-    _cdist = None
-    log.error(f"scipy.spatial import failed in overlay_renderer: {type(_e).__name__}: {_e}")
-
+from .discredit_policy import overlay_withheld
 from .fisheye import FisheyeModel
-from .label_collision import LabelGrid
-from .label_stability import get_label_stabilizer
+from .label_collision import LabelGrid, reserve_targets
+from .label_candidates import eligible_labels, rank_label_candidates
+from .label_size import apply_label_size_preset
+from .label_stability import forget_drawn_labels, get_label_stabilizer, upsample
+from .obstruction_map import get_obstruction_map
 from .render_grid import render_grid
 from .render_constellations import render_constellations
-from .render_objects import render_messier, render_ngc, render_planets, _is_sky_visible
-from .render_stars import render_bright_stars, star_uid, star_display_name
-from .star_centroid import detect_stars, estimate_sky_circle
+from .moon_label import measure_moon_glare
+from . import target_status_log
+from .render_target import (
+    layer_config, locate_target, render_target, reserve_target, stale_after_seconds,
+)
+from .render_objects import (
+    planet_label_px, planet_targets, render_messier, render_ngc, render_planets,
+    reserve_moon_glare,
+)
+from .render_stars import bright_star_targets, render_bright_stars, star_label_px
+from .star_sightings import apply_sightings, label_targets, sighting_tolerance
+from .sky_region import (  # sky_region pre-imports scipy for the worker thread
+    FULL_MASK_MIN_DETECTIONS, detect_sky_evidence, visibility_plane,
+)
 
 # One-shot guard so the model-scaling INFO log fires once per scale factor
 # rather than on every rendered frame (Phase 3.1).
 _last_scale_logged: Optional[float] = None
 
+
 def _detect_sky_mask(img: Image.Image) -> Optional[np.ndarray]:
-    """Build a sky visibility mask from actual star detections.
-
-    Each detected star claims a circular region whose radius is based on
-    the 2nd-nearest-neighbour distance (robust to isolated edge stars)
-    and weighted by local image brightness — bright open sky gets full
-    radius, dim equipment edges get small radii so labels don't bleed
-    onto obstructed areas.
-
-    Returns a uint8 array (0 = obstructed, 255 = open sky) that is a
-    drop-in replacement for the grayscale image in ``_is_sky_visible()``,
-    or None when the frame yields no usable mask (< 10 stars detected,
-    detection error). The caller decides how to fall back.
-    """
-    try:
-        sky_cx, sky_cy, sky_r = estimate_sky_circle(img)
-        detections = detect_stars(
-            img, max_stars=200,
-            sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
-        )
-    except Exception:
+    """A frame's detection mask when it rests on enough stars for a full
+    vote, else None. Kept for existing callers; the renderer itself reads
+    ``sky_region.visibility_plane``."""
+    evidence = detect_sky_evidence(img)
+    if evidence.n_detections < FULL_MASK_MIN_DETECTIONS:
         return None
-
-    if len(detections) < 10:
-        return None
-
-    w, h = img.size
-    det_xy = np.array([(x, y) for x, y, _ in detections])
-
-    # 2nd nearest neighbour distance (more robust than 1st to outliers)
-    if _cdist is None:
-        return None
-    dists = _cdist(det_xy, det_xy)
-    np.fill_diagonal(dists, 1e9)
-    nn2_dist = np.sort(dists, axis=1)[:, 1]
-    base_radii = np.clip(nn2_dist * 0.8, 50, 250)
-
-    # Brightness weight: detections in dim areas (near equipment, median
-    # brightness < 20) get 30% of their base radius.  Detections in
-    # bright sky (median > 60) get 100%.  This prevents equipment-edge
-    # stars from claiming nearby obstructed regions.
-    gray = np.array(img.convert('L'))
-    bw = 25  # brightness sample half-window
-    brightness = np.array([
-        float(np.median(gray[max(0, int(y) - bw):int(y) + bw + 1,
-                              max(0, int(x) - bw):int(x) + bw + 1]))
-        for x, y in det_xy
-    ])
-    weight = np.clip((brightness - 20.0) / 40.0, 0.3, 1.0)
-    radii = (base_radii * weight).astype(int)
-
-    mask = Image.new('L', (w, h), 0)
-    draw = ImageDraw.Draw(mask)
-    for (x, y), r in zip(det_xy, radii):
-        draw.ellipse([(x - r, y - r), (x + r, y + r)], fill=255)
-    return np.array(mask)
+    return upsample(evidence.mask, evidence.full_shape)
 
 
 def render_allsky_overlay(
@@ -106,7 +69,10 @@ def render_allsky_overlay(
 
     Reads calibration model path from config['calibration_file'].
     Observer location from config keys '_lat', '_lon', '_elevation'
-    (injected by the pipeline callers).
+    (injected by the pipeline callers). '_frame_is_observable' (set by
+    render_allsky_for_preview past the observing-window check) lets the
+    equipment map learn from the frame; '_obstruction_map_path' is where it
+    is saved. Direct callers leave both out and never touch the map.
 
     Args:
         img: PIL Image (RGB or RGBA) to annotate.
@@ -119,12 +85,14 @@ def render_allsky_overlay(
     if not config.get('enabled', False):
         return img
 
+    config = apply_label_size_preset(config)
     original_mode = img.mode
 
     # --- Load fisheye model ---
     model = _load_model(config)
     if model is None:
         return img  # Silently skip — not calibrated
+    calibration_a1 = float(model.a1)
 
     # --- Fit the model to the frame we are drawing on ---
     # An OUTPUT_CROP in the metadata means the caller cut a sub-rectangle out of
@@ -182,16 +150,54 @@ def render_allsky_overlay(
     stabilizer = get_label_stabilizer()
     grid_cfg = LabelGrid(w, h, slot_memory=stabilizer.slot_memory)
 
-    # Build a sky visibility mask from star detections.  Pixels near
-    # detected stars are 255 (open sky); all others are 0 (obstructed).
-    # This replaces the old brightness-threshold approach which was
-    # fragile across different FITS stretches and scattered light levels.
-    # The stabilizer votes the mask over recent frames and holds the last
-    # vote through a short run of frames with too few detections; only a
-    # sustained failure falls back to the raw grayscale (issues #31, #13).
-    gray = stabilizer.smooth_mask(_detect_sky_mask(img))
-    if gray is None:
-        gray = np.array(img.convert('L'))
+    # Where labels may go: the voted detection mask while it is fresh, the
+    # persisted equipment map once it is stale, the model's own sky disc
+    # before either exists (sky_region). 255 = open sky, 0 = obstructed.
+    # A reprocess of a capture already counted reads the vote without
+    # advancing it; the map learns only from frames the observing gate passed.
+    advance = not metadata.get(SAME_CAPTURE_KEY, False)
+    evidence = detect_sky_evidence(img) if advance else None
+    obstruction_map = get_obstruction_map()
+    gray = visibility_plane(
+        img, model, dt, lat, lon, stabilizer, obstruction_map,
+        advance=advance,
+        frame_is_observable=bool(config.get('_frame_is_observable', False)),
+        crop=_crop_stamp(crop), save_path=config.get('_obstruction_map_path'),
+        behind_equipment=bool(config.get('labels_behind_equipment', False)),
+        evidence=evidence,
+    )
+    # A star detected at its own pixel is visible whatever the vote says
+    # (star_sightings); the equipment map still has the last word.
+    scale = float(model.a1) / calibration_a1 if calibration_a1 > 0 else 1.0
+    gray = apply_sightings(
+        gray, stabilizer.sightings, label_targets(model, config, lat, lon, dt),
+        evidence.points if evidence is not None else None,
+        sighting_tolerance(model.rms_residual, scale),
+        map_sky=obstruction_map.small_sky_mask(w, h, _crop_stamp(crop)),
+    )
+    # Measured on the frame before any layer draws on it (moon_label).
+    planet_config = config.get('planets', {})
+    moon_glare = (measure_moon_glare(img, model, dt, lat, lon)
+                  if planet_config.get('enabled', True) else None)
+
+    # Placed before any other layer touches the grid, so the target's name
+    # gets first pick and every later label works around it; only the Moon's
+    # glare, where no name can be read, is kept clear before it.
+    target_cfg = layer_config(config.get('nina_target'))
+    target_placement = None
+    try:
+        reserve_moon_glare(grid_cfg, moon_glare)
+        target = config.get('_nina_target')
+        target_placement, unplaced = locate_target(img.size, model, target_cfg,
+                                                   target, lat, lon, dt)
+        if target:
+            target_status_log.report_placement(
+                str(target.get('name') or ''), target_placement, unplaced)
+        if target_placement is not None:
+            target_placement = reserve_target(
+                grid_cfg, target_placement, bool(target_cfg.get('show_label', True)))
+    except Exception as e:
+        log.warning(f"allsky NINA target placement failed: {e}")
 
     # Layer order: grid first (background), then constellations, then objects
     try:
@@ -207,37 +213,57 @@ def render_allsky_overlay(
     except Exception as e:
         log.warning(f"allsky constellation render failed: {e}")
 
-    # Pre-compute global allowed object set (top_n across all types combined)
-    # Uses the ORIGINAL gray (no overlays) for accurate equipment detection
-    allowed_ids = _compute_allowed_ids(config, model, lat, lon, dt, gray)
+    # Rank every labellable object on the ORIGINAL plane (no overlays drawn
+    # yet), pick the top-N budget, and let the drawn-label persistence decide
+    # what is drawn: every layer then draws exactly `persisted`, each label
+    # faded by its alpha (label_persistence).
+    ranked = rank_label_candidates(config, model, lat, lon, dt, gray,
+                                   moon_seen=moon_glare is not None)
+    allowed_ids = _select_budget(ranked, config, advance)
+    persisted = stabilizer.drawn_labels(eligible_labels(ranked, allowed_ids), advance,
+                                        budget=allowed_ids)
+
+    # Stars and planets are all reserved before any of their labels goes
+    # down, and planets are named first: labelled last, a planet found the
+    # slot right of it taken by a star's name and its own went to the far
+    # side (discussion #105, Saturn).
+    stars_config = config.get('bright_stars', {})
+    star_targets, planet_targets_ = _reserve_point_objects(
+        img.size, model, stars_config, planet_config, lat, lon, dt, gray,
+        persisted, grid_cfg, moon_glare)
 
     try:
-        stars_config = config.get('bright_stars', {})
+        img = render_planets(img, model, planet_config, lat, lon, dt, grid_cfg,
+                             sky_gray=gray, targets=planet_targets_,
+                             moon_glare=moon_glare, persisted=persisted)
+    except Exception as e:
+        log.warning(f"allsky planet render failed: {e}")
+
+    try:
         img = render_bright_stars(img, model, stars_config, lat, lon, dt, grid_cfg,
-                                  allowed_ids, sky_gray=gray)
+                                  sky_gray=gray, targets=star_targets,
+                                  persisted=persisted)
     except Exception as e:
         log.warning(f"allsky bright stars render failed: {e}")
 
     try:
         messier_config = config.get('messier', {})
         img = render_messier(img, model, messier_config, lat, lon, dt, grid_cfg,
-                             allowed_ids, sky_gray=gray)
+                             sky_gray=gray, persisted=persisted)
     except Exception as e:
         log.warning(f"allsky messier render failed: {e}")
 
     try:
         ngc_config = config.get('ngc', {})
         img = render_ngc(img, model, ngc_config, lat, lon, dt, grid_cfg,
-                         allowed_ids, sky_gray=gray)
+                         sky_gray=gray, persisted=persisted)
     except Exception as e:
         log.warning(f"allsky NGC render failed: {e}")
 
     try:
-        planet_config = config.get('planets', {})
-        img = render_planets(img, model, planet_config, lat, lon, dt, grid_cfg,
-                             allowed_ids, sky_gray=gray)
+        img = render_target(img, target_cfg, target_placement)
     except Exception as e:
-        log.warning(f"allsky planet render failed: {e}")
+        log.warning(f"allsky NINA target render failed: {e}")
 
     # Restore original mode
     if original_mode != 'RGBA':
@@ -262,9 +288,18 @@ def render_allsky_for_preview(
         return output_img
     if not allsky_cfg.get('calibration_file', ''):
         return output_img
+    # A model the service has discredited (discredit_policy) is treated as
+    # no model: its labels are wrong, and drawing them for hours is what
+    # 2026-09-28 looked like. The file itself is untouched.
+    # A withheld frame also ends the drawn-label hold: a label must not be
+    # carried across the gap and drawn on the next frame from before it.
+    if overlay_withheld():
+        forget_drawn_labels()
+        return output_img
     try:
         from services.observing_window import is_observing_window
         if not is_observing_window(config, metadata, feature="All-sky overlay"):
+            forget_drawn_labels()
             return output_img
         weather_cfg = config.get('weather', {})
         cfg = dict(allsky_cfg)
@@ -272,6 +307,13 @@ def render_allsky_for_preview(
         cfg['_lon'] = float(weather_cfg.get('longitude', 0) or 0)
         cfg['_elevation'] = float(weather_cfg.get('elevation', 0) or 0)
         cfg['_obs_utc'] = datetime.now(timezone.utc).isoformat()
+        cfg['_nina_target'] = _current_nina_target(allsky_cfg)
+        # The render only happens past the observing-window check, so this
+        # frame is one the equipment map may learn from. Package 2's
+        # observable-sky gate will supply the verdict here.
+        cfg['_frame_is_observable'] = True
+        from services.app_config import get_obstruction_map_path
+        cfg['_obstruction_map_path'] = get_obstruction_map_path()
         return render_allsky_overlay(output_img.copy(), cfg, metadata)
     except Exception as e:
         log.debug(f"All-sky preview render skipped: {e}")
@@ -281,6 +323,57 @@ def render_allsky_for_preview(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _current_nina_target(allsky_cfg: dict) -> Optional[dict]:
+    """The target NINA last pushed, while fresh. Its own guard: a bad
+    setting or a failing store loses the target, never the overlay."""
+    try:
+        stale_after_s = stale_after_seconds(allsky_cfg.get('nina_target'))
+        store = get_nina_target_store()
+        target = store.current(stale_after_s)
+        if target is not None:
+            return target.as_dict()
+        held = store.snapshot()
+        if held.get('target'):
+            target_status_log.report_stale(str(held['target'].get('name') or ''),
+                                           held.get('age_s'), stale_after_s)
+        else:
+            target_status_log.forget()
+        return None
+    except Exception as e:
+        log.debug(f"allsky: NINA target unavailable: {e}")
+        return None
+
+
+def _reserve_point_objects(img_size, model, stars_config, planet_config,
+                           lat, lon, dt, gray, persisted, grid, moon_glare=None):
+    """Bright-star and planet targets of the ``persisted`` labels, each
+    reserved on ``grid``, and the Moon's glare kept clear of every label. A
+    layer that fails here is left to its own renderer, which recomputes."""
+    stars = planets = None
+    reserve_moon_glare(grid, moon_glare)
+    try:
+        stars = bright_star_targets(model, stars_config, lat, lon, dt, gray,
+                                    persisted=persisted)
+        reserve_targets(grid, stars, star_label_px(img_size, stars_config))
+    except Exception as e:
+        log.debug(f"allsky: bright-star reservation skipped: {e}")
+    try:
+        planets = planet_targets(model, planet_config, lat, lon, dt, gray,
+                                 moon_glare=moon_glare, persisted=persisted)
+        reserve_targets(grid, planets, planet_label_px(img_size, planet_config))
+    except Exception as e:
+        log.debug(f"allsky: planet reservation skipped: {e}")
+    return stars, planets
+
+
+def _crop_stamp(crop: Optional[CropBox]) -> Optional[tuple]:
+    """The OUTPUT_CROP as the equipment map's stamp: a moved or resized crop
+    puts the equipment at different pixels, so the map must start over."""
+    if crop is None:
+        return None
+    return (crop.x, crop.y, crop.width, crop.height, crop.frame_width, crop.frame_height)
+
 
 def _scale_model_to(
     model: FisheyeModel, w_target: int, h_target: int,
@@ -324,6 +417,17 @@ def _scale_model_to(
     )
 
 
+def _select_budget(ranked, config: dict, advance: bool = True) -> Optional[set]:
+    """The top-N pick from ``ranked``, sticky across frames (label_stability):
+    an object on screen keeps its slot until a newcomer out-ranks it by a
+    clear margin. None when top_n is 0 or unset (show everything). A
+    reprocess (``advance`` False) reads the pick without counting the frame."""
+    top_n = int(config.get('top_n', 0))
+    if top_n <= 0:
+        return None
+    return get_label_stabilizer().select(ranked, top_n, advance)
+
+
 def _compute_allowed_ids(
     config: dict,
     model: FisheyeModel,
@@ -331,111 +435,14 @@ def _compute_allowed_ids(
     lon: float,
     dt: datetime,
     gray: Optional['np.ndarray'] = None,
+    moon_seen: bool = False,
 ) -> Optional[set]:
-    """
-    Rank all visible objects (planets + Messier + NGC) by brightness and
-    return the set of UIDs for the top_n brightest ones.
-
-    Objects projected onto dark equipment areas (checked via gray pixel
-    brightness) are excluded from ranking so they don't consume the budget.
-    The pick is sticky across frames (see label_stability): an object on
-    screen keeps its slot until a newcomer out-ranks it by a clear margin.
-
-    UIDs are prefixed by type to avoid collisions:
-        'planet:Jupiter', 'messier:M45', 'ngc:NGC 2244'
-
-    Returns None if top_n is 0 or not set (show everything).
-    """
-    top_n = int(config.get('top_n', 0))
-    if top_n <= 0:
+    """The top-N budget for this frame (label_candidates ranks, the
+    stabilizer picks). Returns None if top_n is 0 or not set."""
+    if int(config.get('top_n', 0)) <= 0:
         return None
-
-    from .catalogs import get_messier_objects, get_ngc_objects, get_bright_stars
-    from .planets import get_all_positions
-    from .coords import radec_to_altaz as _ra2aa
-
-    # Approximate typical visual magnitudes for planets (used for ranking only)
-    _PLANET_MAG = {
-        'Moon': -12.0, 'Venus': -4.0, 'Jupiter': -2.0, 'Mars': 0.5,
-        'Mercury': 0.0, 'Saturn': 0.7, 'Uranus': 5.7, 'Neptune': 7.8,
-    }
-
-    def _visible(xy) -> bool:
-        if xy is None:
-            return False
-        if gray is None:
-            return True
-        return _is_sky_visible(gray, int(xy[0]), int(xy[1]))
-
-    candidates = []  # (mag, uid)
-
-    # Bright stars (BSC5 named)
-    stars_cfg = config.get('bright_stars', {})
-    if stars_cfg.get('enabled', False):
-        stars_max_mag = float(stars_cfg.get('max_magnitude', 2.5))
-        use_bayer = bool(stars_cfg.get('bayer_fallback', False))
-        for s in get_bright_stars(max_mag=stars_max_mag):
-            if not star_display_name(s, use_bayer):
-                continue
-            alt, az = _ra2aa(
-                s['ra_deg'], s['dec_deg'], lat, lon, dt, refraction=True
-            )
-            if float(alt) < 10.0:
-                continue
-            xy = model.altaz_to_pixel(float(alt), float(az))
-            if not _visible(xy):
-                continue
-            candidates.append((float(s['vmag']), star_uid(s)))
-
-    # Planets
-    for name, (ra, dec) in get_all_positions(dt, lat, lon).items():
-        if name == 'Sun':
-            continue
-        alt, az = _ra2aa(ra, dec, lat, lon, dt, refraction=True)
-        if float(alt) < -1.0:
-            continue
-        xy = model.altaz_to_pixel(float(alt), float(az))
-        if not _visible(xy):
-            continue
-        candidates.append((_PLANET_MAG.get(name, 0.0), f'planet:{name}'))
-
-    # Messier
-    for obj in get_messier_objects():
-        alt, az = _ra2aa(
-            obj['ra_deg'], obj['dec_deg'], lat, lon, dt, refraction=True
-        )
-        if float(alt) < 5.0:
-            continue
-        xy = model.altaz_to_pixel(float(alt), float(az))
-        if not _visible(xy):
-            continue
-        label = obj.get('label', '')
-        if label:
-            mag = float(obj.get('vmag') or obj.get('mag') or 10.0)
-            candidates.append((mag, f'messier:{label}'))
-
-    # NGC (only when that layer is enabled)
-    ngc_cfg = config.get('ngc', {})
-    if ngc_cfg.get('enabled', False):
-        max_mag = float(ngc_cfg.get('min_magnitude', 12.0))
-        for obj in get_ngc_objects(max_mag=max_mag):
-            if obj.get('messier'):
-                continue
-            alt, az = _ra2aa(
-                obj['ra_deg'], obj['dec_deg'], lat, lon, dt, refraction=True
-            )
-            if float(alt) < 5.0:
-                continue
-            xy = model.altaz_to_pixel(float(alt), float(az))
-            if not _visible(xy):
-                continue
-            oid = obj.get('id', obj.get('name', ''))
-            if oid:
-                mag = float(obj.get('vmag') or obj.get('mag') or 99.0)
-                candidates.append((mag, f'ngc:{oid}'))
-
-    candidates.sort(key=lambda c: c[0])  # brightest first
-    return get_label_stabilizer().select([uid for _, uid in candidates], top_n)
+    ranked = rank_label_candidates(config, model, lat, lon, dt, gray, moon_seen)
+    return _select_budget(ranked, config)
 
 
 _model_cache: dict = {'path': '', 'mtime': 0.0, 'model': None}

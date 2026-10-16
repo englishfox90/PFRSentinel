@@ -47,6 +47,9 @@ namespace PFRSentinel.NINA.SentinelDockables {
         private IReadOnlyList<string> healthReasons = Array.Empty<string>();
         private Visibility healthReasonsVisibility = Visibility.Collapsed;
         private IReadOnlyList<SentinelStat> statistics = Array.Empty<SentinelStat>();
+        private IReadOnlyList<SentinelStat> targetRows = Array.Empty<SentinelStat>();
+        private string targetProblemText = string.Empty;
+        private Visibility targetProblemVisibility = Visibility.Collapsed;
         private string linkNoticeText = string.Empty;
         private Visibility linkNoticeVisibility = Visibility.Collapsed;
         private Brush linkNoticeBrush = WarnBrush;
@@ -147,6 +150,24 @@ namespace PFRSentinel.NINA.SentinelDockables {
         public IReadOnlyList<SentinelStat> Statistics {
             get => statistics;
             private set => Set(ref statistics, value);
+        }
+
+        /// <summary>The "All-sky target" column: what the plugin last sent to Sentinel.</summary>
+        public IReadOnlyList<SentinelStat> TargetRows {
+            get => targetRows;
+            private set => Set(ref targetRows, value);
+        }
+
+        /// <summary>Why the last target send failed; empty when it did not.</summary>
+        public string TargetProblemText {
+            get => targetProblemText;
+            private set => Set(ref targetProblemText, value);
+        }
+
+        /// <summary>Whether <see cref="TargetProblemText"/> is shown.</summary>
+        public Visibility TargetProblemVisibility {
+            get => targetProblemVisibility;
+            private set => Set(ref targetProblemVisibility, value);
         }
 
         /// <summary>Why Sentinel cannot be reached, when it cannot.</summary>

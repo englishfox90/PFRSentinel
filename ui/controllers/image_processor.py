@@ -21,6 +21,7 @@ from services.preview_scaling import downscale_for_preview
 from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from services.processor import add_overlays, auto_stretch_image
 from services.sharpening import apply_unsharp_mask
+from services.sky_evidence import compute_sky_evidence
 from services.ml_service import get_ml_service, analyze_image_for_tokens
 from services.allsky.overlay_renderer import render_allsky_for_preview as _render_allsky_for_preview
 from .dev_mode_utils import dev_mode_saver, collect_ml_contribution_sample
@@ -67,7 +68,6 @@ class ImageProcessorWorker(QThread):
         super().__init__(parent)
         self._queue = queue.Queue(maxsize=10)
         self._running = False
-        self._weather_service = None
         self._main_window = None  # Reference to main window for camera access
         self._calibration_service = None  # Background calibration accumulation
         self._frame_count = 0
@@ -86,10 +86,6 @@ class ImageProcessorWorker(QThread):
         from services.ascom_safety_fsm import RoofSafetyFSM, UNSAFE_RESULT
         self._safety_fsm = RoofSafetyFSM(on_failure=self._on_safety_write_failure)
         self._unsafe_result = UNSAFE_RESULT
-
-    def set_weather_service(self, weather_service):
-        """Set weather service for overlay tokens"""
-        self._weather_service = weather_service
 
     def set_calibration_service(self, service):
         """Set calibration service for background accumulation"""
@@ -168,6 +164,11 @@ class ImageProcessorWorker(QThread):
                     app_logger.warning("Reprocess skipped: cached frame could not be rebuilt")
                     return
                 task.img, task.metadata = img, metadata
+            if task.reprocess:
+                # Same capture, new settings: per-capture state (the roof
+                # gate's Closed streak) must not count it a second time.
+                from services.observing_window import SAME_CAPTURE_KEY
+                metadata[SAME_CAPTURE_KEY] = True
             
             # Extract config values
             output_dir = config.get('output_dir', '')
@@ -363,7 +364,11 @@ class ImageProcessorWorker(QThread):
                         if self._main_window:
                             self._main_window.last_ml_results = ml_results
 
-                        app_logger.debug(f"ML predictions: roof={ml_tokens.get('ROOF_STATUS')}, sky={ml_tokens.get('SKY_CONDITION')}")
+                        app_logger.debug(
+                            f"ML predictions: roof={ml_tokens.get('ROOF_STATUS')}, "
+                            f"sky={ml_tokens.get('SKY_CONDITION')}, "
+                            f"static={ml_results.get('static_ratio')}"
+                            f"{' (noise only)' if ml_results.get('frame_is_static') else ''}")
                 except Exception as e:
                     app_logger.debug(f"ML prediction skipped: {e}")
 
@@ -380,6 +385,16 @@ class ImageProcessorWorker(QThread):
                 except Exception as e:
                     app_logger.debug(f"ASCOM safety update skipped: {e}")
 
+            # Star evidence for the observable-sky gate (issue #93), measured on
+            # the same frozen pre-enhancement copy the calibration feed sees,
+            # after ML (the static verdict spares it the scan) and before the
+            # gate is first consulted below. The copy is post-resize; the
+            # evidence resamples every input to one fixed plane, so a 60 %
+            # resize counts the same as the full frame (test_sky_evidence),
+            # and no pre-resize stretched frame exists to copy without a
+            # second full-frame stretch.
+            compute_sky_evidence(stretched_for_preview, metadata, config)
+
             # Feed clean (pre-enhancement) frame to the background calibration
             # service. Runs AFTER ML so the is_observing_window roof gate sees
             # ROOF_STATUS — calibration and the all-sky overlay must both stay
@@ -395,8 +410,13 @@ class ImageProcessorWorker(QThread):
                         cal_lon = float(weather_cfg.get('longitude', 0) or 0)
                         if cal_lat != 0 or cal_lon != 0:
                             from datetime import timezone as _tz
+                            from services.exposure_midpoint import exposure_midpoint
+                            # Mid-exposure, not receipt time: the star
+                            # positions belong to the middle of the exposure.
                             self._calibration_service.feed_frame(
-                                stretched_for_preview, datetime.now(_tz.utc), cal_lat, cal_lon,
+                                stretched_for_preview,
+                                exposure_midpoint(metadata, datetime.now(_tz.utc)),
+                                cal_lat, cal_lon,
                             )
                 except Exception as e:
                     app_logger.warning(f"Calibration feed skipped: {e}")
@@ -435,9 +455,14 @@ class ImageProcessorWorker(QThread):
             # what reaches processing_complete's output_img slot and what
             # watch-mode caches for "Calibrate Now". It must stay clean
             # regardless of the burn-in flags below.
+            #
+            # The weather service is read per frame, never copied at start-up:
+            # the main window rebuilds it on every settings edit (units, key,
+            # location).
+            weather = getattr(self._main_window, 'weather_service', None)
             output_img = add_overlays(img, overlays, metadata,
                                       image_cache=self._overlay_image_cache,
-                                      weather_service=self._weather_service)
+                                      weather_service=weather)
 
             # Overlaid render, computed once — GUI preview always uses it, and
             # it is reused (never re-rendered) for any destination opted into
@@ -610,10 +635,6 @@ class ImageProcessor(QObject):
 
         # Pass main window to worker for camera access
         self._worker.set_main_window(main_window)
-
-        # Pass weather service to worker
-        if hasattr(main_window, 'weather_service'):
-            self._worker.set_weather_service(main_window.weather_service)
 
     def set_calibration_service(self, service):
         """Pass calibration service to worker for background accumulation"""

@@ -337,3 +337,107 @@ class TestAnchorFailureOutranksThe2026_09_05_Floor:
         ok, why = _decide(*args, escape=True, evidence=False,
                           incumbent_failed_anchors=False)
         assert not ok and 'not a material improvement' in why
+
+
+class TestEscapeBypassDemandsCandidateMerit:
+    """#93: rule 2's evidence bypass installed a fit that was 1.0x chance
+    because 'evidence' meant only that a pole existed — and that pole was a
+    light on the pier. The bypass now also needs the candidate's own
+    RMS-to-tolerance and chance ratios to pass calibration_fit_merit."""
+
+    WORKING = dict(rms=7.7, n_matches=4561, n_images=40, span=80.0)
+    # The reporter's saved model as a candidate: 606 matches, RMS 10.9 px on
+    # a 16.5 px final tolerance, 1.04x chance.
+    CHANCE_FIT = dict(rms=10.9, n_matches=606, n_images=60, span=62.6,
+                      final_tol_px=16.5, chance_ratio=1.04)
+
+    def test_a_chance_fit_does_not_get_the_evidence_bypass(self):
+        ok, why = _decide(_m(**self.WORKING), _m(**self.CHANCE_FIT),
+                          escape=True, evidence=True)
+        assert not ok
+        assert 'no merit of its own' in why and 'chance' in why
+
+    def test_the_same_candidate_with_credible_numbers_still_does(self):
+        cand = _m(**dict(self.CHANCE_FIT, rms=7.0, chance_ratio=3.0))
+        ok, why = _decide(_m(**self.WORKING), cand, escape=True, evidence=True)
+        assert ok and 'without the RMS guard' in why
+
+    def test_unknown_merit_is_not_held_against_a_candidate(self):
+        """Every candidate the joint fit produces carries the fields; a
+        stubbed or legacy one without them keeps the old behaviour."""
+        ok, _ = _decide(_m(**self.WORKING), _m(6.0, 900), escape=True,
+                        evidence=True)
+        assert ok
+
+    def test_refused_bypass_falls_through_to_the_material_gain_floor(self):
+        """A chance-level candidate that nevertheless beats a thin incumbent's
+        RMS by the escape margin with more matches still wins on the numbers."""
+        thin = _m(14.0, 500)
+        ok, why = _decide(thin, _m(**self.CHANCE_FIT), escape=True, evidence=True)
+        assert ok and 'no merit of its own' in why and 'beats' in why
+
+
+class TestChanceLevelIncumbentIsDiscredited:
+    """Rule 3's trigger widened: an incumbent that matched the live buffer at
+    chance level in consecutive runs (incumbent_chance) is as discredited as
+    one that failed the bright-anchor gate — on #93's obstructed rig the
+    anchor gate read None all night, so this is the verdict that reaches the
+    rule there."""
+
+    def _incumbent(self, **over):
+        return _m(10.9, 606, n_images=60, span=62.6, final_tol_px=16.5,
+                  chance_ratio=1.04, **over)
+
+    def _candidate(self):
+        return _m(8.0, 700, n_images=30, span=60.0, final_tol_px=16.0,
+                  chance_ratio=2.5)   # 0.5 of tolerance: credible
+
+    def test_chance_level_twice_lifts_the_rms_veto(self):
+        ok, why = _decide(self._incumbent(), self._candidate(), escape=True,
+                          incumbent_chance_level_twice=True)
+        assert ok
+        assert 'chance level in consecutive runs' in why
+        assert 'does not get an RMS veto' in why
+
+    def test_without_the_verdict_the_normal_comparison_applies(self):
+        ok, _ = _decide(self._incumbent(), self._candidate(), escape=True)
+        assert ok   # 8.0 beats 10.9 by more than 15 % with more matches
+        ok, why = _decide(self._incumbent(), _m(10.5, 700, n_images=30,
+                                                 span=60.0), escape=True)
+        assert not ok and 'material' in why
+
+    def test_the_flag_does_nothing_without_an_escape(self):
+        ok, why = _decide(self._incumbent(), _m(14.0, 400), escape=False,
+                          incumbent_chance_level_twice=True)
+        assert not ok and 'worse' in why
+
+    def test_guided_incumbent_is_exempt(self):
+        """Held to the normal comparison instead, where a non-material gain
+        loses."""
+        cand = _m(9.5, 700, n_images=30, span=60.0, final_tol_px=16.0,
+                  chance_ratio=2.5)
+        ok, why = _decide(self._incumbent(provenance='guided'), cand,
+                          escape=True, incumbent_chance_level_twice=True)
+        assert not ok and 'RMS veto' not in why and 'material' in why
+
+    def test_either_discredit_suffices(self):
+        ok, why = _decide(self._incumbent(), self._candidate(), escape=True,
+                          incumbent_failed_anchors=True,
+                          incumbent_chance_level_twice=True)
+        assert ok and 'bright-anchor check' in why
+
+    @pytest.mark.parametrize('discredit', [
+        dict(incumbent_failed_anchors=True),
+        dict(incumbent_chance_level_twice=True),
+    ])
+    def test_a_candidate_without_merit_gets_no_bypass_from_either_discredit(
+            self, discredit):
+        """The Sep 19 shape on the #93 rig: a candidate at ~1.0x chance and
+        RMS = tol / sqrt(2) over a discredited incumbent. It must not walk in
+        on the incumbent's lost veto; it is held to the normal comparison,
+        where it is worse on RMS than the incumbent it would replace."""
+        no_merit = _m(11.6, 644, n_images=60, span=62.6, final_tol_px=16.5,
+                      chance_ratio=1.04)
+        ok, why = _decide(self._incumbent(), no_merit, escape=True, **discredit)
+        assert not ok
+        assert 'no merit of its own' in why and 'RMS veto' not in why

@@ -7,13 +7,15 @@ Manages:
   - Config save/load for allsky_overlay section
   - Signals to panel for status updates
 """
+import threading
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, QThread, QTimer
 
 from services.logger import app_logger as log
-from services.notifications import CALIBRATION_DONE, NotificationEvent
+from services.notifications import (
+    CALIBRATION_DISCREDITED, CALIBRATION_DONE, NotificationEvent)
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
@@ -98,45 +100,28 @@ class CalibrationWorker(QThread):
             self.failed.emit(str(e))
 
 
-class GuidedCalibrationWorker(QThread):
-    """Background thread: solve a fisheye model from user-identified anchors."""
-
-    finished = Signal(object)    # FisheyeModel on success
-    failed   = Signal(str)       # Error message on failure
-
-    def __init__(self, anchors, lat, lon, dt, sky_cx, sky_cy, sky_r,
-                 img_w, img_h, parent=None):
-        super().__init__(parent)
-        self._anchors = anchors
-        self._lat, self._lon, self._dt = lat, lon, dt
-        self._sky_cx, self._sky_cy, self._sky_r = sky_cx, sky_cy, sky_r
-        self._img_w, self._img_h = img_w, img_h
-
-    def run(self):
-        try:
-            from services.allsky.guided_calibration import calibrate_from_anchors
-            model = calibrate_from_anchors(
-                self._anchors, self._lat, self._lon, self._dt,
-                self._sky_cx, self._sky_cy, self._sky_r,
-                image_width=self._img_w, image_height=self._img_h,
-            )
-            self.finished.emit(model)
-        except Exception as e:
-            self.failed.emit(str(e))
-
-
 class AllSkyController(QObject):
     """
     Business logic for the All-Sky Settings panel.
 
     Signals:
         status_changed(str): Human-readable calibration status message.
+        attention_changed(str, str): (level, message) caution for the quality
+            badge, relayed from the calibration service; ('', '') clears it.
         calibration_done(dict): Emitted with model_info after successful calibration.
         settings_changed(): Emitted when any setting is changed (triggers config save).
     """
 
     status_changed   = Signal(str)
     quality_changed  = Signal(str)   # CalibrationQuality level string
+    # Why the level is what it is — calibration_fit_merit's reason for a
+    # capped chance fit, '' otherwise. Emitted before every quality_changed.
+    quality_note_changed = Signal(str)
+    attention_changed = Signal(str, str)
+    # (level, note) for the badge after a live verdict on the model on disk
+    # (CalibrationService.badge_quality_changed). Display only: unlike
+    # quality_upgraded nothing was saved, so no config or file side effects.
+    badge_quality_changed = Signal(str, str)
     calibration_done = Signal(dict)
     settings_changed = Signal()
 
@@ -146,15 +131,27 @@ class AllSkyController(QObject):
         self._worker: Optional[CalibrationWorker] = None
         self._model = None
         self._aspect_note: Optional[str] = None  # non-square-frame warning
+        self._dump_in_flight = False  # one buffer-dump writer at a time
 
         # Background calibration accumulation service
         from services.allsky.calibration_service import CalibrationService
         self._cal_service = CalibrationService(parent=self)
         self._cal_service.quality_upgraded.connect(self._on_quality_upgraded)
         self._cal_service.status_changed.connect(self.status_changed)
+        self._cal_service.attention_changed.connect(self.attention_changed)
+        self._cal_service.badge_quality_changed.connect(self.badge_quality_changed)
+        self._cal_service.model_discredited.connect(self._notify_calibration_discredited)
 
         # Load existing model into both controller and service
         self._update_status()
+
+        # The equipment map is loaded here, on the GUI thread at startup:
+        # no capture is running yet, so nothing races the renderer thread
+        # that will read and update it. It is saved by the renderer every
+        # ten minutes, at capture stop and at shutdown.
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        get_obstruction_map().load(get_obstruction_map_path())
 
     # ------------------------------------------------------------------
     # Public API (called by panel)
@@ -243,8 +240,10 @@ class AllSkyController(QObject):
             return None
 
         dt = self._frame_capture_time()
+        from services.allsky.display_stretch import (
+            DEFAULT_STRENGTH, DisplayStretch)
         from services.allsky.star_centroid import (
-            detect_stars, estimate_sky_circle, stretch_for_display)
+            detect_stars, estimate_sky_circle)
         from services.allsky.catalogs import get_bright_stars
         from services.allsky.coords import radec_to_altaz
         from services.allsky.render_stars import star_display_name
@@ -270,43 +269,83 @@ class AllSkyController(QObject):
         # A failed stretch must not cost the user the dialog itself — guided
         # calibration is often the only path that solves on a given rig, so
         # degrade to the (dark, but usable) linear frame rather than raising.
+        strength = self._display_stretch_strength(DEFAULT_STRENGTH)
         try:
-            display_image = stretch_for_display(image)
+            stretch = DisplayStretch(image)
+            display_image = stretch.render(strength)
         except Exception as e:
             log.warning(f"Guided calibration: display stretch failed, "
                         f"showing the linear frame instead: {e}")
-            display_image = image
+            stretch, display_image = None, image
+
+        width = getattr(image, 'width', 0)
+        height = getattr(image, 'height', 0)
+        # The equipment map, if it has learned this rig, keeps predictions
+        # that land on the mount out of the suggestion support vote. Learned
+        # on the output frame, so it is carried to this frame's pixels here.
+        from services.allsky.equipment_lookup import sky_lookup_for_frame
+        from services.allsky.obstruction_map import get_obstruction_map
+        is_sky = sky_lookup_for_frame(get_obstruction_map(), width, height)
 
         log.info(f"Guided calibration prep: {len(detections)} detections, "
-                 f"{len(candidates)} bright stars above horizon ({source})")
+                 f"{len(candidates)} bright stars above horizon ({source}"
+                 f"{', equipment map on' if is_sky else ''})")
         return {
             'image': image, 'display_image': display_image,
+            'display_stretch': stretch, 'display_strength': strength,
             'detections': detections,
             'sky_cx': sky_cx, 'sky_cy': sky_cy, 'sky_r': sky_r,
             'lat': lat, 'lon': lon, 'dt': dt, 'candidates': candidates,
-            'image_width': getattr(image, 'width', 0),
-            'image_height': getattr(image, 'height', 0),
+            'image_width': width, 'image_height': height,
+            'is_sky': is_sky,
         }
 
-    def start_guided_calibration(self, anchors, prep: dict) -> None:
-        """Solve from user anchors in the background, then save like Calibrate Now.
+    def _display_stretch_strength(self, default: float) -> float:
+        raw = self._mw.config.get('allsky_overlay', {}).get(
+            'guided_display_stretch', default)
+        try:
+            return min(max(float(raw), 0.0), 1.0)
+        except (TypeError, ValueError):
+            return default
 
-        anchors: list of (pixel_x, pixel_y, ra_deg, dec_deg).
-        prep:    the dict returned by prepare_guided_calibration().
+    def remember_display_stretch(self, strength: float) -> None:
+        """Persist the dialog's stretch slider so it opens the same next time."""
+        allsky_cfg = dict(self._mw.config.get('allsky_overlay', {}))
+        value = round(min(max(float(strength), 0.0), 1.0), 2)
+        if allsky_cfg.get('guided_display_stretch') == value:
+            return
+        allsky_cfg['guided_display_stretch'] = value
+        self._mw.config.set('allsky_overlay', allsky_cfg)
+        self._mw.config.save()
+        # The All-Sky panel writes the whole section back from its own loaded
+        # snapshot on its next edit; this refreshes that snapshot so the
+        # saved value is not reverted by an unrelated change.
+        self.settings_changed.emit()
+
+    def begin_guided_session(self, prep: dict):
+        """Open a solve session for the guided-calibration dialog.
+
+        prep: the dict returned by prepare_guided_calibration(). The session
+        solves and suggests off-thread and HOLDS a passing result; nothing is
+        saved until commit_guided_calibration().
+        """
+        from .guided_calibration_session import GuidedCalibrationSession
+        return GuidedCalibrationSession(
+            prep, commit=self.commit_guided_calibration, parent=self)
+
+    def commit_guided_calibration(self, model) -> tuple:
+        """Save a reviewed guided result exactly as Calibrate Now would.
+
+        Returns (ok, message). Refused while a Calibrate Now run is in
+        flight: its result would land afterwards and overwrite this one.
         """
         if self._worker and self._worker.isRunning():
-            self.status_changed.emit("Calibration already in progress…")
-            return
-        log.info(f"Guided calibration starting with {len(anchors)} anchors")
-        self.status_changed.emit("Solving from identified stars…")
-        self._worker = GuidedCalibrationWorker(
-            anchors, prep['lat'], prep['lon'], prep['dt'],
-            prep['sky_cx'], prep['sky_cy'], prep['sky_r'],
-            prep.get('image_width', 0), prep.get('image_height', 0),
-            parent=self)
-        self._worker.finished.connect(self._on_calibration_done)
-        self._worker.failed.connect(self._on_calibration_failed)
-        self._worker.start()
+            return False, ("A Calibrate Now run is still in progress — wait "
+                           "for it to finish, then save again.")
+        if self._on_calibration_done(model):
+            return True, ""
+        return False, ("The calibration could not be saved — see the Logs "
+                       "tab. Your stars are kept.")
 
     def reset_calibration(self) -> None:
         """Delete the saved calibration and forget the in-memory model.
@@ -337,6 +376,7 @@ class AllSkyController(QObject):
 
         self._model = None
         self._cal_service.clear_model()
+        self._forget_equipment_map()
 
         # Clear the config pointer so the overlay renderer stops immediately;
         # the next successful calibration re-sets it.
@@ -349,8 +389,51 @@ class AllSkyController(QObject):
         self.status_changed.emit(
             "Calibration reset — auto-calibration will start over as frames "
             "accumulate, or use Guided Calibration.")
-        self.quality_changed.emit('none')
+        self._publish_quality('none')
         self.settings_changed.emit()
+
+    def dump_calibration_buffer(self) -> None:
+        """Write the service's frame buffer to a replay dump for a bug report.
+
+        Runs on a daemon thread: the write is a few milliseconds, but the
+        status line must not wait on disk either way. The result reaches the
+        panel through status_changed, which Qt queues onto the GUI thread.
+        """
+        if self._dump_in_flight:
+            return
+        self._dump_in_flight = True
+        self.status_changed.emit("Saving calibration buffer…")
+        threading.Thread(target=self._dump_calibration_buffer,
+                         name='allsky-buffer-dump-ui', daemon=True).start()
+
+    def _dump_calibration_buffer(self) -> None:
+        try:
+            path = self._cal_service.dump_now()
+        finally:
+            self._dump_in_flight = False
+        if path is None:
+            self.status_changed.emit(
+                "Calibration buffer is empty — nothing to save. Frames are "
+                "collected while capture runs with the overlay enabled.")
+        else:
+            self.status_changed.emit(f"Calibration buffer saved: {path}")
+
+    def reset_equipment_map(self) -> None:
+        """Forget the learned equipment map (Reset Equipment Map button).
+
+        For a rearranged rig: the map heals on its own over about two
+        nights, but a scope parked where sky used to be keeps its labels
+        off until then, and nothing else clears it.
+        """
+        ok = self._forget_equipment_map()
+        self.status_changed.emit(
+            "Equipment map reset — it relearns where the equipment is over "
+            "the next clear nights." if ok else
+            "Reset failed — could not delete the equipment map file. (See logs)")
+
+    def on_capture_stopped(self) -> None:
+        """Persist what the map learned this session."""
+        self._save_equipment_map()
 
     @property
     def calibration_service(self):
@@ -370,18 +453,50 @@ class AllSkyController(QObject):
             'cy': self._model.cy,
         }
 
+    def _publish_quality(self, quality: str, model=None) -> None:
+        """Badge level plus the reason it is capped, if it is."""
+        from services.allsky.calibration_fit_merit import credibility_note
+        self.quality_note_changed.emit(credibility_note(model) if model else '')
+        self.quality_changed.emit(quality)
+
     def shutdown(self) -> None:
         """Stop any running calibration threads and background service."""
         if self._worker and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait(3000)
         self._cal_service.shutdown()
+        self._save_equipment_map()
+
+    def _save_equipment_map(self) -> None:
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        try:
+            get_obstruction_map().save_if_dirty(get_obstruction_map_path())
+        except Exception as e:
+            log.warning(f"Equipment map save failed: {e}")
+
+    def _forget_equipment_map(self) -> bool:
+        """Clear the in-memory map and its file; True when the file is gone.
+        Saving an empty map is how the file is removed — the file I/O stays
+        in the service module."""
+        from services.allsky.obstruction_map import get_obstruction_map
+        from services.app_config import get_obstruction_map_path
+        obs_map = get_obstruction_map()
+        obs_map.reset()
+        ok = obs_map.save(get_obstruction_map_path())
+        if ok:
+            log.info("All-sky equipment map reset by user")
+        return ok
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
-    def _on_calibration_done(self, model) -> None:
+    def _on_calibration_done(self, model) -> bool:
+        """Admit, save and announce a manual result; True once it is on disk."""
+        from services.allsky import calibration_history
+        from services.allsky.calibration_store import keep_guided_copy
+        from services.allsky.fisheye import FisheyeModel
         from services.app_config import get_calibration_path
 
         # Pole check: the background service measures the celestial pole from
@@ -391,43 +506,65 @@ class AllSkyController(QObject):
         pole_ok, pole_msg = self._cal_service.validate_against_pole(model)
         if not pole_ok:
             self._on_calibration_failed(f"pole check failed: {pole_msg}")
-            return
+            return False
 
-        self._model = model
-        info = self.get_calibration_info()
-
-        # Persist model JSON
+        # Persist model JSON. A model that never reached disk must not be
+        # announced as the calibration: it would draw until the next restart
+        # and then silently give way to the old file.
         cal_path = get_calibration_path()
+        replaced = FisheyeModel.try_load(cal_path)
         try:
             model.save(cal_path)
-            # Update config with new calibration path
-            allsky_cfg = dict(self._mw.config.get('allsky_overlay', {}))
-            allsky_cfg['calibration_file'] = cal_path
-            self._mw.config.set('allsky_overlay', allsky_cfg)
-            self._mw.config.save()
+            self.remember_calibration_file(cal_path)
         except Exception as e:
             log.error(f"Failed to save calibration: {e}")
+            self.status_changed.emit(f"Calibration save failed: {e}")
+            return False
+        keep_guided_copy(model, cal_path)
+        calibration_history.record(
+            model, calibration_history.source_for_model(model), replaced=replaced)
 
-        # Notify the background service so it uses this model as its seed
-        # and resets its frame buffer for fresh accumulation.
-        self._cal_service.set_model(model)
-
+        from services.allsky.model_admission import is_guided
         from services.allsky.calibration_service import model_quality
         quality = model_quality(model, model.n_images, model.span_minutes)
-
-        msg = (f"Calibrated: {model.n_matches} stars, "
-               f"RMS={model.rms_residual:.2f}px ({quality})")
+        if is_guided(model):
+            # 'preliminary' alone undersells it: the orientation is pinned by
+            # stars the user named; only the fine lens terms are still rough.
+            msg = (f"Guided calibration saved: {model.n_matches} stars, "
+                   f"RMS={model.rms_residual:.2f}px. Automatic refinement "
+                   "sharpens it as frames accumulate")
+        else:
+            msg = (f"Calibrated: {model.n_matches} stars, "
+                   f"RMS={model.rms_residual:.2f}px ({quality})")
         # Guided-solve rescue note (excluded/reassigned anchors) — the user
         # must see which of their identifications didn't fit.
         note = getattr(model, 'guided_note', None)
         if note:
             msg += f" — {note}"
-        self.status_changed.emit(msg)
-        self.quality_changed.emit(quality)
+        self._notify_calibration_done(self.adopt_model(model, msg))
+        return True
+
+    def remember_calibration_file(self, cal_path: str) -> None:
+        """Point allsky_overlay.calibration_file at `cal_path`."""
+        allsky_cfg = dict(self._mw.config.get('allsky_overlay', {}))
+        allsky_cfg['calibration_file'] = cal_path
+        self._mw.config.set('allsky_overlay', allsky_cfg)
+        self._mw.config.save()
+
+    def adopt_model(self, model, status: str) -> Optional[dict]:
+        """Make `model`, already on disk, the live calibration: the service
+        seeds from it and starts a fresh buffer, the panel hears about it.
+        Shared by a manual/guided result and a history restore."""
+        from services.allsky.calibration_service import model_quality
+        self._model = model
+        info = self.get_calibration_info()
+        self._cal_service.set_model(model)
+        self.status_changed.emit(status)
+        self._publish_quality(
+            model_quality(model, model.n_images, model.span_minutes), model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
-
-        self._notify_calibration_done(info)
+        return info
 
     def _on_calibration_failed(self, error_msg: str) -> None:
         log.warning(f"All-sky calibration failed: {error_msg}")
@@ -455,10 +592,10 @@ class AllSkyController(QObject):
                     f"Calibrated ({ts}): {model.n_matches} stars, "
                     f"RMS={model.rms_residual:.2f}px ({quality})"
                 )
-                self.quality_changed.emit(quality)
+                self._publish_quality(quality, model)
                 return
         self.status_changed.emit("Not calibrated — click 'Calibrate Now'")
-        self.quality_changed.emit('none')
+        self._publish_quality('none')
 
     def _on_quality_upgraded(self, quality: str, model) -> None:
         """Handle quality upgrade from the background service."""
@@ -472,7 +609,7 @@ class AllSkyController(QObject):
         self._mw.config.set('allsky_overlay', allsky_cfg)
         self._mw.config.save()
 
-        self.quality_changed.emit(quality)
+        self._publish_quality(quality, model)
         self.calibration_done.emit(info)
         self.settings_changed.emit()
 
@@ -529,3 +666,14 @@ class AllSkyController(QObject):
             ))
         except Exception as e:
             log.debug(f"Calibration notification failed: {e}")
+
+    def _notify_calibration_discredited(self, title: str, body: str) -> None:
+        """Once per discredit episode (CalibrationService.model_discredited)."""
+        try:
+            self._mw.notifier.notify(NotificationEvent(
+                type=CALIBRATION_DISCREDITED, title=title, body=body,
+                level='warning',
+                data={'model_info': self.get_calibration_info() or {}},
+            ))
+        except Exception as e:
+            log.debug(f"Calibration discredited notification failed: {e}")

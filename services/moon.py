@@ -10,6 +10,7 @@ import time
 
 from services.logger import app_logger
 from services.config import Config
+from services.coordinates import parse_coordinate as _parse_coordinate
 
 try:
     from astral import LocationInfo
@@ -20,23 +21,10 @@ except ImportError:
 
 
 def parse_coordinate(value):
-    """Parse a coordinate that may be decimal ('31.55', '-100.46') or DMS
-    ('31 32 51', '100 27 25 W'). Returns float degrees, or None if unparseable."""
-    s = str(value).strip().upper()
-    if not s:
-        return None
-    sign = -1 if (s.startswith('-') or 'S' in s or 'W' in s) else 1
-    for ch in "NSEW°'\":,-":
-        s = s.replace(ch, ' ')
-    parts = [p for p in s.split() if p]
-    try:
-        nums = [float(p) for p in parts]
-    except ValueError:
-        return None
-    if not nums:
-        return None
-    mag = nums[0] + (nums[1] if len(nums) > 1 else 0) / 60 + (nums[2] if len(nums) > 2 else 0) / 3600
-    return sign * abs(mag)
+    """Kept for existing callers: the one parser is
+    ``services.coordinates.parse_coordinate``. Accepts the longitude range so
+    either field can be handed to it, as before."""
+    return _parse_coordinate(value, is_longitude=True)
 
 
 def get_configured_location():
@@ -47,8 +35,8 @@ def get_configured_location():
         config = Config()
         weather_config = config.get('weather', {})
 
-        lat = parse_coordinate(weather_config.get('latitude', ''))
-        lon = parse_coordinate(weather_config.get('longitude', ''))
+        lat = _parse_coordinate(weather_config.get('latitude', ''), is_longitude=False)
+        lon = _parse_coordinate(weather_config.get('longitude', ''), is_longitude=True)
         location_name = weather_config.get('location', 'Observatory')
 
         if lat is not None and lon is not None:

@@ -126,13 +126,16 @@ class TestScheduledCaptureWindow:
     
     def test_same_day_window(self):
         """Test same-day capture window (e.g., 09:00-17:00)"""
-        # This test depends on current time, so we'll just verify it runs
-        result = is_within_scheduled_window(
-            scheduled_capture_enabled=True,
-            scheduled_start_time="00:00",
-            scheduled_end_time="23:59"
-        )
-        # Should be within this 24-hour-ish window
+        # Pinned to noon: on the real clock the 23:59-00:00 minute falls
+        # outside the window, and a CI run once landed in it.
+        from datetime import datetime as real_datetime
+        with patch('services.camera.camera_utils.datetime') as fake:
+            fake.now.return_value = real_datetime(2026, 10, 3, 12, 0)
+            result = is_within_scheduled_window(
+                scheduled_capture_enabled=True,
+                scheduled_start_time="00:00",
+                scheduled_end_time="23:59"
+            )
         assert result is True
     
     def test_overnight_window_format(self):

@@ -365,6 +365,149 @@ real rig and run a night. That is the decision point for Stages 1–3.
 
 ---
 
+## Stage 4 — Target push (issue #137)
+
+**Added:** 2026-10-05 · plugin **1.2.0.0** · Sentinel: the release after 3.7.8.
+
+The plugin tells Sentinel which target the sequencer is imaging, and the all-sky
+overlay draws a reticle, the name and the imaging camera's field of view at that
+position. The *mutating* surface grows by exactly one idempotent route, behind the
+same auth as Start/Stop — it changes only what the overlay draws, never capture.
+
+### Modules
+
+| Side | File | Role |
+|---|---|---|
+| Sentinel | `services/nina_target_store.py` | Thread-safe last-pushed target + monotonic receipt time; `current(max_age_s)` applies the stale-out |
+| Sentinel | `services/api_target.py` | Pure: `TARGET_PATH`, payload validation → `NinaTarget`, response shaping, OpenAPI paths/schemas |
+| Sentinel | `services/web_target.py` | Socket-facing `POST /nina/target`; reuses `web_control.authorize` / `_read_body` / `_send_json` |
+| Sentinel | `services/allsky/render_target.py` | Tangent-plane FOV corners, precession to date, projection, label reservation, drawing |
+| Sentinel | `ui/panels/allsky_nina_target_card.py` | **NINA Target** card (layout only); config under `allsky_overlay.nina_target` |
+| Plugin | `Client/SentinelTargetPayload.cs` | `SentinelTargetReport`, `SentinelTargetResult`, the request body (`Utf8JsonWriter`, invariant plain decimals) |
+| Plugin | `Client/SentinelClient.Target.cs` | `PostTargetAsync` — partial of `SentinelClient`, same token-refresh / error mapping as Start/Stop |
+| Plugin | `SentinelTarget/NinaTargetSource.cs` | The only NINA-facing reader: running DSO container, J2000 coordinates, position angle, FOV |
+| Plugin | `SentinelTarget/SentinelTargetReading.cs` | Target / no target / unknown — only "no target" sends a clear |
+| Plugin | `SentinelTarget/SentinelTargetReporter.cs` | 10 s loop, send on change + 30 s heartbeat, one clear, back-off, de-duplicated warnings |
+| Plugin | `SentinelSequenceLink.PostTargetAsync` | Transport over the sequence items' shared client (same override, same in-flight bracket) |
+| Plugin | `Sentinel.cs` / `SentinelPluginOptions.cs` / `Options.xaml` | Hosts the reporter in the manifest; profile-scoped `ReportTargetToSentinel` switch, default on |
+
+### Payload
+
+`POST /nina/target` — fixed path, deliberately *not* under the configurable
+`webserver_control_path`. Bearer token, Host allow-list, fail closed with no token,
+no CORS, 4096-byte cap: identical to the capture routes.
+
+```json
+{"target":{"name":"M31","ra_deg":10.6847,"dec_deg":41.2687,"epoch":"J2000","fov_w_deg":2.1336,"fov_h_deg":1.4224,"rotation_deg":15,"source":"nina"}}
+```
+
+`{"target":null}` clears. The plugin sends `fov_w_deg`/`fov_h_deg` both or neither
+(Sentinel rejects one alone) and drops a field Sentinel would refuse rather than
+failing every request of the night: a FOV outside (0, 60] after rounding to 4 places, a non-finite rotation.
+RA is wrapped to [0, 360) *after* rounding (359.9999999 → 0, never 360), Dec is
+clamped, numbers are written as plain invariant decimals (RA/Dec 6 places, FOV 4,
+rotation 3), and the name is cleaned like `api_target.clean_name` — Unicode "C" categories
+dropped, whitespace collapsed, cut to 64 code points (blank → `NINA target`).
+
+FOV: `2·atan(n·pixel_µm/1000/2/focal_mm)` per axis — `CameraInfo.XSize/YSize` and
+`PixelSize` when the camera is connected, else the profile's pixel size and the
+framing assistant's camera width/height; focal length from the telescope settings.
+Omitted when any input is ≤ 0 or NaN. Binning does not change the field.
+
+Response 200: `{"accepted": true, "changed": bool, "target": {...}|null, "age_s": 0.0, "message": "..."}`.
+The plugin reads `accepted`, `changed`, `message`.
+
+### Position-angle convention
+
+`rotation_deg` is the **sky position angle, in degrees east of north, of the camera's
+"up" (top edge / height) axis**. At 0 the sensor width runs east–west and the height
+north–south; only PA mod 180 matters for a rectangle. The plugin sends NINA's
+`InputTarget.PositionAngle` unchanged. In NINA 3 that property is normalised to
+[0, 360) and is the standard astronomical position angle, east of north: NINA 2.x's
+`Rotation` (counter-clockwise) is migrated as `360 − Rotation`, so the plugin must
+*not* apply that conversion again. If a live comparison against NINA's framing
+assistant still shows the box mirrored, the single fix is the sign of θ in
+`render_target.fov_corners_radec` — not the plugin.
+
+### Reporter behaviour
+
+- Started from `Sentinel.Initialize()` (PluginLoader calls it right after composition),
+  first read 15 s later. Reads the target every 10 s. Sends when the serialised payload differs from the
+  last one Sentinel accepted, or every 30 s while a target is set (Sentinel's
+  default stale-out is 120 s, so four heartbeats fit inside it).
+- No running target, or the options switch off: one clear, then silence until a
+  target reappears. Dispose sends nothing — shutdown must not wait on the network,
+  and the stale-out hides the marker.
+- Three readings, not two (`SentinelTargetReading`): a target; no target (one clear);
+  or *unknown* — `ISequenceMediator.Initialized` is still false (most mediator calls
+  throw `SequenceMediatorException` until then) or no mediator was supplied — which
+  sends nothing and leaves Sentinel's copy to its stale-out.
+- A read fault in `NinaTargetSource` (the UI thread edits the sequence tree while we
+  walk it) repeats the last good answer on faults 1–2 (~20 s); fault 3 reports no
+  target. Without this a race would send a clear and blink the marker.
+- Failures: one `Warning` per distinct message (text from
+  `SentinelReadiness.Describe`, never the token), config.json re-read on the next
+  attempt only. Unreachable / timeout: flat 30 s back-off. Unauthorized,
+  HostNotAllowed, ControlDisabled and BadRequest escalate 30 s → 60 s → … → 10 min,
+  because each attempt also writes a warning into Sentinel's log; a body that got a
+  400 is never resent until the serialised JSON changes. HTTP 404 means an older
+  Sentinel: its own warning and a 10-minute back-off. Nothing is logged at `Error`.
+- `RequestSendNow()` (any options-page change, a profile switch) cuts the back-off,
+  forgets a rejected body and re-reads config.json, so a fix acts within one tick.
+- The name is cleaned like `api_target.clean_name` (Unicode "C" categories dropped,
+  whitespace collapsed, 64 code points), so a name Sentinel would clean to nothing
+  becomes `NINA target` rather than a perpetual 400.
+- Does not touch the sequence items' cached readiness: the target route proves the
+  token but not that a capture handler is wired.
+
+### Hosting decision
+
+The reporter lives in the plugin manifest (`Sentinel`, a `PluginBase`), which imports
+`ISequenceMediator` and `ICameraMediator` through its `[ImportingConstructor]` — as
+published plugins (nina.plugin.connector, ninaAPI) do. Both parameters carry
+`[Import(AllowDefault = true)]`: a missing export arrives as null (the source then
+reads *unknown* and nothing is sent) instead of MEF silently dropping the whole
+manifest and the options page with it. The reporter is built and started in the
+`Initialize()` override, inside a try/catch, and disposed in `Teardown()`, so the
+push runs whether or not the dockable is ever opened. **Fallback** if a live load
+still misbehaves: host the reporter in `SentinelDockable` (already
+`[ImportingConstructor]`), accepting that it then runs only once NINA has
+constructed the panel.
+
+### VERIFY list
+
+Every NINA member the plugin uses was checked against NINA's public source
+(isbeorn/nina, develop): the `ISequenceMediator` target lists and `Initialized`,
+`IDeepSkyObjectContainer.Target` / `InputTarget` fields, `SequenceEntityStatus`
+(`NINA.Core.Enum`), `Coordinates.Transform` with `Epoch` (`NINA.Astrometry`, not
+`NINA.Core.Enum`), `ICameraMediator.GetInfo()`, the profile settings,
+`IPluginOptionsAccessor.Get/SetValueBoolean`, `PluginBase.Initialize/Teardown`, and
+`[Import(AllowDefault = true)]` on constructor parameters. The Windows CI build is the
+compile check. What remains needs a live NINA:
+
+| Item | How to check | If it is wrong |
+|---|---|---|
+| Position-angle sign | Frame a target at PA ≈ 30° in NINA's framing assistant, run it, compare Sentinel's box with the framing view | Flip the sign of θ in `render_target.fov_corners_radec` |
+| Manifest import at runtime | Plugin listed, options page shows the switch, NINA's log has `sent target '…' to Sentinel` at Debug after a target starts | Move the reporter to `SentinelDockable` |
+| Width vs height | A non-square sensor's long side matches the framing view | Swap `XSize`/`YSize` in `NinaTargetSource.ReadFieldOfView` |
+
+Live checks still owed as well: the marker clears within one tick when a sequence
+stops; an older Sentinel produces exactly one 404 warning.
+
+### Deliberate deferrals
+
+- **Headless does not render the overlay.** `headless_runner._process_and_save` only
+  calls `add_overlays`, so a headless Sentinel accepts and stores the target but
+  draws nothing — the same as the rest of the all-sky overlay.
+- **`/status` does not carry the target.** It would cost a line in
+  `web_output._build_status_dict`, which is near its size cap; the POST response
+  already echoes the stored target.
+- **Live mount pointing.** The push reports the *sequencer target*, not where the
+  mount is actually pointed (`ITelescopeMediator`). Slews, meridian flips and
+  centring offsets are not shown. A later stage could add it as a second source.
+
+---
+
 ## Definition of done
 
 - **Stage 0:** control endpoints authenticated and idempotent; `tests/test_api_control.py` + `test_api_auth.py` pass under the default pytest run; no ACAO on control routes (regression test); OpenAPI/`/docs` describe the new routes; start/stop verified against the real rig from both GUI and headless hosts.

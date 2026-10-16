@@ -3,174 +3,48 @@ All-Sky Overlay Settings Panel.
 
 Provides:
   - Calibration status + "Calibrate Now" button
-  - Layer toggles: Grid, Constellations, Messier, NGC, Planets
+  - Layer toggles: Constellations, Bright Stars, Messier, NGC, Planets, NINA target
   - Per-layer color, opacity, line width controls
   - Enabled/disabled master toggle
+  - Observable-sky gate floors (exposure, star detections)
 """
+import copy
+
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QFrame, QGridLayout, QSizePolicy, QProgressBar, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
 from qfluentwidgets import (
-    PushButton, SwitchButton,
-    CardWidget, CaptionLabel, BodyLabel, SubtitleLabel,
-    MessageBox,
+    PushButton, ComboBox, CaptionLabel, BodyLabel, SubtitleLabel, MessageBox,
 )
-from ..components.scroll_safe_spinbox import SpinBox
+from services.allsky.label_size import (
+    CONFIG_KEY as LABEL_SIZE_KEY, DEFAULT_PRESET as LABEL_SIZE_DEFAULT,
+    preset_keys, preset_names,
+)
+from services.allsky.object_label_text import (
+    CONFIG_KEY as LABEL_STYLE_KEY, DEFAULT_STYLE as LABEL_STYLE_DEFAULT,
+    known_style, style_keys, style_names,
+)
+from services.config_defaults import DEFAULT_CONFIG
+from ..components.scroll_safe_spinbox import DoubleSpinBox, SpinBox
 
-from ..theme.tokens import Colors, Typography, Spacing, Layout
+from ..theme.tokens import Spacing
 from ..theme.icons import mdi
 from ..components.cards import CollapsibleCard
+from .allsky_nina_target_card import NinaTargetCard
+from .allsky_settings_rows import (  # re-exported for existing callers
+    LayerToggleRow, ColorPaletteRow, section_card as _section_card,
+)
 
 
-def _section_card(title: str) -> tuple:
-    """Create a labelled card widget. Returns (card, inner_layout)."""
-    card = CardWidget()
-    card.setStyleSheet(f"CardWidget {{ border-radius: {Layout.radius_md}px; }}")
-    vl = QVBoxLayout(card)
-    vl.setContentsMargins(Spacing.base, Spacing.base, Spacing.base, Spacing.lg)
-    vl.setSpacing(Spacing.sm)
-
-    lbl = SubtitleLabel(title)
-    vl.addWidget(lbl)
-    return card, vl
-
-
-class LayerToggleRow(QWidget):
-    """A row with a label + SwitchButton for a single layer toggle."""
-
-    toggled = Signal(bool)
-
-    def __init__(self, label: str, default: bool = True, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        lbl = BodyLabel(label)
-        lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._switch = SwitchButton()
-        self._switch.setChecked(default)
-        self._switch.checkedChanged.connect(self.toggled)
-        layout.addWidget(lbl)
-        layout.addWidget(self._switch)
-
-    def is_checked(self) -> bool:
-        return self._switch.isChecked()
-
-    def set_checked(self, v: bool) -> None:
-        self._switch.setChecked(v)
-
-
-# 10 preset overlay colors — bright enough to read against a dark sky
-OVERLAY_PALETTE = [
-    ('#4488FF', 'Blue'),
-    ('#FF8844', 'Orange'),
-    ('#88FF44', 'Green'),
-    ('#FF4444', 'Red'),
-    ('#44DDFF', 'Cyan'),
-    ('#FFDD44', 'Yellow'),
-    ('#AA66FF', 'Purple'),
-    ('#FF66AA', 'Pink'),
-    ('#FFFFFF', 'White'),
-    ('#44FFAA', 'Teal'),
-]
-
-
-class _ColorPopup(QFrame):
-    """Popup grid of color swatches shown when the color button is clicked."""
-
-    color_picked = Signal(str)
-
-    def __init__(self, selected: str, parent=None):
-        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setStyleSheet(
-            "QFrame { background: #2b2b2b; border: 1px solid #555; border-radius: 6px; }"
-        )
-        grid = QGridLayout(self)
-        grid.setContentsMargins(8, 8, 8, 8)
-        grid.setSpacing(4)
-
-        cols = 5
-        for i, (hex_color, name) in enumerate(OVERLAY_PALETTE):
-            btn = QPushButton()
-            btn.setFixedSize(28, 28)
-            btn.setToolTip(name)
-            btn.setCursor(Qt.PointingHandCursor)
-            if hex_color == selected:
-                border = '2px solid #FFFFFF'
-            else:
-                border = '2px solid transparent'
-            btn.setStyleSheet(
-                f"QPushButton {{ background: {hex_color}; border: {border}; "
-                f"border-radius: 4px; min-width: 28px; min-height: 28px; }}"
-                f"QPushButton:hover {{ border: 2px solid #AAAAAA; }}"
-            )
-            btn.clicked.connect(lambda _=False, c=hex_color: self._pick(c))
-            grid.addWidget(btn, i // cols, i % cols)
-
-    def _pick(self, color: str) -> None:
-        self.color_picked.emit(color)
-        self.close()
-
-
-class ColorPaletteRow(QWidget):
-    """Label + single color swatch (right-aligned) that opens a popup picker."""
-
-    color_changed = Signal(str)
-
-    def __init__(self, default_color: str = '#4488FF', parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
-
-        lbl = BodyLabel("Color")
-        lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        layout.addWidget(lbl)
-
-        self._selected = default_color
-        self._swatch = QPushButton()
-        self._swatch.setFixedSize(32, 22)
-        self._swatch.setCursor(Qt.PointingHandCursor)
-        self._swatch.clicked.connect(self._show_popup)
-        layout.addWidget(self._swatch)
-
-        self._update_swatch()
-
-    def _show_popup(self) -> None:
-        popup = _ColorPopup(self._selected, self)
-        popup.color_picked.connect(self._select)
-        # Position below the swatch button
-        pos = self._swatch.mapToGlobal(self._swatch.rect().bottomLeft())
-        popup.move(pos.x(), pos.y() + 2)
-        popup.show()
-
-    def _select(self, color: str) -> None:
-        self._selected = color
-        self._update_swatch()
-        self.color_changed.emit(color)
-
-    def _update_swatch(self) -> None:
-        self._swatch.setStyleSheet(
-            f"QPushButton {{ background: {self._selected}; border: 2px solid #888; "
-            f"border-radius: 4px; min-width: 32px; min-height: 22px; }}"
-            f"QPushButton:hover {{ border: 2px solid #FFFFFF; }}"
-        )
-        # Find the color name for the tooltip
-        name = self._selected
-        for hex_color, color_name in OVERLAY_PALETTE:
-            if hex_color == self._selected:
-                name = color_name
-                break
-        self._swatch.setToolTip(name)
-
-    def selected_color(self) -> str:
-        return self._selected
-
-    def set_color(self, color: str) -> None:
-        self._selected = color
-        self._update_swatch()
+def _merge(base: dict, over: dict) -> dict:
+    """Recursively lay ``over`` onto ``base`` (in place) and return it."""
+    for key, value in (over or {}).items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
 
 
 class QualityBadge(QFrame):
@@ -190,13 +64,43 @@ class QualityBadge(QFrame):
         layout.addWidget(self._label)
 
         self.setFixedHeight(26)
+        self._level = 'none'
+        self._attention = ''
+        self._note = ''
         self.set_quality('none')
+
+    # Amber, whatever the rating: a green pill over a calibration the app
+    # can no longer confirm reads as "all is well" (issue #79).
+    _ATTENTION_COLOURS = ('#2D2305', '#FFD166')
+    _ATTENTION_SUFFIX = {'unconfirmed': 'unconfirmed',
+                         'misaligned': 'check alignment'}
+
+    def set_attention(self, attention: str) -> None:
+        self._attention = attention if attention in self._ATTENTION_SUFFIX else ''
+        self.set_quality(self._level)
+
+    def set_note(self, note: str) -> None:
+        """Why the rating is what it is (a capped chance fit); '' for none.
+        Shown in the tooltip, where the level's stock description would
+        otherwise call a 60-frame chance fit a "single image"."""
+        self._note = note or ''
+        self.set_quality(self._level)
 
     def set_quality(self, level: str) -> None:
         from services.allsky.calibration_service import CalibrationQuality
+        self._level = level
         bg, text = CalibrationQuality.badge_colors(level)
         desc = CalibrationQuality.description(level)
         label = level.capitalize() if level != 'none' else 'None'
+        if self._attention and level != 'none':
+            bg, text = self._ATTENTION_COLOURS
+            label = f"{label} — {self._ATTENTION_SUFFIX[self._attention]}"
+        # The note is the specific reason and names the saved rating itself;
+        # the generic suffix is for a caution with no measurement behind it.
+        if self._note and level != 'none':
+            desc = f"{desc}. {self._note}"
+        elif self._attention and level != 'none':
+            desc = f"{desc} (rating from when it was saved)"
 
         self._label.setText(label)
         self.setToolTip(desc)
@@ -232,15 +136,23 @@ class AllSkySettingsPanel(QScrollArea):
         self._layout.setContentsMargins(Spacing.base, Spacing.base, Spacing.base, Spacing.base)
         self._layout.setSpacing(Spacing.sm)
 
+        # The allsky_overlay dict last loaded; get_config merges the panel's
+        # controls over it so keys the panel has no control for
+        # (utc_offset_hours, planets.colors, constellations.edge_fade_px,
+        # anything added later) survive an edit on this page.
+        self._loaded = {}
+
         self._build_header()
         self._build_calibration_card()
         self._build_master_toggle()
+        self._build_gate_card()
         self._build_burn_in_card()
         self._build_constellations_card()
         self._build_bright_stars_card()
         self._build_messier_card()
         self._build_ngc_card()
         self._build_planets_card()
+        self._build_nina_target_card()
 
         self._layout.addStretch()
 
@@ -275,6 +187,12 @@ class AllSkySettingsPanel(QScrollArea):
         self._status_label.setWordWrap(True)
         vl.addWidget(self._status_label)
 
+        self._attention_label = CaptionLabel("")
+        self._attention_label.setWordWrap(True)
+        self._attention_label.setStyleSheet("color: #FFD166;")
+        self._attention_label.hide()
+        vl.addWidget(self._attention_label)
+
         self._calibrate_btn = PushButton("Calibrate Now", icon=mdi('refresh'))
         self._calibrate_btn.clicked.connect(self._on_calibrate_clicked)
         vl.addWidget(self._calibrate_btn)
@@ -287,9 +205,31 @@ class AllSkySettingsPanel(QScrollArea):
 
         # Escape hatch for a bad saved calibration (a wrong model seeds every
         # background refinement, so deleting it beats keeping it).
+        # Every calibration that went live is kept; this restores one
+        # (a guided solve replaced by automatic refinement, discussion #105).
+        self._history_btn = PushButton("Calibration History…", icon=mdi('history'))
+        self._history_btn.clicked.connect(
+            lambda: self.settings_changed.emit({'_action': 'calibration_history'}))
+        vl.addWidget(self._history_btn)
+
         self._reset_btn = PushButton("Reset Calibration…", icon=mdi('delete'))
         self._reset_btn.clicked.connect(self._on_reset_clicked)
         vl.addWidget(self._reset_btn)
+
+        # Support handle: writes the frames auto-calibration is working from
+        # to a small file the diagnostics bundle picks up (no images).
+        self._dump_btn = PushButton("Dump calibration buffer", icon=mdi('database-export'))
+        self._dump_btn.setToolTip(
+            "Save the star detections collected for automatic calibration to a "
+            "file for a bug report. No images are saved.")
+        self._dump_btn.clicked.connect(self._on_dump_clicked)
+        vl.addWidget(self._dump_btn)
+
+        # The learned equipment map outlives the calibration on purpose; this
+        # is the way to forget it after the rig is rearranged.
+        self._reset_map_btn = PushButton("Reset Equipment Map…", icon=mdi('delete'))
+        self._reset_map_btn.clicked.connect(self._on_reset_map_clicked)
+        vl.addWidget(self._reset_map_btn)
 
         self._layout.addWidget(card)
 
@@ -299,6 +239,45 @@ class AllSkySettingsPanel(QScrollArea):
         self._master_toggle.toggled.connect(self._on_setting_changed)
         vl.addWidget(self._master_toggle)
         self._top_n = self._spin_row(vl, "Max objects visible", 5, 50, 15, 5)
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel("Label size"))
+        self._label_size = ComboBox()
+        self._label_size.addItems(list(preset_names()))
+        self._label_size.setCurrentIndex(preset_keys().index(LABEL_SIZE_DEFAULT))
+        self._label_size.currentIndexChanged.connect(self._on_setting_changed)
+        row.addWidget(self._label_size)
+        vl.addLayout(row)
+        self._behind_equipment = LayerToggleRow(
+            "Show labels behind equipment", default=False)
+        self._behind_equipment.setToolTip(
+            "Keep star and planet names on where the pier or a telescope blocks "
+            "the sky. Off: names only where the sky is seen. A closed roof still "
+            "hides every label.")
+        self._behind_equipment.toggled.connect(self._on_setting_changed)
+        vl.addWidget(self._behind_equipment)
+        self._layout.addWidget(card)
+
+    def _build_gate_card(self):
+        card, vl = _section_card("When the overlay is drawn")
+        desc = CaptionLabel(
+            "The overlay, automatic calibration and star detection pause on frames "
+            "that cannot show a night sky: exposures shorter than the floor, and a "
+            "roof that reads Open while no stars are detected (a lit roof or an "
+            "overcast sky). Set the exposure floor to 0 to turn that check off."
+        )
+        desc.setWordWrap(True)
+        vl.addWidget(desc)
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel("Minimum exposure (seconds)"))
+        self._min_exposure = DoubleSpinBox()
+        self._min_exposure.setRange(0.0, 60.0)
+        self._min_exposure.setDecimals(2)
+        self._min_exposure.setSingleStep(0.1)
+        self._min_exposure.setValue(0.5)
+        self._min_exposure.valueChanged.connect(self._on_setting_changed)
+        row.addWidget(self._min_exposure)
+        vl.addLayout(row)
+        self._min_stars = self._spin_row(vl, "Minimum stars detected", 0, 500, 100, 10)
         self._layout.addWidget(card)
 
     def _build_burn_in_card(self):
@@ -349,6 +328,7 @@ class AllSkySettingsPanel(QScrollArea):
         self._messier_enabled = LayerToggleRow("Show Messier objects", default=True)
         self._messier_enabled.toggled.connect(self._on_setting_changed)
         card.add_widget(self._messier_enabled)
+        self._messier_style = self._style_row_in(card)
         self._messier_color = ColorPaletteRow('#FF8844')
         self._messier_color.color_changed.connect(self._on_setting_changed)
         card.add_widget(self._messier_color)
@@ -360,6 +340,7 @@ class AllSkySettingsPanel(QScrollArea):
         self._ngc_enabled.toggled.connect(self._on_setting_changed)
         card.add_widget(self._ngc_enabled)
         self._ngc_max_mag = self._spin_row_in(card, "Max magnitude", 5, 12, 8, 1)
+        self._ngc_style = self._style_row_in(card)
         self._ngc_color = ColorPaletteRow('#88FF44')
         self._ngc_color.color_changed.connect(self._on_setting_changed)
         card.add_widget(self._ngc_color)
@@ -374,6 +355,11 @@ class AllSkySettingsPanel(QScrollArea):
         self._planets_color.color_changed.connect(self._on_setting_changed)
         card.add_widget(self._planets_color)
         self._layout.addWidget(card)
+
+    def _build_nina_target_card(self):
+        self._nina_card = NinaTargetCard()
+        self._nina_card.changed.connect(self._on_setting_changed)
+        self._layout.addWidget(self._nina_card)
 
     def _spin_row(self, layout, label: str, min_v: int, max_v: int,
                   default: int, step: int) -> SpinBox:
@@ -398,6 +384,14 @@ class AllSkySettingsPanel(QScrollArea):
         card.add_row(label, spin)
         return spin
 
+    def _style_row_in(self, card: CollapsibleCard) -> ComboBox:
+        combo = ComboBox()
+        combo.addItems(list(style_names()))
+        combo.setCurrentIndex(style_keys().index(LABEL_STYLE_DEFAULT))
+        combo.currentIndexChanged.connect(self._on_setting_changed)
+        card.add_row("Label text", combo)
+        return combo
+
     # ------------------------------------------------------------------
     # Public API (called by controller)
     # ------------------------------------------------------------------
@@ -409,6 +403,21 @@ class AllSkySettingsPanel(QScrollArea):
         """Update the calibration quality badge."""
         self._quality_badge.set_quality(level)
 
+    def set_quality_note(self, note: str) -> None:
+        """Badge tooltip detail: why a rating is capped ('' clears it)."""
+        self._quality_badge.set_note(note)
+
+    def set_badge_quality(self, level: str, note: str) -> None:
+        """Level and reason together (a live verdict on the saved model)."""
+        self._quality_badge.set_note(note)
+        self._quality_badge.set_quality(level)
+
+    def set_attention(self, level: str, message: str) -> None:
+        """Caution beside the badge when the rating can't be confirmed."""
+        self._quality_badge.set_attention(level)
+        self._attention_label.setText(message)
+        self._attention_label.setVisible(bool(level and message))
+
     def set_calibrating(self, active: bool) -> None:
         self._calibrate_btn.setEnabled(not active)
         self._calibrate_btn.setText("Calibrating…" if active else "Calibrate Now")
@@ -416,8 +425,16 @@ class AllSkySettingsPanel(QScrollArea):
     def load_from_config(self, config: dict) -> None:
         """Populate all controls from the given allsky_overlay config dict."""
         c = config
+        self._loaded = copy.deepcopy(c) if isinstance(c, dict) else {}
         self._master_toggle.set_checked(c.get('enabled', False))
         self._top_n.setValue(int(c.get('top_n', 15)))
+        self._min_exposure.setValue(float(c.get('min_exposure_s', 0.5)))
+        self._min_stars.setValue(int(c.get('min_star_detections', 100)))
+        keys = preset_keys()
+        preset = c.get(LABEL_SIZE_KEY, LABEL_SIZE_DEFAULT)
+        self._label_size.setCurrentIndex(
+            keys.index(preset if preset in keys else LABEL_SIZE_DEFAULT))
+        self._behind_equipment.set_checked(bool(c.get('labels_behind_equipment', False)))
 
         burn = c.get('burn_into_output', {})
         self._burn_saved_file.set_checked(burn.get('saved_file', False))
@@ -439,65 +456,70 @@ class AllSkySettingsPanel(QScrollArea):
         messier = c.get('messier', {})
         self._messier_enabled.set_checked(messier.get('enabled', True))
         self._messier_color.set_color(messier.get('color', '#FF8844'))
+        self._messier_style.setCurrentIndex(
+            style_keys().index(known_style(messier.get(LABEL_STYLE_KEY))))
 
         ngc = c.get('ngc', {})
         self._ngc_enabled.set_checked(ngc.get('enabled', False))
         self._ngc_max_mag.setValue(int(ngc.get('min_magnitude', 8)))
         self._ngc_color.set_color(ngc.get('color', '#88FF44'))
+        self._ngc_style.setCurrentIndex(
+            style_keys().index(known_style(ngc.get(LABEL_STYLE_KEY))))
 
         planets = c.get('planets', {})
         self._planets_enabled.set_checked(planets.get('enabled', True))
         self._planets_color.set_color(planets.get('color', '#FFFFCC'))
 
+        self._nina_card.load(c.get('nina_target', {}))
+
     def get_config(self) -> dict:
-        """Collect current UI state into allsky_overlay config dict."""
-        return {
-            'enabled': self._master_toggle.is_checked(),
-            'calibration_file': '',  # Preserved by controller from actual config
-            'top_n': self._top_n.value(),
-            'burn_into_output': {
-                'saved_file': self._burn_saved_file.is_checked(),
-                'web': self._burn_web.is_checked(),
-                'timelapse': self._burn_timelapse.is_checked(),
-            },
-            'grid': {
-                'enabled': False, 'horizon': False,
-                'altitude_rings': False, 'cardinal_labels': False,
-                'altitude_step': 30, 'azimuth_lines': False,
-                'color': '#336633', 'line_width': 1,
-                'label_size': 14, 'opacity': 120,
-            },
-            'constellations': {
-                'enabled': self._con_enabled.is_checked(),
-                'lines': self._con_lines.is_checked(),
-                'labels': self._con_labels.is_checked(),
-                'color': self._con_color.selected_color(),
-                'line_width': 2, 'label_size': 12, 'opacity': 180,
-            },
-            'bright_stars': {
-                'enabled': self._stars_enabled.is_checked(),
-                'max_magnitude': float(self._stars_max_mag.value()),
-                'bayer_fallback': self._stars_bayer.is_checked(),
-                'color': self._stars_color.selected_color(),
-                'label_size': 11, 'opacity': 220,
-            },
-            'messier': {
-                'enabled': self._messier_enabled.is_checked(),
-                'color': self._messier_color.selected_color(),
-                'marker_size': 8, 'label_size': 10, 'opacity': 200,
-            },
-            'ngc': {
-                'enabled': self._ngc_enabled.is_checked(),
-                'min_magnitude': float(self._ngc_max_mag.value()),
-                'color': self._ngc_color.selected_color(),
-                'marker_size': 6, 'label_size': 9, 'opacity': 150,
-            },
-            'planets': {
-                'enabled': self._planets_enabled.is_checked(),
-                'color': self._planets_color.selected_color(),
-                'label_size': 14, 'marker_size': 10, 'opacity': 255,
-            },
-        }
+        """Current UI state merged over the last loaded allsky_overlay dict.
+
+        Defaults underneath, the loaded dict over them, the panel's own
+        controls on top — so a key without a control here is carried through
+        unchanged rather than dropped on the first edit (H11, issue #93).
+        """
+        cfg = _merge(copy.deepcopy(DEFAULT_CONFIG['allsky_overlay']), self._loaded)
+        cfg['enabled'] = self._master_toggle.is_checked()
+        cfg['top_n'] = self._top_n.value()
+        cfg['min_exposure_s'] = float(self._min_exposure.value())
+        cfg['min_star_detections'] = int(self._min_stars.value())
+        cfg[LABEL_SIZE_KEY] = preset_keys()[self._label_size.currentIndex()]
+        cfg['labels_behind_equipment'] = self._behind_equipment.is_checked()
+        cfg['burn_into_output'].update({
+            'saved_file': self._burn_saved_file.is_checked(),
+            'web': self._burn_web.is_checked(),
+            'timelapse': self._burn_timelapse.is_checked(),
+        })
+        cfg['constellations'].update({
+            'enabled': self._con_enabled.is_checked(),
+            'lines': self._con_lines.is_checked(),
+            'labels': self._con_labels.is_checked(),
+            'color': self._con_color.selected_color(),
+        })
+        cfg['bright_stars'].update({
+            'enabled': self._stars_enabled.is_checked(),
+            'max_magnitude': float(self._stars_max_mag.value()),
+            'bayer_fallback': self._stars_bayer.is_checked(),
+            'color': self._stars_color.selected_color(),
+        })
+        cfg['messier'].update({
+            'enabled': self._messier_enabled.is_checked(),
+            'color': self._messier_color.selected_color(),
+            LABEL_STYLE_KEY: style_keys()[self._messier_style.currentIndex()],
+        })
+        cfg['ngc'].update({
+            'enabled': self._ngc_enabled.is_checked(),
+            'min_magnitude': float(self._ngc_max_mag.value()),
+            'color': self._ngc_color.selected_color(),
+            LABEL_STYLE_KEY: style_keys()[self._ngc_style.currentIndex()],
+        })
+        cfg['planets'].update({
+            'enabled': self._planets_enabled.is_checked(),
+            'color': self._planets_color.selected_color(),
+        })
+        cfg['nina_target'].update(self._nina_card.values())
+        return cfg
 
     # ------------------------------------------------------------------
     # Internal
@@ -528,6 +550,26 @@ class AllSkySettingsPanel(QScrollArea):
         box.cancelButton.setText("Cancel")
         if box.exec():
             self.settings_changed.emit({'_action': 'reset_calibration'})
+
+    def _on_dump_clicked(self):
+        """Signal main_window to dump the calibration buffer."""
+        self.settings_changed.emit({'_action': 'dump_buffer'})
+
+    def _on_reset_map_clicked(self):
+        """Confirm, then signal main_window to forget the equipment map."""
+        box = MessageBox(
+            "Reset equipment map?",
+            "This forgets where Sentinel has learned that telescopes, mounts "
+            "and other equipment sit in the frame. Labels may land on "
+            "equipment for a while; the map relearns it over the next "
+            "clear nights."
+            "\n\nUse this after moving the camera or rearranging the rig.",
+            self.window(),
+        )
+        box.yesButton.setText("Reset")
+        box.cancelButton.setText("Cancel")
+        if box.exec():
+            self.settings_changed.emit({'_action': 'reset_equipment_map'})
 
     def _on_setting_changed(self, *_):
         self.settings_changed.emit(self.get_config())

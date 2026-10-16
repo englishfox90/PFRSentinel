@@ -66,6 +66,18 @@ def parse_coordinate(text, is_longitude: bool = False) -> Optional[float]:
     return value
 
 
+def is_unsigned_dms(text) -> bool:
+    """True for a degrees-minutes(-seconds) value with no sign and no hemisphere
+    letter: the one form whose hemisphere the parser has to assume (north /
+    east). Decimal values, signed values and lettered values return False."""
+    if text is None:
+        return False
+    s = str(text).strip()
+    if not s or _HEMISPHERE.search(s) or s.startswith("-"):
+        return False
+    return len(_DMS_SEPARATORS.sub(" ", s).split()) >= 2
+
+
 def to_decimal_string(value: float, precision: int = 7) -> str:
     """Format a decimal-degree float as a trimmed canonical string."""
     s = f"{value:.{precision}f}".rstrip("0").rstrip(".")

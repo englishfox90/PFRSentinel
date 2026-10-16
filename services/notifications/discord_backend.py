@@ -6,6 +6,7 @@ from ..discord_alerts import DiscordAlerts
 from ..logger import app_logger
 from .base import NotificationBackend
 from .events import (
+    CALIBRATION_DISCREDITED,
     CALIBRATION_DONE,
     ERROR,
     LIFECYCLE,
@@ -41,6 +42,8 @@ class DiscordBackend(NotificationBackend):
             )
         elif event.type == CALIBRATION_DONE:
             alerts.send_calibration_complete(event.data.get('model_info', {}))
+        elif event.type == CALIBRATION_DISCREDITED:
+            alerts.send_calibration_discredited(event.title, event.body)
         else:
             app_logger.warning(f"Discord backend: unknown event type '{event.type}'")
 

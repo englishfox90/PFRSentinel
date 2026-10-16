@@ -53,6 +53,10 @@ Latitude and longitude accept decimal degrees or degrees-minutes-seconds. All of
 
 Use a leading minus or an S or W letter for southern latitudes and western longitudes. When you leave the field, the value is rewritten as decimal degrees. If it can't be understood, the field gets a red border, the status line shows "Invalid coordinate — use decimal degrees", and the saved coordinate is cleared.
 
+> **New in the next release** — not available in version 3.7.7 or earlier.
+>
+> Coordinates saved by an older version in degrees-minutes-seconds are converted to decimal degrees when the app starts, so weather, the timelapse sun window and the capture schedule read them too (they used to fall back silently). A value with no hemisphere letter and no minus can't be placed on its own, so shortly after the window opens the app asks once which side you meant, showing the value as you typed it. North and, for a PC whose clock runs behind UTC, West are pre-selected; **Confirm** writes the signed value, **Ask me later** asks again next start, and editing the field in Settings yourself also settles it. In headless mode there is no prompt, only a warning in the log. A value that can't be understood at all is left as it was.
+
 **Elevation** is used by the [All-Sky Overlay](All-Sky-Overlay) for atmospheric refraction. Weather doesn't need it.
 
 ### Option 2: City Name
@@ -95,14 +99,14 @@ If a refresh fails after the cache has expired, weather tokens show `?` until th
 
 ## Units
 
+> Added in version v3.7.9. Choosing **Imperial** now saves and applies; in 3.7.8 and earlier it was always saved as metric.
+
 | Option | Temperature | Wind Speed |
 |--------|-------------|------------|
 | **Metric (°C, m/s)** | °C | m/s |
 | **Imperial (°F, mph)** | °F | mph |
 
-Values come from OpenWeatherMap already in the chosen units. Pressure is always hPa and visibility is always km.
-
-**Known issue:** in the current version, choosing **Imperial** has no effect. The setting is always saved as metric (the dropdown returns to **Metric** the next time the Settings tab loads), and **Test** also requests metric values.
+Values come from OpenWeatherMap already in the chosen units. Pressure is always hPa and visibility is always km. The choice takes effect on the next weather refresh (within 10 minutes) without restarting, and **Test** uses it as well.
 
 ---
 
@@ -158,4 +162,4 @@ These features read the coordinates directly, so you can enter latitude and long
 | Coordinate field turns red | The value couldn't be parsed or is out of range | Use decimal degrees such as `31.33` / `-100.46` |
 | Weather tile is dimmed | No successful update for more than 30 minutes | Check the network connection and API key |
 | Tokens work intermittently | Network problems | The 10-minute cache covers short outages; check network stability for longer failures |
-| Temperatures stay in °C after choosing Imperial | Known issue in the current version: the **Imperial** choice is always saved as metric, and **Test** ignores it too | None yet; values display in metric units |
+| Temperatures stay in °C after choosing Imperial | Version 3.7.8 or earlier, where the choice was always saved as metric | Update to a newer version; the choice is then saved, applied and kept across restarts |

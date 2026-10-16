@@ -8,6 +8,7 @@ from .logger import app_logger
 from .image_stretch import auto_stretch_image, mtf_stretch, _stretch_channel, _calculate_mtf_midtone  # noqa: F401
 from .output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from .overlay_renderer import add_overlays  # noqa: F401
+from .sky_evidence import compute_sky_evidence
 
 
 def save_image_atomic(img, output_path: str, format_name: str, **save_kwargs) -> None:
@@ -210,6 +211,21 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None, 
             except Exception as e:
                 app_logger.debug(f"ML prediction skipped: {e}")
 
+        raw_img = Image.open(image_path) if isinstance(image_path, str) else image_path
+
+        auto_stretch_config = config.get('auto_stretch', {})
+        if auto_stretch_config.get('enabled', False):
+            if raw_img.mode not in ('RGB', 'RGBA', 'L'):
+                raw_img = raw_img.convert('RGB')
+            raw_img = auto_stretch_image(raw_img, auto_stretch_config)
+
+        # Star evidence for the observable-sky gate (issue #93), on the
+        # stretched frame before the gate is first consulted by star detection
+        # below. Here that frame is pre-resize; camera mode measures its
+        # post-resize stretched copy — the evidence resamples either to one
+        # fixed plane, so the count means the same thing in both.
+        compute_sky_evidence(raw_img, metadata, config)
+
         try:
             from .star_detection import analyze_stars, should_run_star_detection
             if should_run_star_detection(config, metadata):
@@ -220,14 +236,6 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None, 
                 metadata.update({'STAR_COUNT': 'N/A', 'FWHM': 'N/A', 'SEEING': 'N/A'})
         except Exception as e:
             app_logger.debug(f"Star detection skipped: {e}")
-
-        raw_img = Image.open(image_path) if isinstance(image_path, str) else image_path
-
-        auto_stretch_config = config.get('auto_stretch', {})
-        if auto_stretch_config.get('enabled', False):
-            if raw_img.mode not in ('RGB', 'RGBA', 'L'):
-                raw_img = raw_img.convert('RGB')
-            raw_img = auto_stretch_image(raw_img, auto_stretch_config)
 
         # The pre-resize, pre-crop frame is what a watch-mode reprocess and
         # Calibrate Now must start from — resizing or cropping it twice would

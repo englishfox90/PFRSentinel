@@ -28,7 +28,7 @@ DEFAULT_CONFIG = {
     # UI appearance
     "ui_accent": "iris",   # accent theme: iris | nebula | aurora | solar | nova | forest
     "ui_special_theme": "",   # special theme pack ("" = off): halloween
-    "ui_log_level": "Info+",
+    "ui_log_level": "INFO",
 
     # Window settings
     "window_geometry": "1280x1700",
@@ -209,6 +209,14 @@ DEFAULT_CONFIG = {
             "sky_classifier": True,   # Predict sky condition (only when roof open)
         }
     },
+
+    # Resource reporting (services/resource_monitor.py). No UI: edit config.json.
+    "diagnostics": {
+        "resource_log_interval_s": 300,  # How often memory/CPU is sampled
+        # tracemalloc hotspots after each resource line. Costs CPU on every
+        # allocation — dev builds only; a production build ignores it.
+        "memory_trace": False,
+    },
     
     # Overlay settings
     "overlays": [
@@ -250,6 +258,9 @@ DEFAULT_CONFIG = {
         "units": "metric",  # "metric", "imperial", or "standard"
         "cache_duration": 600,  # Cache weather data for 10 minutes
         "elevation": "",       # Observer elevation in metres (for refraction)
+        # {field: text as typed} for DMS coordinates saved without a hemisphere;
+        # the GUI asks once, then clears it (services/coordinate_hemisphere.py).
+        "hemisphere_unconfirmed": {},
     },
     
     # Discord alerts
@@ -300,7 +311,13 @@ DEFAULT_CONFIG = {
         "client_secrets_path": "",
         "privacy_status": "private",  # "private" | "unlisted" | "public"
         "title_template": "PFR Sentinel Timelapse {date}",
-        "description_template": "All-sky timelapse recorded by PFR Sentinel.",
+        # Kept equal to youtube_config.DEFAULT_DESCRIPTION_TEMPLATE (tested).
+        "description_template": (
+            "All-sky timelapse recorded by PFR Sentinel on {date}.\n"
+            "{recording}\n"
+            "\n"
+            "{night_summary}"
+        ),
         "tags": "astronomy, allsky, timelapse",
         "category_id": "22",
     },
@@ -379,6 +396,31 @@ DEFAULT_CONFIG = {
         # UTC offset of timestamps in image metadata/filenames — NINA and most
         # capture software write LOCAL time, so constellations misalign at 0.
         "utc_offset_hours": 0,
+        # Observable-sky gate (issue #93). Frames exposed for less than
+        # min_exposure_s seconds are never a night sky (a lit roof at 0.06 s,
+        # dusk at 8 ms; clear nights run 10-30 s); 0 disables. A roof that
+        # reads Open but shows fewer than min_star_detections star-like
+        # sources on three frames in a row is a lit roof or overcast, and
+        # sky features pause until two frames show twice that many. 100 is
+        # calibrated on the reference rig's frames at the evidence plane
+        # (services/sky_evidence.py): its dimly lit closed roof carries
+        # 20-80 point sources (lights, reflections, residual grain), a clear
+        # night 206-445, so the closed side is 1.25x under and the open side
+        # 2x over, with the 200 recovery reachable on every open frame. ML's
+        # "stars visible" verdict vetoes a false block on a moon-washed
+        # night; rigs without ML or with a small sensor may need it lower.
+        "min_exposure_s": 0.5,
+        "min_star_detections": 100,
+        # One step for every layer's label_size below (services/allsky/label_size.py):
+        # too_small / small / normal / large / why_so_large. 'large' is unchanged.
+        "label_size_preset": "large",
+        # Draw labels across the whole calibrated sky disc, behind the pier
+        # and scopes too (services/allsky/sky_region.py). Off: labels only
+        # where the sky is actually seen.
+        "labels_behind_equipment": False,
+        # Guided Calibration's display stretch slider, 0-1 (0.5 = what the
+        # star detector sees). Display only; never touches the solve.
+        "guided_display_stretch": 0.5,
         "constellations": {
             "enabled": True, "lines": True, "labels": True,
             "color": "#4488FF", "line_width": 2, "label_size": 12, "opacity": 180,
@@ -388,13 +430,17 @@ DEFAULT_CONFIG = {
             "enabled": False, "max_magnitude": 3, "bayer_fallback": False,
             "color": "#FFDD44", "label_size": 11, "opacity": 220,
         },
+        # label_style: name / name_number / number (services/allsky/object_label_text.py).
+        # The common name alone keeps timelapse labels short (issue #144).
         "messier": {
             "enabled": True, "color": "#FF8844",
             "marker_size": 8, "label_size": 10, "opacity": 200,
+            "label_style": "name",
         },
         "ngc": {
             "enabled": False, "min_magnitude": 8.0, "color": "#88FF44",
             "marker_size": 6, "label_size": 9, "opacity": 150,
+            "label_style": "name",
         },
         "planets": {
             "enabled": True, "color": "#FFFFCC",
@@ -405,13 +451,24 @@ DEFAULT_CONFIG = {
                 "Uranus": "#88DDFF", "Neptune": "#4466FF", "Moon": "#FFFFEE",
             },
         },
-        # Off by default: the settings panel writes these all-False, so a
-        # True default only ever applied to fresh installs that had not yet
-        # saved the all-sky panel — which drew a full alt/az grid unasked.
+        # Off by default. There is no panel control for the grid; the panel
+        # used to write these all-False on every save, so a True default only
+        # ever reached fresh installs — which drew a full alt/az grid unasked.
+        # The panel now carries the loaded values through (issue #93, H11),
+        # so an edit here survives the All-Sky page.
         "grid": {
             "enabled": False, "horizon": False, "altitude_rings": False,
             "altitude_step": 30, "azimuth_lines": False, "cardinal_labels": False,
             "color": "#336633", "line_width": 1, "label_size": 14, "opacity": 120,
+        },
+        # The target NINA is imaging, pushed by the NINA plugin to POST /nina/target
+        # (services/api_target.py): a reticle at its sky position, its name, and the
+        # imaging camera's field of view. Not drawn once nothing has arrived for
+        # stale_after_s seconds, so a closed NINA leaves no marker up all night.
+        "nina_target": {
+            "enabled": True, "show_fov": True, "show_label": True,
+            "color": "#FF66AA", "marker_size": 10, "line_width": 2,
+            "label_size": 13, "opacity": 230, "stale_after_s": 120,
         },
         # Per-destination burn-in; overlay stays preview-only unless opted in.
         "burn_into_output": {"saved_file": False, "web": False, "timelapse": False},

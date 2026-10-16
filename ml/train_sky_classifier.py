@@ -41,6 +41,7 @@ from torch.amp import autocast, GradScaler
 # Add parent for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from ml.dataset_files import iter_calibration_files
 from ml.sky_dataset import (
     SkyDataset, SKY_CONDITIONS, SKY_TO_IDX, IDX_TO_SKY, SKY_CONDITION_COLLAPSE,
 )
@@ -154,7 +155,7 @@ def load_dataset(data_dir: Path) -> tuple:
         'roof_closed': 0,
     }
     
-    for cal_file in data_dir.rglob('calibration_*.json'):
+    for cal_file in iter_calibration_files(data_dir):
         try:
             with open(cal_file, 'r') as f:
                 cal = json.load(f)
@@ -387,7 +388,7 @@ def train_model(
     scaler = GradScaler('cuda')
     use_amp = device.type == 'cuda'
     if use_amp:
-        print("✓ Mixed precision (FP16) enabled")
+        print("Mixed precision (FP16) enabled")
     
     # Training loop
     best_val_loss = float('inf')
@@ -520,7 +521,7 @@ def train_model(
         'use_pool': use_pool,
     }, model_path)
     
-    print(f"\n✓ Model saved to: {model_path}")
+    print(f"\nModel saved to: {model_path}")
     
     # Final evaluation on the HELD-OUT test set (never seen during selection).
     print("\n" + "=" * 60)

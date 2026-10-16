@@ -16,8 +16,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from services.allsky.bootstrap_selection import (
-    CLOSE_EXCESS_FRAC, chance_excess, recent_anchor_hits,
-    select_bootstrap_winner)
+    CLOSE_EXCESS_FRAC, RIVAL_MAX_STAR_OVERLAP, RIVAL_MIN_EXCESS_FRACTION,
+    chance_excess, find_rival, matched_star_ids, recent_anchor_hits,
+    select_bootstrap_winner, star_overlap)
 from services.allsky.calibration import CalibrationError
 from services.allsky.chance_matches import ChanceEstimate
 from services.allsky.fisheye import FisheyeModel
@@ -223,7 +224,8 @@ class TestJointFitSeedIsolation:
 
         def _boom(*args, **kwargs):
             raise RuntimeError("simulated least_squares failure")
-        monkeypatch.setattr(MC, '_least_squares', _boom)
+        from services.allsky import joint_fit as JF
+        monkeypatch.setattr(JF, '_least_squares', _boom)
 
         model, _rms = MC._joint_iterative_fit(
             matches, synthetic_frames, seed, 4, 20, 20.0, tol_scale_factor=ts)
@@ -231,3 +233,83 @@ class TestJointFitSeedIsolation:
         assert model is not seed
         assert seed.n_matches == 321
         assert seed.rms_residual == 4.5
+
+
+class TestRivalTest:
+    """Issue #93, package 5e: a second survivor that explains the frames with
+    a mostly different star set at a comparable excess means the night
+    cannot tell two solutions apart, and the escape yields nothing."""
+
+    def _fit(self, n_matches, chance, stars):
+        m = _true_model()
+        m.n_matches = n_matches
+        m.chance_expected = chance
+        m.rms_residual = 3.0
+        m.matched_stars = [{'hr': str(h), 'name': ''} for h in stars]
+        return m
+
+    def test_star_ids_prefer_hr_and_skip_blanks(self):
+        m = _true_model()
+        m.matched_stars = [{'hr': '7001', 'name': 'Vega'}, {'hr': '', 'name': 'Deneb'},
+                           {'hr': '', 'name': ''}, {'hr': '7001', 'name': 'Vega'}]
+        assert matched_star_ids(m) == {'7001', 'Deneb'}
+
+    def test_same_basin_is_not_a_rival(self):
+        winner = self._fit(400, 40.0, range(100))
+        same = self._fit(380, 40.0, range(10, 110))          # 90 % overlap
+        assert star_overlap(same, winner) == pytest.approx(0.9)
+        assert find_rival([winner, same], winner) is None
+
+    def test_different_star_set_at_half_the_excess_is_a_rival(self):
+        winner = self._fit(400, 40.0, range(100))
+        rival = self._fit(240, 40.0, range(200, 300))        # 0 % overlap, excess 200
+        assert chance_excess(rival) >= RIVAL_MIN_EXCESS_FRACTION * chance_excess(winner)
+        assert find_rival([winner, rival], winner) is rival
+
+    def test_weak_rival_is_ignored(self):
+        winner = self._fit(400, 40.0, range(100))
+        weak = self._fit(150, 40.0, range(200, 300))         # excess 110 < 180
+        assert find_rival([winner, weak], winner) is None
+
+    def test_overlap_threshold_is_the_boundary(self):
+        winner = self._fit(400, 40.0, range(100))
+        half = self._fit(300, 40.0, list(range(50)) + list(range(200, 250)))
+        assert star_overlap(half, winner) == pytest.approx(RIVAL_MAX_STAR_OVERLAP)
+        assert find_rival([winner, half], winner) is None
+        under = self._fit(300, 40.0, list(range(49)) + list(range(200, 251)))
+        assert find_rival([winner, under], winner) is under
+
+    def test_no_diagnostics_means_no_verdict(self):
+        winner = self._fit(400, 40.0, range(100))
+        blank = self._fit(300, 40.0, [])
+        assert find_rival([winner, blank], winner) is None
+
+    def test_refine_from_detections_withholds_on_a_rival(self, synthetic_frames,
+                                                        monkeypatch):
+        from services.allsky import multi_calibrate as MC
+        winner = self._fit(400, 40.0, range(100))
+        rival = self._fit(240, 40.0, range(200, 300))
+        seeds = [object(), object()]
+        prepared = {id(seeds[0]): winner, id(seeds[1]): rival}
+        monkeypatch.setattr(MC, '_coarse_orientation_candidates',
+                            lambda frames, **kw: seeds)
+        monkeypatch.setattr(MC, 'search_frames', lambda frames, ring=None: [])
+        monkeypatch.setattr(MC, '_fit_and_validate',
+                            lambda frames, seed, *a, **kw: prepared[id(seed)])
+        with pytest.raises(CalibrationError) as exc:
+            MC.refine_from_detections(synthetic_frames, None)
+        assert 'two incompatible solutions' in str(exc.value)
+
+    def test_refine_from_detections_returns_the_winner_without_a_rival(
+            self, synthetic_frames, monkeypatch):
+        from services.allsky import multi_calibrate as MC
+        winner = self._fit(400, 40.0, range(100))
+        same = self._fit(380, 40.0, range(10, 110))
+        seeds = [object(), object()]
+        prepared = {id(seeds[0]): winner, id(seeds[1]): same}
+        monkeypatch.setattr(MC, '_coarse_orientation_candidates',
+                            lambda frames, **kw: seeds)
+        monkeypatch.setattr(MC, 'search_frames', lambda frames, ring=None: [])
+        monkeypatch.setattr(MC, '_fit_and_validate',
+                            lambda frames, seed, *a, **kw: prepared[id(seed)])
+        assert MC.refine_from_detections(synthetic_frames, None) is winner

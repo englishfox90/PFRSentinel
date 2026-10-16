@@ -201,3 +201,26 @@ def test_tz_offset_uses_current_dst_state_not_zone_capability(monkeypatch):
 
     result = moon.compute_moon_context()
     assert result['moon_is_up'] is False
+
+
+def test_parse_coordinate_is_the_shared_parser():
+    """moon.parse_coordinate is a shim over services.coordinates; the two used
+    to be separate implementations that could drift."""
+    import services.coordinates as coordinates
+    assert moon._parse_coordinate is coordinates.parse_coordinate
+    # The shim keeps the old lenient range so a longitude still parses.
+    assert moon.parse_coordinate('100 27 25 W') == coordinates.parse_coordinate('100 27 25 W', True)
+
+
+def test_get_configured_location_reads_dms_with_the_right_ranges(monkeypatch):
+    monkeypatch.setattr(moon, 'Config',
+                        lambda: _FakeConfig({'latitude': '31 19 49 N', 'longitude': '100 27 25 W'}))
+    lat, lon, _ = moon.get_configured_location()
+    assert round(lat, 4) == 31.3303
+    assert round(lon, 4) == -100.4569
+
+
+def test_get_configured_location_rejects_a_latitude_beyond_90(monkeypatch):
+    monkeypatch.setattr(moon, 'Config',
+                        lambda: _FakeConfig({'latitude': '100 0 0', 'longitude': '-100.46'}))
+    assert moon.get_configured_location() == (None, None, None)
