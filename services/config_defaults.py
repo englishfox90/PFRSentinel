@@ -141,8 +141,8 @@ DEFAULT_CONFIG = {
     # Analytics (PostHog)
     "analytics_enabled": True,  # Send anonymous usage data (opt-out via Settings > System)
 
-    # Startup behaviour (Windows scheduled task — see services/autostart.py)
-    "run_on_startup": False,      # UI reflection; the scheduled task is the source of truth
+    # Startup behaviour (task / LaunchAgent / XDG entry — see services/autostart.py)
+    "run_on_startup": False,      # UI reflection; the registration itself is the source of truth
     "autostart_capture": True,    # Include --auto-start in the registered startup command
 
     "auto_brightness": False,  # Automatically adjust brightness

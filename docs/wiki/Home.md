@@ -67,7 +67,7 @@ The navigation rail groups the pages:
 | Publish | [Timelapse](Timelapse) | Nightly timelapse recording and YouTube upload |
 | Publish | [Library](Image-Library) | Browse past nights frame by frame |
 | — | [Logs](Logs) | Application log viewer, and [Diagnostics Export](Diagnostics-Export) from the next release |
-| — | [Settings](Settings) | Theme, start with Windows, system tray, weather API and coordinates, analytics, and updates |
+| — | [Settings](Settings) | Theme, start at login, system tray, weather API and coordinates, analytics, and updates |
 
 ---
 

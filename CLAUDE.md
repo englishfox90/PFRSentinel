@@ -33,6 +33,9 @@ PFRSentinel/
 ├── services/                   # Core processing modules
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
 │   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
+│   ├── autostart.py            # Start at login: Task Scheduler (Windows) → autostart_macos.py (LaunchAgent, relaunch on crash) / autostart_linux.py (XDG)
+│   ├── launch_command.py       # argv that starts this copy (frozen .app/exe or source) — LaunchAgent, XDG entry, restart waiter
+│   ├── app_restart.py          # Self-restart via a detached waiter (PowerShell / sh) once this PID exits
 │   ├── font_loader.py          # PIL font resolution: Arial (Windows) → bundled Space Grotesk → DejaVu → default
 │   ├── zwo_sdk_library.py      # ZWO SDK library name + search paths per OS; the only place that may name it
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
@@ -330,6 +333,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_watcher.py` | 2 | `ImageFileHandler` — `process_image` extras reach the callback |
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
+| `test_autostart_posix.py` | 25 | `autostart_macos` / `autostart_linux` / `launch_command` / POSIX `app_restart` — LaunchAgent plist relaunches on crash but not on a clean quit, written atomically, never calls `launchctl`, foreign/garbage plist reads as off; XDG entry and Exec quoting; dispatch per OS; the real `/bin/sh` waiter relaunches only after the PID exits (skipped on Windows) |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
 | `test_zwo_sdk_library.py` | 35 | `zwo_sdk_library` — library name per OS, search order (bundled → per-user `sdk/` → system, multiarch first), versioned `.so`/`.dylib`, symlink stubs skipped, foreign-platform path detection, help text |
 | `test_zwo_sdk_loading.py` | 9 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; the Start Capture index resolver does the same; `Config` rewrites only another platform's SDK path |

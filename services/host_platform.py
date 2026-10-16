@@ -49,3 +49,13 @@ def zwo_sdk_dialog_filter() -> str:
     if IS_MACOS:
         return "Shared Libraries (*.dylib)"
     return "Shared Libraries (*.so *.so.*)"
+
+
+def login_start_description() -> str:
+    """Subtext for the "Start at login" switch: what registering does here."""
+    if IS_WINDOWS:
+        return "Launch automatically on logon (scheduled task; expect a one-time admin prompt)"
+    if IS_MACOS:
+        return ("Launch automatically when you log in, and relaunch after a crash "
+                "(a launchd agent; takes effect at your next login)")
+    return "Launch automatically when you log in to the desktop (XDG autostart)"

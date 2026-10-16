@@ -22,8 +22,8 @@ A special theme only restyles the app window. It never changes your images, over
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Enable System Tray** | Off | Run in the background. When on, a PFR Sentinel icon appears in the Windows notification area, closing the main window hides it to the tray instead of quitting, and a launch at Windows logon starts hidden in the tray. When off, closing the window quits the app and a logon launch opens the window normally. |
-| **Start with Windows** | Off | Launch PFR Sentinel automatically when you log on to Windows. |
-| **Auto-start capture on launch** | On | When PFR Sentinel is launched at logon by **Start with Windows**, begin capturing with the saved camera or watch folder automatically. |
+| **Start at login** | Off | Launch PFR Sentinel automatically when you log in. On macOS it is also relaunched after a crash. |
+| **Auto-start capture on launch** | On | When PFR Sentinel is launched at login by **Start at login**, begin capturing with the saved camera or watch folder automatically. |
 | **Automatic camera recovery** | On | How hard PFR Sentinel works to get a ZWO camera back after a fault. On: the full [camera recovery](Capture-Settings#camera-recovery) process, including USB resets and an app restart. Off: one plain reconnect, then capture stops until you start it again. New in the next release. |
 | **Send Anonymous Usage Data** | On | Share anonymous usage information, error reports, and warning/error log messages with the developer. See [Anonymous Usage Data](#anonymous-usage-data). |
 
@@ -43,26 +43,36 @@ Right-click the tray icon for these options:
 
 With the tray enabled, closing the window does not stop capture or any outputs; use **Exit** from the tray menu to quit. Launching PFR Sentinel again while it is already running brings the existing window to the front instead of starting a second copy.
 
-### Start with Windows
+### Start at login
 
-**Start with Windows** registers a Windows scheduled task named "PFR Sentinel Autostart" that runs when you log on. The task runs with the highest privileges available to your account, so the app can start with Administrator rights (needed for full USB camera recovery) without a permission prompt at every logon.
+**Start at login** works differently on each system. The switch always reflects whether the registration actually exists, even if it was changed outside the app, and a message at the top of the window confirms "PFR Sentinel will start when you log in." or "PFR Sentinel will no longer start when you log in."
 
-- Creating or removing the task usually needs Administrator approval once, so expect a Windows permission (UAC) prompt when you change the setting. If you decline, the switch turns itself back off (or on) to match the real state.
-- A message at the top of the window confirms "PFR Sentinel will start with Windows." or "PFR Sentinel will no longer start with Windows."
-- The switch always reflects whether the scheduled task actually exists, even if it was changed outside the app.
+**Windows.** The switch registers a Windows scheduled task named "PFR Sentinel Autostart" that runs when you log on. The task runs with the highest privileges available to your account, so the app can start with Administrator rights (needed for full USB camera recovery) without a permission prompt at every logon. Creating or removing the task usually needs Administrator approval once, so expect a Windows permission (UAC) prompt when you change the setting. If you decline, the switch turns itself back off (or on) to match the real state.
 
-How the logon launch behaves depends on the other two switches:
+**macOS.**
 
-| Enable System Tray | Auto-start capture on launch | At logon |
+> **New in the next release** — not available in version 3.7.9 or earlier.
+
+The switch adds a login item for your user account (a launchd agent, `~/Library/LaunchAgents/com.pfrsentinel.app.plist`). No administrator password is needed. If PFR Sentinel crashes, macOS starts it again after 30 seconds; quitting it yourself from the menu bar icon or the window is left alone. A change takes effect at your next login, not straight away.
+
+**Linux.**
+
+> **New in the next release** — not available in version 3.7.9 or earlier.
+
+The switch adds a desktop autostart entry (`~/.config/autostart/pfrsentinel.desktop`), which GNOME, KDE, XFCE and other desktops run when you log in. There is no relaunch after a crash on Linux.
+
+How the login launch behaves depends on the other two switches:
+
+| Enable System Tray | Auto-start capture on launch | At login |
 |--------------------|------------------------------|----------|
 | On | On | Starts hidden in the tray and begins capturing |
 | On | Off | Starts hidden in the tray, capture stopped |
 | Off | On | Opens the window and begins capturing |
 | Off | Off | Opens the window, capture stopped |
 
-For an unattended observatory PC, turn on **Start with Windows** and **Auto-start capture on launch** so capture resumes by itself after a reboot or power cut. Turn **Enable System Tray** off if you want to see the window after logon (for example, over remote desktop) rather than having it tucked away in the tray.
+For an unattended observatory computer, turn on **Start at login** and **Auto-start capture on launch** so capture resumes by itself after a reboot or power cut. The computer also has to log in by itself: on a Mac, turn on automatic login in System Settings → Users & Groups. Turn **Enable System Tray** off if you want to see the window after login (for example, over remote desktop or Screen Sharing) rather than having it tucked away in the tray.
 
-Changing **Enable System Tray** or **Auto-start capture on launch** while **Start with Windows** is on updates the scheduled task, which may show the permission prompt again. **Auto-start capture on launch** only affects launches at logon; opening the app from its shortcut does not start capture automatically.
+Changing **Enable System Tray** or **Auto-start capture on launch** while **Start at login** is on updates the registration; on Windows that may show the permission prompt again. **Auto-start capture on launch** only affects launches at login; opening the app yourself does not start capture automatically.
 
 ### Anonymous Usage Data
 

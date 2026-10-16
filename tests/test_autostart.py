@@ -1,4 +1,5 @@
-"""Tests for services.autostart — Windows logon task registration.
+"""Tests for services.autostart — Windows logon task registration (the macOS
+and Linux backends are in test_autostart_posix.py).
 
 subprocess and the ShellExecute elevation path are fully mocked, so these run
 on any platform without touching the real Task Scheduler.
@@ -77,8 +78,9 @@ class TestLaunchCommand:
 
 
 class TestIsEnabled:
-    def test_false_off_windows(self):
-        with patch.object(autostart, "_IS_WINDOWS", False):
+    def test_false_on_an_unsupported_os(self):
+        with patch.object(autostart, "_IS_WINDOWS", False), \
+             patch.object(autostart, "_PLATFORM", "sunos5"):
             assert autostart.is_enabled() is False
 
     def test_true_when_query_succeeds(self, on_windows):
@@ -91,8 +93,9 @@ class TestIsEnabled:
 
 
 class TestEnable:
-    def test_noop_off_windows(self):
-        with patch.object(autostart, "_IS_WINDOWS", False):
+    def test_noop_on_an_unsupported_os(self):
+        with patch.object(autostart, "_IS_WINDOWS", False), \
+             patch.object(autostart, "_PLATFORM", "sunos5"):
             assert autostart.enable() is False
 
     def test_direct_create_success_builds_logon_task(self, on_windows):

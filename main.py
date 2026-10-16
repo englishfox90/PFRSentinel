@@ -176,9 +176,10 @@ def main():
     parser.add_argument('--tray', action='store_true',
                        help='Start minimized to system tray')
     parser.add_argument('--register-startup', action='store_true',
-                       help='Register the app to run on Windows logon, then exit')
+                       help='Register the app to start at login (Task Scheduler on Windows, '
+                            'a LaunchAgent on macOS, XDG autostart on Linux), then exit')
     parser.add_argument('--unregister-startup', action='store_true',
-                       help='Remove the Windows logon task, then exit')
+                       help='Remove the start-at-login registration, then exit')
     parser.add_argument('--shutdown', action='store_true',
                        help='Ask a running instance to quit cleanly, then exit '
                             '(used by the installer before an upgrade)')
@@ -186,7 +187,7 @@ def main():
     args = parser.parse_args()
 
     # Startup registration - perform the action and exit before any GUI work.
-    # Reused by the installer so the schtasks logic lives in one place.
+    # Reused by the installer so the registration logic lives in one place.
     if args.register_startup or args.unregister_startup:
         from services import autostart
         if args.register_startup:
