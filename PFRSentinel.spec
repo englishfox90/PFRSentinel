@@ -265,14 +265,26 @@ if IS_WINDOWS:
         ('scripts/nina/README.md', 'scripts/nina'),
     ]
 
-# ZWO SDK for macOS, staged by scripts/ci/stage_zwo_sdk_macos.py (arm64
-# library from INDI's pinned mirror, Homebrew libusb beside it, rpath and
-# signature fixed). Binaries rather than datas, so PyInstaller's macOS pass
-# rewrites and re-signs them with everything else. Conditional like the NINA
-# DLL: without it the app still runs, and the Capture tab can be pointed at a
-# library installed elsewhere.
+# ZWO SDK for macOS, staged by scripts/ci/stage_zwo_sdk_macos.py from the
+# committed universal libASICamera2.dylib: the arm64 slice, Homebrew libusb
+# beside it, its libusb reference made @rpath-relative, re-signed. The
+# committed file itself is never bundled: its arm64 slice links libusb at an
+# absolute Homebrew path the user's Mac may not have. Binaries rather than
+# datas, so PyInstaller's macOS pass rewrites and re-signs them with everything
+# else. Conditional like the NINA DLL: without it the app still runs, and the
+# Capture tab can be pointed at a library installed elsewhere.
+#
+# Linux keeps the rule from #39: ZWO's .so is a per-CPU download, bundled only
+# when the builder dropped it at the repo root.
 zwo_binaries = []
-if sys.platform == 'darwin':
+if sys.platform.startswith('linux'):
+    if os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'libASICamera2.so')):
+        added_files.append(('libASICamera2.so', '.'))
+        print("[OK] ZWO SDK: bundled libASICamera2.so")
+    else:
+        print("[WARN] libASICamera2.so not found at the repo root "
+              "- building WITHOUT a bundled ZWO SDK")
+elif sys.platform == 'darwin':
     _zwo_dir = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'build', 'zwo-macos')
     _zwo_libs = ['libASICamera2.dylib', 'libusb-1.0.0.dylib']
     if all(os.path.isfile(os.path.join(_zwo_dir, lib)) for lib in _zwo_libs):

@@ -32,12 +32,12 @@ PFRSentinel/
 │   └── theme/                  # tokens.py, styles.py, accent_themes.py, special_themes.py (seasonal packs), icons.py
 ├── services/                   # Core processing modules
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
-│   ├── zwo_sdk_library.py      # Find the ZWO SDK library per OS; repair a config path carried over from another OS
 │   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
 │   ├── autostart.py            # Start at login: Task Scheduler (Windows) → autostart_macos.py (LaunchAgent, relaunch on crash) / autostart_linux.py (XDG)
 │   ├── launch_command.py       # argv that starts this copy (frozen .app/exe or source) — LaunchAgent, XDG entry, restart waiter
 │   ├── app_restart.py          # Self-restart via a detached waiter (PowerShell / sh) once this PID exits
 │   ├── font_loader.py          # PIL font resolution: Arial (Windows) → bundled Space Grotesk → DejaVu → default
+│   ├── zwo_sdk_library.py      # ZWO SDK library name + search paths per OS; the only place that may name it
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
 │   ├── config_defaults.py      # DEFAULT_CONFIG + DEFAULT_CAMERA_PROFILE (data only)
 │   ├── utils_paths.py          # get_app_data_dir() — per-platform app-data root; resource paths
@@ -47,7 +47,8 @@ PFRSentinel/
 │   ├── watcher.py              # watchdog FileSystemEventHandler
 │   ├── camera/                 # ZWO subpackage — zwo_camera.py (SDK wrapper, BGGR debayer, auto-exposure),
 │   │                             camera_connection.py (SDK init, detection, USB reconnect),
-│   │                             camera_calibration.py, camera_utils.py
+│   │                             camera_calibration.py, camera_utils.py,
+│   │                             linux_usb_preflight.py (udev rule + usbfs_memory_mb warnings)
 │   ├── cleanup.py              # Disk space management (files only, never folders)
 │   ├── gc_scheduler.py         # GUI-thread cyclic GC (automatic GC off, QTimer-driven)
 │   ├── discord_alerts.py       # Discord webhook client
@@ -259,10 +260,12 @@ Windows-only import or a one-OS `datas` entry in seconds. macOS gets a real
 dev build (`macOS dev build`, Apple-silicon runner) that runs
 `build_sentinel_macos.sh` — the same script a local Mac build uses — and
 uploads the `.dmg`. That script stages the ZWO SDK with
-`scripts/ci/stage_zwo_sdk_macos.py`: the arm64 library from INDI's mirror,
-pinned to a commit and checked by git blob hash, with Homebrew's libusb beside
-it, an `@loader_path` rpath added and both re-signed (as shipped, the library
-links `@rpath/libusb-1.0.0.dylib` with no rpath, so Python can't load it).
+`scripts/ci/stage_zwo_sdk_macos.py`: the arm64 slice of the committed universal
+`libASICamera2.dylib` (ZWO's official build, updated with
+`scripts/update_zwo_sdk.py`), with Homebrew's libusb beside it, its libusb
+reference rewritten to `@rpath` with an `@loader_path` rpath, and both
+re-signed. The committed file is never bundled as-is: its arm64 slice links
+libusb at an absolute Homebrew path a user's Mac may not have.
 The job is not required by the ruleset and the `.app` is not notarized or
 published to the dev prerelease yet; the rest of mac/Linux packaging is
 issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
@@ -308,7 +311,6 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
 | `test_camera.py` | 14 | `zwo_camera` — SDK, config, debayering |
 | `test_camera_hardware.py` | 4 | real camera on whichever OS the SDK loads — detect, open, serial, one RAW8 frame; a library that is found but won't load fails instead of skipping (all `requires_camera`) |
-| `test_zwo_sdk_library.py` | 23 | `zwo_sdk_library` — per-OS library name and search dirs (project root first, `/usr/local/lib` + Homebrew on macOS, multiarch on Linux), loader fallback, a configured path kept only if it exists and is this OS's kind, a Windows path in a config moved to a Mac replaced on load, kept when nothing is found |
 | `test_camera_auto_recovery.py` | 20 | `camera_auto_recovery` off — one plain reconnect, no ladder/USB/SDK reset (`camera_reconnect`), capture loop stops instead of retrying (cold-open quirk still absorbed, handle released on the fatal exit), controller schedules no restart or USB reset; on = unchanged |
 | `test_discord.py` | 32 | `discord_alerts` — webhooks, embeds (mocked) |
 | `test_image_output.py` | 18 | `processor` — overlays, stretch, output formats |
@@ -344,8 +346,11 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
 | `test_autostart_posix.py` | 25 | `autostart_macos` / `autostart_linux` / `launch_command` / POSIX `app_restart` — LaunchAgent plist relaunches on crash but not on a clean quit, written atomically, never calls `launchctl`, foreign/garbage plist reads as off; XDG entry and Exec quoting; dispatch per OS; the real `/bin/sh` waiter relaunches only after the PID exits (skipped on Windows) |
-| `test_stage_zwo_sdk_macos.py` | 5 | `scripts/ci/stage_zwo_sdk_macos.py` — git blob hash matches git, a download that doesn't match the pin is refused, every source pinned to one INDI commit, refuses to run off macOS |
+| `test_stage_zwo_sdk_macos.py` | 7 | `scripts/ci/stage_zwo_sdk_macos.py` — finds ZWO's absolute Homebrew libusb reference (and an already-`@rpath` one) in `otool -L` output, never mistakes the library's own id line, reads every `LC_RPATH`, licence and source are in the repo, refuses to run off macOS |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
+| `test_zwo_sdk_library.py` | 35 | `zwo_sdk_library` — library name per OS, search order (bundled → per-user `sdk/` → system, multiarch first), versioned `.so`/`.dylib`, symlink stubs skipped, foreign-platform path detection, help text |
+| `test_zwo_sdk_loading.py` | 9 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; the Start Capture index resolver does the same; `Config` rewrites only another platform's SDK path |
+| `test_linux_usb_preflight.py` | 15 | `linux_usb_preflight` — `usbfs_memory_mb` and udev-rule warnings, root exempt, once per process, no-op off Linux, shipped `asi.rules` satisfies the check |
 | `test_font_loader.py` | 5 | `font_loader` — bundled Space Grotesk resolves off Windows, Arial never tried there, fallback outcome cached |
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
 | `test_windows_only_ui.py` | 5 | `FfmpegInstallCard` copyable install command off Windows; `MissingCameraNotice` hides Revive where there is no USB reset API (offscreen Qt) |

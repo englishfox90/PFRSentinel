@@ -13,10 +13,10 @@ made in the connection layer (CameraConnection.connect serial-verifies and
 reconnect_safe probes serials). Same-model ambiguity here is therefore safe:
 connect() rejects the wrong body and the serial probe finds the right one.
 """
-import os
 from typing import List, Tuple
 
 from services.logger import app_logger
+from services.zwo_sdk_library import library_name, missing_library_help, resolve_library_path
 from .camera_utils import clean_camera_name, call_with_timeout, SDKTimeoutError
 
 
@@ -24,8 +24,11 @@ def _list_camera_names(sdk_path: str) -> List[Tuple[int, str]]:
     """Enumerate (index, name) for connected ZWO cameras. Raises on failure."""
     import zwoasi as asi
 
-    if not sdk_path or not os.path.exists(sdk_path):
-        raise Exception("SDK path not configured or not found.")
+    sdk_path = resolve_library_path(sdk_path)
+    if not sdk_path:
+        for line in missing_library_help():
+            app_logger.error(line)
+        raise Exception(f"ZWO SDK ({library_name()}) not found — see the log for the folders searched.")
     try:
         asi.init(sdk_path)
     except Exception as e:

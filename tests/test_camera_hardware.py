@@ -6,7 +6,7 @@ Run on the rig after an SDK or OS change:
 import pytest
 
 from services.host_platform import zwo_sdk_library_name
-from services.zwo_sdk_library import find_sdk_library
+from services.zwo_sdk_library import find_library
 
 pytestmark = pytest.mark.requires_camera
 
@@ -14,7 +14,7 @@ pytestmark = pytest.mark.requires_camera
 @pytest.fixture
 def zwoasi_module():
     zwoasi = pytest.importorskip("zwoasi")
-    library = find_sdk_library()
+    library = find_library()
     if not library:
         pytest.skip(f"{zwo_sdk_library_name()} not found on this machine")
     # A library that is found but won't load is a failure, not a skip:

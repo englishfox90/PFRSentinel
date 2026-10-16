@@ -144,18 +144,27 @@ class Config:
         # Also check if sdk_path points to non-existent file - try to find it in new location
         sdk_path = self.data.get('sdk_path', '')
         if sdk_path and not os.path.isfile(sdk_path):
-            # Try to find SDK in the new PFRSentinel _internal folder
-            from .zwo_sdk_library import candidate_sdk_paths
-            possible_locations = candidate_sdk_paths()
-            for loc in possible_locations:
-                if os.path.isfile(loc):
-                    self.data['sdk_path'] = loc
-                    app_logger.info(f"SDK path was invalid, found SDK at: {loc}")
-                    updated = True
-                    break
+            from .zwo_sdk_library import find_library
+            loc = find_library()
+            if loc:
+                self.data['sdk_path'] = loc
+                app_logger.info(f"SDK path was invalid, found SDK at: {loc}")
+                updated = True
             else:
-                if sdk_path:
-                    app_logger.warning(f"SDK path is invalid and could not find SDK: {sdk_path}")
+                app_logger.warning(f"SDK path is invalid and could not find SDK: {sdk_path}")
+
+        # A config carried between operating systems — or written off Windows
+        # before the port, when the default named the DLL everywhere — points
+        # at another OS's library. Only that case is rewritten: a missing path
+        # with the right name may be a drive that is not mounted yet.
+        from .zwo_sdk_library import find_library, names_another_platforms_library
+        zwo_sdk_path = self.data.get('zwo_sdk_path', '')
+        if zwo_sdk_path and names_another_platforms_library(zwo_sdk_path):
+            loc = find_library()
+            if loc:
+                self.data['zwo_sdk_path'] = loc
+                app_logger.info(f"SDK path named another platform's library ({zwo_sdk_path}); now {loc}")
+                updated = True
         
         if updated:
             self.save()
@@ -236,17 +245,6 @@ class Config:
                                 from .logger import app_logger
                                 for level, message in notices:
                                     getattr(app_logger, level)(message)
-                            except Exception:
-                                pass
-
-                        # A config moved from another OS (or install) names
-                        # an SDK library that can't exist here.
-                        from .zwo_sdk_library import repair_configured_sdk_path
-                        sdk_notice = repair_configured_sdk_path(loaded)
-                        if sdk_notice:
-                            try:
-                                from .logger import app_logger
-                                app_logger.info(sdk_notice)
                             except Exception:
                                 pass
 

@@ -153,19 +153,21 @@ class CameraConnection:
             self.asi = asi
             self.log("zwoasi module imported successfully")
 
-            from ..zwo_sdk_library import resolve_sdk_path
-            from ..host_platform import zwo_sdk_library_name
-            library = resolve_sdk_path(self.sdk_path)
-            if not library:
-                self.log(f"ERROR: {zwo_sdk_library_name()} not found "
-                         f"(configured: {self.sdk_path or 'none'})")
-                self.log("Please configure SDK path in Capture tab settings")
+            from ..zwo_sdk_library import missing_library_help, resolve_library_path
+            library_path = resolve_library_path(self.sdk_path)
+            if library_path is None:
+                for line in missing_library_help():
+                    self.log(line)
                 return False
-            if library != self.sdk_path:
-                self.log(f"SDK path not configured or not usable here, using: {library}")
-            asi.init(library)
-            self.log(f"✓ ZWO SDK initialized successfully from: {library}")
+            if self.sdk_path and os.path.abspath(self.sdk_path) != library_path:
+                self.log(f"Configured SDK path not found ({self.sdk_path}); using {library_path}")
 
+            self.log(f"Attempting SDK init from: {library_path}")
+            asi.init(library_path)
+            self.log(f"✓ ZWO SDK initialized successfully from: {library_path}")
+
+            from .linux_usb_preflight import log_linux_usb_warnings
+            log_linux_usb_warnings(self.log)
             return True
 
         except ImportError as e:
