@@ -110,6 +110,14 @@ def _is_real_library(path: str) -> bool:
         return False
 
 
+def _version_key(path: str, exact: str) -> Optional[tuple]:
+    """(1, 37) for '<exact>.1.37'; None for a suffix that isn't a version."""
+    parts = path[len(exact) + 1:].split(".")
+    if not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
 def _library_in(folder: str) -> Optional[str]:
     exact = os.path.join(folder, library_name())
     if _is_real_library(exact):
@@ -118,8 +126,14 @@ def _library_in(folder: str) -> Optional[str]:
         return None
     # ZWO's SDK and distro packages both carry a versioned file
     # (libASICamera2.so.1.37, libASICamera2.dylib.1.37); the bare name may be
-    # missing, left to a -dev package, or a broken link.
-    for candidate in sorted(glob.glob(exact + ".*"), reverse=True):
+    # missing, left to a -dev package, or a broken link. Newest first, compared
+    # as numbers: as text, 1.9 would outrank 1.37 and load the older SDK.
+    versioned = []
+    for candidate in glob.glob(exact + ".*"):
+        key = _version_key(candidate, exact)
+        if key is not None:
+            versioned.append((key, candidate))
+    for _key, candidate in sorted(versioned, reverse=True):
         if _is_real_library(candidate):
             return candidate
     return None
@@ -140,8 +154,13 @@ def resolve_library_path(configured: Optional[str] = None) -> Optional[str]:
     A configured path that no longer exists is normal, not an error — a config
     written on Windows and carried to another OS, a reinstall to a different
     folder, or the pre-port default that named the DLL on every platform.
+
+    Another OS's library is never used even when the file exists (a Windows
+    checkout's committed DLL, say): it cannot load here, and accepting it would
+    skip the search and the guided "not found" help for a raw loader error.
     """
-    if configured and os.path.isfile(configured):
+    if (configured and os.path.isfile(configured)
+            and not names_another_platforms_library(configured)):
         return os.path.abspath(configured)
     return find_library()
 

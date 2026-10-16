@@ -117,6 +117,22 @@ class TestFindLibrary:
         (system / 'libASICamera2.so.1.37').write_bytes(LIBRARY_BYTES)
         assert sdk.find_library() == str(system / 'libASICamera2.so.1.37')
 
+    def test_versions_compare_as_numbers_not_text(self, monkeypatch, isolated_search):
+        # As strings '1.9' > '1.37'; the older SDK must not win.
+        _set_platform(monkeypatch)
+        system = isolated_search[2]
+        (system / 'libASICamera2.so.1.9').write_bytes(LIBRARY_BYTES)
+        (system / 'libASICamera2.so.1.37').write_bytes(LIBRARY_BYTES)
+        assert sdk.find_library() == str(system / 'libASICamera2.so.1.37')
+
+    def test_non_version_suffix_is_ignored(self, monkeypatch, isolated_search):
+        _set_platform(monkeypatch)
+        system = isolated_search[2]
+        (system / 'libASICamera2.so.bak').write_bytes(LIBRARY_BYTES)
+        assert sdk.find_library() is None
+        (system / 'libASICamera2.so.1.37').write_bytes(LIBRARY_BYTES)
+        assert sdk.find_library() == str(system / 'libASICamera2.so.1.37')
+
     def test_macos_accepts_the_versioned_dylib(self, monkeypatch, isolated_search):
         _set_platform(monkeypatch, macos=True)
         user = isolated_search[1]
@@ -149,6 +165,14 @@ class TestResolveLibraryPath:
         custom = tmp_path / 'custom.so'
         custom.write_bytes(LIBRARY_BYTES)
         assert sdk.resolve_library_path(str(custom)) == str(custom)
+
+    def test_existing_foreign_library_is_never_used(self, monkeypatch, isolated_search, tmp_path):
+        _set_platform(monkeypatch, macos=True)
+        dll = tmp_path / 'ASICamera2.dll'
+        dll.write_bytes(LIBRARY_BYTES)
+        assert sdk.resolve_library_path(str(dll)) is None
+        (isolated_search[2] / 'libASICamera2.dylib').write_bytes(LIBRARY_BYTES)
+        assert sdk.resolve_library_path(str(dll)) == str(isolated_search[2] / 'libASICamera2.dylib')
 
     def test_stale_configured_path_falls_back_to_the_search(self, monkeypatch, isolated_search):
         _set_platform(monkeypatch)

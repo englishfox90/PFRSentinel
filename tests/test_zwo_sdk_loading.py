@@ -28,7 +28,7 @@ def _connection(sdk_path, lines):
 
 class TestInitializeSdk:
     def test_loads_the_configured_library_by_absolute_path(self, fake_zwoasi, tmp_path):
-        library = tmp_path / 'libASICamera2.so'
+        library = tmp_path / sdk.library_name()
         library.write_bytes(b'')
         assert _connection(str(library), []).initialize_sdk() is True
         assert fake_zwoasi.init_calls == [str(library)]
