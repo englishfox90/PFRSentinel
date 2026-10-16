@@ -31,9 +31,10 @@ name: Build
 # flip between unmerged branches, and Dependabot and fork PRs get a read-only
 # token that cannot publish at all. PRs keep their per-run artifacts.
 #
-# Windows is the only platform that produces an artifact today. macOS and Linux
-# get a spec-parse smoke test instead — the packaging work for them
-# (BUNDLE/.icns/notarization, .deb, the udev rule, ARM wheels) is issue #41.
+# Windows and macOS (Apple silicon) produce artifacts; Linux gets a spec-parse
+# smoke test instead. The macOS app is ad-hoc signed and not notarized, and is
+# not published to the dev prerelease yet. Remaining packaging work (Linux
+# .deb, the udev rule, notarization, an Intel Mac build) is issue #41.
 
 # Docs-only changes skip the build on both triggers: on a PR there is no binary
 # change to review, and on main it would republish an identical binary and
@@ -369,6 +370,81 @@ jobs:
             echo "- Discussion: $DISCUSSION_URL"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  macos:
+    name: macOS dev build
+    # GitHub's macos-latest is Apple silicon, so this is an arm64 app.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      # Same reasons as the Windows job: dev features compiled in, and a
+      # version that can never pass for a release.
+      - name: Stamp the dev channel and version
+        id: version
+        run: |
+          python scripts/ci/set_build_channel.py dev
+          python scripts/ci/set_dev_version.py
+
+      # Stages the ZWO SDK (pinned, verified, patched), freezes the app and
+      # wraps it in a .dmg — the same script a local Mac build runs.
+      - name: Build the app and disk image
+        run: ./build_sentinel_macos.sh
+
+      - name: Verify the app
+        run: |
+          app="dist/PFR Sentinel.app"
+          plist="$app/Contents/Info.plist"
+          short=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist")
+          build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$plist")
+          echo "stamped=${{ steps.version.outputs.version }}  short=$short  build=$build"
+          [ "$build" = "${{ steps.version.outputs.file_version }}" ] || {
+            echo "CFBundleVersion $build does not match ${{ steps.version.outputs.file_version }}"; exit 1; }
+
+          # The camera library has to load from inside the bundle with libusb
+          # found beside it, not from Homebrew.
+          lib=$(find "$app/Contents" -name libASICamera2.dylib -type f | head -1)
+          [ -n "$lib" ] || { echo "libASICamera2.dylib is not in the bundle"; exit 1; }
+          lipo -archs "$lib"
+          otool -L "$lib"
+          python -c "import ctypes, sys; ctypes.CDLL(sys.argv[1]); print('camera library loads')" "$lib"
+
+          # --help parses arguments after every top-level import, so this
+          # proves the frozen app imports end to end without opening a window.
+          "$app/Contents/MacOS/PFRSentinel" --help
+
+          codesign --verify --deep --verbose=2 "$app" || echo "::warning::codesign --verify reported a problem with the ad-hoc signature"
+
+      - name: Upload the disk image
+        uses: actions/upload-artifact@v7
+        with:
+          name: PFRSentinel-macos-arm64-dev-unsigned
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 30 || 7 }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### macOS dev build ${{ steps.version.outputs.version }}"
+            echo
+            echo "Apple silicon only. Ad-hoc signed, not notarized: macOS will"
+            echo "refuse to open a downloaded copy until you clear the quarantine"
+            echo "flag (see the macOS wiki page)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   spec:
     name: Spec parses (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -377,8 +453,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            name: macOS
+          # macOS runs the same check inside its build job below.
           - os: ubuntu-latest
             name: Linux
     steps:

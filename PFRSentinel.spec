@@ -231,7 +231,6 @@ except Exception as e:
 # ============================================================================
 
 added_files = [
-    ('ASICamera2.dll', '.'),
     ('version.py', '.'),
     ('assets/app_icon.ico', 'assets'),
     ('assets/app_icon.png', 'assets'),
@@ -251,14 +250,40 @@ added_files = [
     ('star_data/messier_list.json', 'star_data'),
     ('star_data/NGC.csv', 'star_data'),
     ('star_data/constellations.json', 'star_data'),
-    # NINA Advanced Sequencer helpers. Shipped as loose scripts (not frozen)
-    # because the user points a NINA "External Script" instruction at the .bat
-    # by path — it has to exist on disk next to the install.
-    ('scripts/nina/Invoke-SentinelCapture.ps1', 'scripts/nina'),
-    ('scripts/nina/sentinel-capture-start.bat', 'scripts/nina'),
-    ('scripts/nina/sentinel-capture-stop.bat', 'scripts/nina'),
-    ('scripts/nina/README.md', 'scripts/nina'),
 ]
+
+if IS_WINDOWS:
+    added_files += [
+        ('ASICamera2.dll', '.'),
+        # NINA Advanced Sequencer helpers. Shipped as loose scripts (not frozen)
+        # because the user points a NINA "External Script" instruction at the
+        # .bat by path — it has to exist on disk next to the install. NINA is
+        # Windows-only, so they are too.
+        ('scripts/nina/Invoke-SentinelCapture.ps1', 'scripts/nina'),
+        ('scripts/nina/sentinel-capture-start.bat', 'scripts/nina'),
+        ('scripts/nina/sentinel-capture-stop.bat', 'scripts/nina'),
+        ('scripts/nina/README.md', 'scripts/nina'),
+    ]
+
+# ZWO SDK for macOS, staged by scripts/ci/stage_zwo_sdk_macos.py (arm64
+# library from INDI's pinned mirror, Homebrew libusb beside it, rpath and
+# signature fixed). Binaries rather than datas, so PyInstaller's macOS pass
+# rewrites and re-signs them with everything else. Conditional like the NINA
+# DLL: without it the app still runs, and the Capture tab can be pointed at a
+# library installed elsewhere.
+zwo_binaries = []
+if sys.platform == 'darwin':
+    _zwo_dir = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'build', 'zwo-macos')
+    _zwo_libs = ['libASICamera2.dylib', 'libusb-1.0.0.dylib']
+    if all(os.path.isfile(os.path.join(_zwo_dir, lib)) for lib in _zwo_libs):
+        zwo_binaries = [(os.path.join(_zwo_dir, lib), '.') for lib in _zwo_libs]
+        for notice in ('ZWO-LICENSE.txt', 'libusb-COPYING.txt'):
+            if os.path.isfile(os.path.join(_zwo_dir, notice)):
+                added_files.append((os.path.join(_zwo_dir, notice), 'licenses'))
+        print("[OK] ZWO SDK (macOS): bundled")
+    else:
+        print("[WARN] ZWO SDK not staged in build/zwo-macos - building WITHOUT camera "
+              "support; run scripts/ci/stage_zwo_sdk_macos.py first")
 
 # NINA plugin DLL — built by build_sentinel.bat from nina-plugin/ and staged
 # here. Conditional: PyInstaller aborts the whole build on a datas entry whose
@@ -367,7 +392,7 @@ hiddenimports = [
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=fluent_binaries + requests_binaries + jaraco_binaries + platformdirs_binaries + onnx_binaries + xml_binaries + posthog_binaries + backoff_binaries + otel_binaries + scipy_binaries + google_binaries,
+    binaries=zwo_binaries + fluent_binaries + requests_binaries + jaraco_binaries + platformdirs_binaries + onnx_binaries + xml_binaries + posthog_binaries + backoff_binaries + otel_binaries + scipy_binaries + google_binaries,
     datas=added_files + fluent_datas + requests_datas + jaraco_datas + platformdirs_datas + onnx_datas + posthog_datas + backoff_datas + otel_datas + scipy_datas + google_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -473,3 +498,28 @@ coll = COLLECT(
     upx_exclude=[],
     name='PFRSentinel',
 )
+
+# macOS: wrap the folder in an application bundle. Info.plist versions must be
+# numeric, so a dev build's "3.7.10-dev.4" becomes 3.7.10 (short) and
+# 3.7.10.4 (build), the same split the Windows FileVersion uses.
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='PFR Sentinel.app',
+        icon=app_icon,
+        bundle_identifier='com.pfrsentinel.app',
+        version='.'.join(str(p) for p in version_tuple[:3]),
+        info_plist={
+            'CFBundleDisplayName': 'PFR Sentinel',
+            'CFBundleName': 'PFR Sentinel',
+            'CFBundleVersion': file_version_str,
+            'CFBundleShortVersionString': '.'.join(str(p) for p in version_tuple[:3]),
+            'NSHighResolutionCapable': True,
+            'NSHumanReadableCopyright': 'Copyright © Paul Fox-Reeks',
+            # The web output and control API listen on the LAN; macOS 15 asks
+            # the user before allowing that and shows this reason.
+            'NSLocalNetworkUsageDescription':
+                'PFR Sentinel serves the latest image and its status to other '
+                'devices on your network when the web output is on.',
+        },
+    )

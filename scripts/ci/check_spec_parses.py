@@ -110,6 +110,27 @@ def _check_invariants(namespace: dict) -> list[str]:
     if not is_windows and isinstance(icon, str) and icon.lower().endswith(".ico"):
         failures.append(f"EXE(icon={icon!r}) — .ico is Windows-only; macOS needs .icns")
 
+    datas = recorded["Analysis"][0].kwargs.get("datas", [])
+    windows_only = [src for src, _dest in datas
+                    if src.lower().endswith((".dll", ".bat", ".ps1"))]
+    if is_windows and "ASICamera2.dll" not in [src for src, _dest in datas]:
+        failures.append("ASICamera2.dll is not bundled on Windows")
+    if not is_windows and windows_only:
+        failures.append(f"Windows-only files bundled off Windows: {windows_only}")
+
+    is_macos = sys.platform == "darwin"
+    bundles = recorded.get("BUNDLE", [])
+    if is_macos and not bundles:
+        failures.append("no BUNDLE() on macOS — the build would be a bare folder, not an .app")
+    if not is_macos and bundles:
+        failures.append("BUNDLE() called off macOS")
+    for bundle in bundles:
+        plist = bundle.kwargs.get("info_plist", {})
+        for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+            value = str(plist.get(key, ""))
+            if not value or not all(part.isdigit() for part in value.split(".")):
+                failures.append(f"Info.plist {key}={value!r} is not a numeric version")
+
     # A datas entry whose source is missing aborts a real build with a message
     # that does not name the entry. Catch it here instead.
     for source, _dest in recorded["Analysis"][0].kwargs.get("datas", []):

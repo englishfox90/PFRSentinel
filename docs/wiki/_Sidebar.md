@@ -1,6 +1,7 @@
 ### PFR Sentinel
 
 - [Home](Home)
+- [macOS](macOS)
 
 ### Monitor
 
