@@ -401,6 +401,16 @@ hiddenimports = [
 # ANALYSIS
 # ============================================================================
 
+# macOS: keep OpenCV's Python package in the PYZ archive. The cv2 hook collects
+# it as source ('py'), and in an .app PyInstaller moves source files to
+# Contents/Resources, leaving symlinks in Contents/Frameworks beside the
+# compiled extension. cv2's loader finds itself with os.path.realpath(__file__),
+# follows the symlink into Resources, can't see the extension there, re-imports
+# the package and dies with "recursion is detected during loading of cv2
+# binary extensions". From the archive, __file__ sits in Frameworks/cv2 next to
+# the extension. Overrides the hook; Windows keeps the hook's default.
+module_collection_mode = {'cv2': 'pyz'} if sys.platform == 'darwin' else {}
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -461,6 +471,7 @@ a = Analysis(
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
+    module_collection_mode=module_collection_mode,
 )
 
 # ============================================================================
