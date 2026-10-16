@@ -160,6 +160,7 @@ python main.py
 # Build
 .\build_sentinel.bat              # PyInstaller exe (Python 3.13 needs an email module workaround)
 .\build_sentinel_installer.bat    # Inno Setup installer
+./build_sentinel_macos.sh         # macOS: PFR Sentinel.app + .dmg (Apple silicon, ad-hoc signed)
 ```
 
 ## Testing
@@ -252,10 +253,19 @@ The Windows build job also compiles the NINA plugin with `dotnet` (its only
 automated check — there is no C# test suite) and asserts the exe's FileVersion
 matches `version.py`.
 
-macOS and Linux get `scripts/ci/check_spec_parses.py` instead of a build: it
+Linux gets `scripts/ci/check_spec_parses.py` instead of a build: it
 executes the spec with the PyInstaller classes stubbed, which catches a
-Windows-only import or a one-OS `datas` entry in seconds. Actual mac/Linux
-packaging is issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
+Windows-only import or a one-OS `datas` entry in seconds. macOS gets a real
+dev build (`macOS dev build`, Apple-silicon runner) that runs
+`build_sentinel_macos.sh` — the same script a local Mac build uses — and
+uploads the `.dmg`. That script stages the ZWO SDK with
+`scripts/ci/stage_zwo_sdk_macos.py`: the arm64 library from INDI's mirror,
+pinned to a commit and checked by git blob hash, with Homebrew's libusb beside
+it, an `@loader_path` rpath added and both re-signed (as shipped, the library
+links `@rpath/libusb-1.0.0.dylib` with no rpath, so Python can't load it).
+The job is not required by the ruleset and the `.app` is not notarized or
+published to the dev prerelease yet; the rest of mac/Linux packaging is
+issue #41. PyInstaller is pinned in `requirements-build.txt`, kept
 apart from `requirements-dev.txt` so the test matrix doesn't install it three
 times.
 
@@ -334,6 +344,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
 | `test_autostart_posix.py` | 25 | `autostart_macos` / `autostart_linux` / `launch_command` / POSIX `app_restart` — LaunchAgent plist relaunches on crash but not on a clean quit, written atomically, never calls `launchctl`, foreign/garbage plist reads as off; XDG entry and Exec quoting; dispatch per OS; the real `/bin/sh` waiter relaunches only after the PID exits (skipped on Windows) |
+| `test_stage_zwo_sdk_macos.py` | 5 | `scripts/ci/stage_zwo_sdk_macos.py` — git blob hash matches git, a download that doesn't match the pin is refused, every source pinned to one INDI commit, refuses to run off macOS |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
 | `test_font_loader.py` | 5 | `font_loader` — bundled Space Grotesk resolves off Windows, Arial never tried there, fallback outcome cached |
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
