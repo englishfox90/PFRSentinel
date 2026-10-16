@@ -366,7 +366,7 @@ class _MainWindowLifecycleMixin:
             app_logger.debug(f"tray InfoBar failed: {e}")
 
     def set_run_on_startup(self, enabled: bool, auto_start: bool = True):
-        """Register or remove the Windows logon task and report the outcome.
+        """Register or remove start-at-login and report the outcome.
 
         Returns True on success. Reverts the Settings switch + config on failure
         (e.g. the user declines the one-time UAC elevation), matching the
@@ -399,10 +399,11 @@ class _MainWindowLifecycleMixin:
     def _notify_startup_result(self, enabled: bool, success: bool):
         from PySide6.QtCore import Qt
         from qfluentwidgets import InfoBar, InfoBarPosition
+        from services.host_platform import IS_WINDOWS
         try:
             if success:
-                msg = ("PFR Sentinel will start with Windows."
-                       if enabled else "PFR Sentinel will no longer start with Windows.")
+                msg = ("PFR Sentinel will start when you log in."
+                       if enabled else "PFR Sentinel will no longer start when you log in.")
                 InfoBar.success(
                     title="Startup updated", content=msg, orient=Qt.Horizontal,
                     isClosable=True, position=InfoBarPosition.TOP, duration=6000, parent=self,
@@ -411,7 +412,9 @@ class _MainWindowLifecycleMixin:
                 InfoBar.warning(
                     title="Startup not changed",
                     content=("Could not update the Windows startup task. Administrator "
-                             "approval is required — please accept the prompt and try again."),
+                             "approval is required — please accept the prompt and try again."
+                             if IS_WINDOWS else
+                             "Could not update the login item. See the log for the reason."),
                     orient=Qt.Horizontal, isClosable=True, position=InfoBarPosition.TOP,
                     duration=10000, parent=self,
                 )

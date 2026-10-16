@@ -1,4 +1,7 @@
-"""Windows startup registration via Task Scheduler.
+"""Start at login: Task Scheduler on Windows, a LaunchAgent on macOS, XDG
+autostart on Linux (see services/autostart_macos.py, autostart_linux.py).
+
+The rest of this docstring and module is the Windows implementation.
 
 Registers PFR Sentinel to launch on user logon so an unattended observatory
 PC resumes capture automatically after a reboot. We use a scheduled task
@@ -10,7 +13,7 @@ prompt for UAC on every logon and stall unattended startup.
 
 Creating an elevated task itself needs admin, so ``enable``/``disable`` retry
 through a one-time UAC elevation when the direct call is denied. All functions
-no-op gracefully off Windows and on any failure.
+no-op gracefully on an unsupported OS and on any failure.
 """
 from __future__ import annotations
 
@@ -22,7 +25,8 @@ from services.logger import app_logger
 
 TASK_NAME = "PFR Sentinel Autostart"
 
-_IS_WINDOWS = sys.platform == "win32"
+_PLATFORM = sys.platform
+_IS_WINDOWS = _PLATFORM == "win32"
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
 
 
@@ -50,6 +54,19 @@ def _resolve_launch_command(auto_start: bool, start_in_tray: bool = True) -> str
         return f'"{sys.executable}"{suffix}'
     main_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
     return f'"{sys.executable}" "{main_py}"{suffix}'
+
+
+def _posix_backend():
+    """The macOS / Linux implementation, or None on Windows and anything else."""
+    if _IS_WINDOWS:
+        return None
+    if _PLATFORM == "darwin":
+        from services import autostart_macos
+        return autostart_macos
+    if _PLATFORM.startswith("linux"):
+        from services import autostart_linux
+        return autostart_linux
+    return None
 
 
 def _run_schtasks(args: list[str]) -> subprocess.CompletedProcess | None:
@@ -88,7 +105,10 @@ def _run_schtasks_elevated(args: list[str]) -> bool:
 
 
 def is_enabled() -> bool:
-    """True if the scheduled task currently exists."""
+    """True if start-at-login is registered (the task, agent or entry exists)."""
+    backend = _posix_backend()
+    if backend:
+        return backend.is_enabled()
     if not _IS_WINDOWS:
         return False
     result = _run_schtasks(["/Query", "/TN", TASK_NAME])
@@ -104,8 +124,11 @@ def enable(auto_start: bool = True, start_in_tray: bool = True) -> bool:
     Tries a direct create first; if that is denied (non-elevated session),
     retries through a UAC elevation prompt.
     """
+    backend = _posix_backend()
+    if backend:
+        return backend.enable(auto_start=auto_start, start_in_tray=start_in_tray)
     if not _IS_WINDOWS:
-        app_logger.debug("autostart: enable() is a no-op off Windows")
+        app_logger.debug(f"autostart: enable() is not supported on {_PLATFORM}")
         return False
 
     command = _resolve_launch_command(auto_start, start_in_tray)
@@ -130,6 +153,9 @@ def enable(auto_start: bool = True, start_in_tray: bool = True) -> bool:
 
 def disable() -> bool:
     """Remove the logon task. Returns True if the task is gone afterwards."""
+    backend = _posix_backend()
+    if backend:
+        return backend.disable()
     if not _IS_WINDOWS:
         return False
 

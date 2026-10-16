@@ -33,6 +33,9 @@ PFRSentinel/
 ├── services/                   # Core processing modules
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
 │   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
+│   ├── autostart.py            # Start at login: Task Scheduler (Windows) → autostart_macos.py (LaunchAgent, relaunch on crash) / autostart_linux.py (XDG)
+│   ├── launch_command.py       # argv that starts this copy (frozen .app/exe or source) — LaunchAgent, XDG entry, restart waiter
+│   ├── app_restart.py          # Self-restart via a detached waiter (PowerShell / sh) once this PID exits
 │   ├── font_loader.py          # PIL font resolution: Arial (Windows) → bundled Space Grotesk → DejaVu → default
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
 │   ├── config_defaults.py      # DEFAULT_CONFIG + DEFAULT_CAMERA_PROFILE (data only)
@@ -327,6 +330,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_watcher.py` | 2 | `ImageFileHandler` — `process_image` extras reach the callback |
 | `test_headless_runner_crop.py` | 3 | `HeadlessRunner._process_and_save` — output crop after resize, before overlays |
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
+| `test_autostart_posix.py` | 25 | `autostart_macos` / `autostart_linux` / `launch_command` / POSIX `app_restart` — LaunchAgent plist relaunches on crash but not on a clean quit, written atomically, never calls `launchctl`, foreign/garbage plist reads as off; XDG entry and Exec quoting; dispatch per OS; the real `/bin/sh` waiter relaunches only after the PID exits (skipped on Windows) |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
 | `test_font_loader.py` | 5 | `font_loader` — bundled Space Grotesk resolves off Windows, Arial never tried there, fallback outcome cached |
 | `test_ffmpeg_utils.py` | 15 | `ffmpeg_utils` — PATH first, then winget / Homebrew / distro candidates per platform; winget probe never spawns off Windows |
