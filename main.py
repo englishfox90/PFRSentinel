@@ -27,6 +27,8 @@ sys.path.insert(0, project_root)
 # os.add_dll_directory() makes the bare-name load work regardless of interpreter
 # or CWD. Packaged builds are unaffected (the DLL sits next to the exe), so this
 # is guarded to dev-from-source and is a no-op if the folder/DLL is absent.
+# macOS and Linux need no equivalent: services/zwo_sdk_library.py hands
+# zwoasi.init() an absolute path, so no loader search path is involved.
 if sys.platform == 'win32' and hasattr(os, 'add_dll_directory'):
     if os.path.exists(os.path.join(project_root, 'ASICamera2.dll')):
         os.add_dll_directory(project_root)

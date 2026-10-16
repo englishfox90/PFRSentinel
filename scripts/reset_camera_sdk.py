@@ -25,7 +25,7 @@ import sys
 import time
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def reset_all_cameras(sdk_path):
@@ -49,13 +49,13 @@ def reset_all_cameras(sdk_path):
         import zwoasi as asi
         
         # Initialize SDK
-        if not os.path.exists(sdk_path):
-            print(f"✗ SDK not found at: {sdk_path}")
-            print("\nTrying default location...")
-            sdk_path = 'ASICamera2.dll'
-            if not os.path.exists(sdk_path):
-                print("✗ ASICamera2.dll not found!")
-                return False
+        from services.zwo_sdk_library import resolve_sdk_path
+        from services.host_platform import zwo_sdk_library_name
+        resolved = resolve_sdk_path(sdk_path)
+        if not resolved:
+            print(f"✗ {zwo_sdk_library_name()} not found!")
+            return False
+        sdk_path = resolved
         
         print(f"SDK path: {sdk_path}")
         asi.init(sdk_path)
@@ -209,7 +209,8 @@ def reset_all_cameras(sdk_path):
 def main():
     """Main script execution"""
     # Get SDK path
-    sdk_path = 'C:/Program Files (x86)/PFRSentinel/_internal/ASICamera2.dll'
+    from services.zwo_sdk_library import find_sdk_library
+    sdk_path = find_sdk_library()
     
     # Check if PFRSentinel is running (optional check)
     try:

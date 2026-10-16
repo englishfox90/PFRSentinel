@@ -32,6 +32,7 @@ PFRSentinel/
 │   └── theme/                  # tokens.py, styles.py, accent_themes.py, special_themes.py (seasonal packs), icons.py
 ├── services/                   # Core processing modules
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
+│   ├── zwo_sdk_library.py      # Find the ZWO SDK library per OS; repair a config path carried over from another OS
 │   ├── reveal_in_file_manager.py # Explorer / Finder / xdg-open launch, one implementation
 │   ├── font_loader.py          # PIL font resolution: Arial (Windows) → bundled Space Grotesk → DejaVu → default
 │   ├── config.py               # Config class — load/save/merge; re-exports the defaults
@@ -292,7 +293,9 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | Test file | Tests | Covers |
 |-----------|-------|--------|
 | `test_auto_exposure.py` | 21 | `camera_utils` — brightness, clipping, exposure logic |
-| `test_camera.py` | 14 | `zwo_camera` — SDK, config, debayering (3 need `requires_camera`) |
+| `test_camera.py` | 14 | `zwo_camera` — SDK, config, debayering |
+| `test_camera_hardware.py` | 4 | real camera on whichever OS the SDK loads — detect, open, serial, one RAW8 frame; a library that is found but won't load fails instead of skipping (all `requires_camera`) |
+| `test_zwo_sdk_library.py` | 23 | `zwo_sdk_library` — per-OS library name and search dirs (project root first, `/usr/local/lib` + Homebrew on macOS, multiarch on Linux), loader fallback, a configured path kept only if it exists and is this OS's kind, a Windows path in a config moved to a Mac replaced on load, kept when nothing is found |
 | `test_camera_auto_recovery.py` | 20 | `camera_auto_recovery` off — one plain reconnect, no ladder/USB/SDK reset (`camera_reconnect`), capture loop stops instead of retrying (cold-open quirk still absorbed, handle released on the fatal exit), controller schedules no restart or USB reset; on = unchanged |
 | `test_discord.py` | 32 | `discord_alerts` — webhooks, embeds (mocked) |
 | `test_image_output.py` | 18 | `processor` — overlays, stretch, output formats |

@@ -145,11 +145,8 @@ class Config:
         sdk_path = self.data.get('sdk_path', '')
         if sdk_path and not os.path.isfile(sdk_path):
             # Try to find SDK in the new PFRSentinel _internal folder
-            possible_locations = [
-                os.path.join(os.getenv('PROGRAMFILES(X86)', ''), 'PFRSentinel', '_internal', 'ASICamera2.dll'),
-                os.path.join(os.getenv('PROGRAMFILES', ''), 'PFRSentinel', '_internal', 'ASICamera2.dll'),
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), '_internal', 'ASICamera2.dll'),
-            ]
+            from .zwo_sdk_library import candidate_sdk_paths
+            possible_locations = candidate_sdk_paths()
             for loc in possible_locations:
                 if os.path.isfile(loc):
                     self.data['sdk_path'] = loc
@@ -239,6 +236,17 @@ class Config:
                                 from .logger import app_logger
                                 for level, message in notices:
                                     getattr(app_logger, level)(message)
+                            except Exception:
+                                pass
+
+                        # A config moved from another OS (or install) names
+                        # an SDK library that can't exist here.
+                        from .zwo_sdk_library import repair_configured_sdk_path
+                        sdk_notice = repair_configured_sdk_path(loaded)
+                        if sdk_notice:
+                            try:
+                                from .logger import app_logger
+                                app_logger.info(sdk_notice)
                             except Exception:
                                 pass
 
