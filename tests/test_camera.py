@@ -23,14 +23,6 @@ if project_root not in sys.path:
 class TestCameraConnectionMock:
     """Test camera connection logic with mocks"""
     
-    def test_sdk_path_configuration(self):
-        """Test SDK path can be configured"""
-        from services.config import DEFAULT_CONFIG
-        
-        assert 'zwo_sdk_path' in DEFAULT_CONFIG
-        from services.host_platform import zwo_sdk_library_name  # this OS's SDK file
-        assert zwo_sdk_library_name() in DEFAULT_CONFIG['zwo_sdk_path']
-    
     def test_camera_settings_defaults(self):
         """Per-camera defaults now live in DEFAULT_CAMERA_PROFILE, not DEFAULT_CONFIG."""
         from services.config import DEFAULT_CAMERA_PROFILE
@@ -733,7 +725,7 @@ class TestResolveCameraIndexRefusesToSwap:
         fake_asi.get_num_cameras.return_value = 1
         fake_asi.list_cameras.return_value = ['ZWO ASI462MM']
         with patch.dict(sys.modules, {'zwoasi': fake_asi}), \
-                patch('os.path.exists', return_value=True):
+                patch('os.path.isfile', return_value=True):
             with pytest.raises(Exception, match="ZWO ASI676MC.*not found"):
                 ctrl._resolve_camera_index(
                     sdk_path='fake.dll',
@@ -748,7 +740,7 @@ class TestResolveCameraIndexRefusesToSwap:
         fake_asi.get_num_cameras.return_value = 2
         fake_asi.list_cameras.return_value = ['ZWO ASI676MC', 'ZWO ASI462MM']
         with patch.dict(sys.modules, {'zwoasi': fake_asi}), \
-                patch('os.path.exists', return_value=True):
+                patch('os.path.isfile', return_value=True):
             idx = ctrl._resolve_camera_index(
                 sdk_path='fake.dll',
                 camera_name='ZWO ASI462MM',

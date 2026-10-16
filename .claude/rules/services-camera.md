@@ -17,12 +17,15 @@ These are real bugs that have shipped in this project. Get them right.
 - All `*_ms` fields in config are milliseconds; all SDK calls take seconds.
 
 ## SDK initialization
-- `ASICamera2.dll` lives in app root by default. Custom path is configurable via the Capture tab.
+- The SDK library is `ASICamera2.dll` on Windows, `libASICamera2.dylib` on macOS, `libASICamera2.so` on Linux. **Never spell the name or a location** — ask `services/zwo_sdk_library.py`: `resolve_library_path(configured)` returns the configured file if it exists, else the first copy found (bundled, `<app-data root>/sdk/`, system library folders). Custom path is configurable via the Capture tab.
+- Always hand `zwoasi.init()` the absolute path the locator returns, never a bare filename: macOS and Linux have no `os.add_dll_directory()` equivalent, so a bare name never finds a copy sitting next to the app.
+- Only the Windows DLL is committed and bundled. The macOS/Linux libraries are per-CPU downloads the user (or INDI's `libasi`) installs — see `docs/dev/ZWO_SDK_PLATFORMS.md` for the reasoning, the Linux udev rule (`installer/linux/asi.rules`) and the `usbfs_memory_mb` check in `linux_usb_preflight.py`.
 - SDK init can fail if no camera is connected — handle the absence gracefully, don't crash on startup.
 
 ## Reconnect
 - Cameras drop off USB occasionally — the reconnect path in `camera_connection.py` must remain idempotent. Don't add state that prevents repeated init attempts.
 - Windows USB reset uses `CM_Reenumerate_DevNode()` via ctypes. Wrap in try/except and fall back gracefully on non-Windows or unprivileged sessions.
+- There is deliberately **no USB reset on macOS or Linux** (issue #39). Recovery there is `stop_capture()`, the plain reconnect and the app-restart policy, so none of those may come to depend on a USB reset having happened.
 
 ## Disconnect / cleanup
 - The cleanup safety net is layered, and since the camera package split it spans two classes: `ZWOCamera` owns `__del__` and `__enter__`/`__exit__` (`services/camera/zwo_camera.py`); `CameraConnection` owns the `_cleanup_lock` that serialises teardown (`services/camera/camera_connection.py`). Don't remove any of them — improper cleanup leaves the USB device hung until reboot.

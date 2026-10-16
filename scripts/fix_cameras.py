@@ -35,8 +35,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.utils_paths import get_app_data_dir
-from services.host_platform import zwo_sdk_library_name
-from services.zwo_sdk_library import resolve_sdk_path
+from services.zwo_sdk_library import library_name, resolve_library_path, search_dirs
 
 
 def backup_config():
@@ -68,8 +67,10 @@ def detect_cameras(sdk_path):
         import zwoasi as asi
         
         # Initialize SDK
-        if not sdk_path or not os.path.exists(sdk_path):
-            print(f"✗ {zwo_sdk_library_name()} not found")
+        if not sdk_path:
+            print(f"✗ {library_name()} not found! Searched:")
+            for folder in search_dirs():
+                print(f"    {folder}")
             return []
         
         print(f"Initializing SDK: {sdk_path}")
@@ -213,8 +214,8 @@ def main():
     # Get SDK path from config or use default
     config_dir = get_app_data_dir()
     config_path = os.path.join(config_dir, 'config.json')
-    sdk_path = None
-
+    sdk_path = ''
+    
     if os.path.exists(config_path):
         try:
             with open(config_path, 'r') as f:
@@ -222,16 +223,15 @@ def main():
                 sdk_path = config.get('zwo_sdk_path', sdk_path)
         except:
             pass
-    sdk_path = resolve_sdk_path(sdk_path)
-    
+
     # Detect cameras
-    cameras = detect_cameras(sdk_path)
+    cameras = detect_cameras(resolve_library_path(sdk_path))
     
     if not cameras:
         print("\n✗ No cameras detected!")
         print("\nTroubleshooting:")
         print("  1. Ensure cameras are connected via USB")
-        print(f"  2. Check that {zwo_sdk_library_name()} exists in the app directory")
+        print(f"  2. Check that {library_name()} exists in one of the folders listed above")
         print("  3. Try closing any other software using the cameras")
         return 1
     
