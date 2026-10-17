@@ -21,7 +21,7 @@ QtAwesome>=1.4.2  # Material Design Icons (nav rail, all-sky settings)
 # Analytics + observability (PostHog events + log forwarding)
 posthog>=7.60.1
 opentelemetry-sdk>=1.20.0          # OTLP log pipeline (services/posthog_logs.py)
-opentelemetry-exporter-otlp-proto-http>=1.20.0  # ships app logs to PostHog
+opentelemetry-exporter-otlp-proto-http>=1.45.0  # ships app logs to PostHog
 
 # ML inference (lightweight ONNX runtime for production)
 onnxruntime>=1.16.0
