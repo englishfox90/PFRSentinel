@@ -72,6 +72,7 @@ def test_frame_bytes_match_the_numpy_path(writer, mode):
     rng = np.random.default_rng(mode.encode()[0])
     if mode == 'I;16':
         arr = rng.integers(0, 65535, size=(48, 64), dtype=np.uint16)
+        # Inferred from the dtype: Pillow 13 refuses an explicit mode='I;16'.
         image = Image.fromarray(arr)
         assert image.mode == 'I;16'
     else:

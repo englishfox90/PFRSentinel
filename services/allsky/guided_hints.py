@@ -228,6 +228,12 @@ def suggest_stars(
                    "probably mis-identified.")
     hints.sort(key=lambda h: h.vmag)
     hints = hints[:MAX_HINTS]
+    # The dialog shows nothing when it withholds hints; without this line a
+    # field report of "no suggestions" cannot be told apart from a slow solve.
+    log.info(f"Guided hints: {len(anchors)} anchors, provisional RMS "
+             f"{rms:.1f}px, {supported_voters}/{voters} bright stars on a "
+             f"detection (of {len(det)}), "
+             f"{'shown' if trusted else 'withheld'}: {len(hints)} hints")
     return HintResult(hints=hints, rms=float(rms), support=support,
                       trusted=trusted, message=message)
 
