@@ -47,7 +47,8 @@ class _SolveWorker(QThread):
                 self._anchors, p['lat'], p['lon'], p['dt'],
                 p['sky_cx'], p['sky_cy'], p['sky_r'],
                 image_width=p.get('image_width', 0),
-                image_height=p.get('image_height', 0))
+                image_height=p.get('image_height', 0),
+                circle_cropped=bool(p.get('circle_cropped')))
             self.solved.emit(model)
         except Exception as e:
             self.failed.emit(str(e), getattr(e, 'anchor_residuals', None),
@@ -73,7 +74,9 @@ class _HintWorker(QThread):
                 p['lat'], p['lon'], p['dt'],
                 p['sky_cx'], p['sky_cy'], p['sky_r'],
                 should_cancel=self.isInterruptionRequested,
-                is_sky=p.get('is_sky'))
+                is_sky=p.get('is_sky'),
+                frame_size=((p.get('image_width', 0), p.get('image_height', 0))
+                            if p.get('circle_cropped') else None))
         except Exception as e:
             log.debug(f"Guided hints failed (non-fatal): {e}")
         self.ready.emit(self._id, result)

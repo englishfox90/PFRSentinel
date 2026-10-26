@@ -101,6 +101,7 @@ def calibrate_from_anchors(
     image_width: int = 0,
     image_height: int = 0,
     max_rms_px: float = 15.0,
+    circle_cropped: bool = False,
 ) -> FisheyeModel:
     """Solve a FisheyeModel from user-identified star anchors.
 
@@ -115,6 +116,9 @@ def calibrate_from_anchors(
             fix the optical centre and seed a1.
         image_width/height: stored on the model for the renderer's scaling (F5).
         max_rms_px: reject the fit if anchor RMS exceeds this (scaled by sky_r).
+        circle_cropped: the frame crops the sky circle (sky_circle_crop), so
+            the measured circle is no horizon and the a1-vs-circle gate is
+            skipped — the anchors alone set the plate scale.
 
     Returns:
         FisheyeModel (rms_residual = anchor RMS, n_matches = anchor count).
@@ -160,6 +164,7 @@ def calibrate_from_anchors(
     log.info(
         f"Guided solve input: dt={dt.isoformat()}, "
         f"sky_circle=({cx:.0f}, {cy:.0f}, r={float(sky_radius):.0f}), "
+        f"{'circle cropped, ' if circle_cropped else ''}"
         f"rms_limit={rms_limit:.1f}px, anchors: "
         + "; ".join(f"{n}@({a[0]:.1f},{a[1]:.1f}) ra={a[2]:.4f} dec={a[3]:.4f}"
                     for n, a in zip(names, anchors))
@@ -194,7 +199,8 @@ def calibrate_from_anchors(
 
     idx = np.array(used)
     poly_ok, poly_msg = validate_lens_polynomial(model)
-    scale_ok, scale_msg = validate_a1_scale(model, sky_radius)
+    scale_ok, scale_msg = validate_a1_scale(
+        model, None if circle_cropped else sky_radius)
     if not (poly_ok and scale_ok):
         reason = "; ".join(m for ok, m in ((poly_ok, poly_msg),
                                            (scale_ok, scale_msg)) if not ok)

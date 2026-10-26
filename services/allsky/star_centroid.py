@@ -270,6 +270,7 @@ def detect_stars(
     sky_radius: Optional[float] = None,
     sky_trim_fraction: float = 0.15,
     filters: Optional[DetectionFilters] = None,
+    region_radius: Optional[float] = None,
 ) -> List[Tuple[float, float, float]]:
     """
     Detect star centroids in an all-sky camera image.
@@ -290,6 +291,12 @@ def detect_stars(
                            (ignored if sky_radius is supplied).  0.15 = 15% inward.
         filters: detection_filters.DetectionFilters — streak, dark-neighbourhood
                  and ignore-box rejection. None keeps the area window alone.
+        region_radius: search radius about the sky centre, replacing
+                 sky_radius for the mask and edge rejection only (area and
+                 background scaling still follow sky_radius). For a frame that
+                 crops the circle (sky_circle_crop), where the measured circle
+                 is no horizon; sources within border_px of the frame edge are
+                 then rejected instead.
 
     Returns:
         List of (x, y, flux) tuples sorted by decreasing flux.
@@ -319,10 +326,10 @@ def detect_stars(
     if sky_cx is None or sky_cy is None or sky_radius is None:
         sky_cx, sky_cy, sky_radius = estimate_sky_circle(gray, trim_fraction=sky_trim_fraction)
 
-    # Build circular sky mask
+    search_r = float(region_radius) if region_radius else float(sky_radius)
     mask = np.zeros((h, w), dtype=np.uint8)
     cv2.circle(mask, (int(round(sky_cx)), int(round(sky_cy))),
-               int(round(sky_radius)), 255, -1)
+               int(round(search_r)), 255, -1)
 
     # --- Scale area thresholds by sky_radius / reference_radius ---
     # Stars are optical point sources; their pixel size is driven by PSF/JPEG,
@@ -390,7 +397,10 @@ def detect_stars(
 
         # Reject detections too close to the sky circle edge (horizon noise)
         dist_from_centre = np.hypot(cx - sky_cx, cy - sky_cy)
-        if dist_from_centre > sky_radius - border_px:
+        if dist_from_centre > search_r - border_px:
+            continue
+        if region_radius and not (border_px <= cx < w - border_px
+                                  and border_px <= cy < h - border_px):
             continue
 
         if filters is not None:

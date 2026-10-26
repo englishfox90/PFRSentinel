@@ -20,26 +20,22 @@ from services.notifications import (
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
 
-# Frames wider/taller than this ratio almost certainly crop the fisheye
-# circle — the all-sky feature assumes the full sky circle is in frame
-# (square-ish sensor + fisheye lens). Warn, don't block: a wide sensor whose
-# lens image circle fits the short edge can still calibrate.
-_MAX_SQUARE_ASPECT = 1.2
-
-
 def _aspect_warning(image) -> Optional[str]:
-    """Human-readable warning when a frame is far from square, else None."""
+    """Human-readable warning when a frame is far from square, else None.
+
+    Warn, don't block: guided calibration handles a cropped circle; the
+    automatic calibrators still read the circle as the horizon.
+    """
+    from services.allsky.sky_circle_crop import circle_cropped
     w = int(getattr(image, 'width', 0) or 0)
     h = int(getattr(image, 'height', 0) or 0)
-    if not w or not h:
-        return None
-    if max(w, h) / min(w, h) <= _MAX_SQUARE_ASPECT:
+    if not circle_cropped(w, h):
         return None
     return (
         f"frame is {w}x{h} — the all-sky feature is designed for a fisheye "
         "lens on a square (or near-square) sensor with the whole sky circle "
-        "in frame. A wide sensor usually crops the circle, and calibration "
-        "will not work correctly."
+        "in frame. A wide sensor usually crops the circle: use Guided "
+        "Calibration, automatic calibration will not work correctly."
     )
 
 
@@ -248,9 +244,17 @@ class AllSkyController(QObject):
         from services.allsky.coords import radec_to_altaz
         from services.allsky.render_stars import star_display_name
 
+        from services.allsky.sky_circle_crop import (
+            circle_cropped, whole_frame_radius)
+        width = getattr(image, 'width', 0)
+        height = getattr(image, 'height', 0)
         sky_cx, sky_cy, sky_r = estimate_sky_circle(image)
+        cropped = circle_cropped(width, height)
+        region_r = (whole_frame_radius(width, height, sky_cx, sky_cy)
+                    if cropped else None)
         detections = detect_stars(image, max_stars=300,
-                                  sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r)
+                                  sky_cx=sky_cx, sky_cy=sky_cy, sky_radius=sky_r,
+                                  region_radius=region_r)
         candidates = []
         for s in get_bright_stars(max_mag=3.5):
             alt, az = radec_to_altaz(s['ra_deg'], s['dec_deg'], lat, lon, dt)
@@ -278,8 +282,6 @@ class AllSkyController(QObject):
                         f"showing the linear frame instead: {e}")
             stretch, display_image = None, image
 
-        width = getattr(image, 'width', 0)
-        height = getattr(image, 'height', 0)
         # The equipment map, if it has learned this rig, keeps predictions
         # that land on the mount out of the suggestion support vote. Learned
         # on the output frame, so it is carried to this frame's pixels here.
@@ -289,12 +291,14 @@ class AllSkyController(QObject):
 
         log.info(f"Guided calibration prep: {len(detections)} detections, "
                  f"{len(candidates)} bright stars above horizon ({source}"
-                 f"{', equipment map on' if is_sky else ''})")
+                 f"{', equipment map on' if is_sky else ''}"
+                 f"{', circle cropped: whole frame searched' if cropped else ''})")
         return {
             'image': image, 'display_image': display_image,
             'display_stretch': stretch, 'display_strength': strength,
             'detections': detections,
             'sky_cx': sky_cx, 'sky_cy': sky_cy, 'sky_r': sky_r,
+            'circle_cropped': cropped,
             'lat': lat, 'lon': lon, 'dt': dt, 'candidates': candidates,
             'image_width': width, 'image_height': height,
             'is_sky': is_sky,
