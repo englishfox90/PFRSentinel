@@ -19,7 +19,7 @@ does fit predicts stars that sit on empty sky — the `support` figure.
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -113,6 +113,7 @@ def suggest_stars(
     sky_radius: float,
     should_cancel=None,
     is_sky: Optional[Callable[[float, float], bool]] = None,
+    frame_size: Optional[Tuple[int, int]] = None,
 ) -> Optional[HintResult]:
     """Predict pixel positions for the candidates the user has not named yet.
 
@@ -125,6 +126,9 @@ def suggest_stars(
     is_sky: optional (x, y) -> bool in the frame's pixels, from the equipment
         map (equipment_lookup). A prediction it puts on equipment is still
         shown, as an unsupported hint, but does not vote on support.
+    frame_size: (width, height) when the frame crops the sky circle
+        (sky_circle_crop); hints are then kept anywhere in the frame instead
+        of only inside the circle, which is no horizon there.
 
     Returns None when there are too few anchors or the solve cannot run;
     otherwise a HintResult whose `trusted` flag says whether the hints should
@@ -196,8 +200,11 @@ def suggest_stars(
         if xy is None:
             continue
         x, y = float(xy[0]), float(xy[1])
+        if frame_size:
+            if not (0 <= x < frame_size[0] and 0 <= y < frame_size[1]):
+                continue
         # Predictions outside the sky circle are horizon clutter, not help.
-        if math.hypot(x - sky_cx, y - sky_cy) > float(sky_radius):
+        elif math.hypot(x - sky_cx, y - sky_cy) > float(sky_radius):
             continue
         supported = has_detection(x, y)
         # Shown even on equipment: the map's edge is soft and a star at the
@@ -221,6 +228,12 @@ def suggest_stars(
                    "probably mis-identified.")
     hints.sort(key=lambda h: h.vmag)
     hints = hints[:MAX_HINTS]
+    # The dialog shows nothing when it withholds hints; without this line a
+    # field report of "no suggestions" cannot be told apart from a slow solve.
+    log.info(f"Guided hints: {len(anchors)} anchors, provisional RMS "
+             f"{rms:.1f}px, {supported_voters}/{voters} bright stars on a "
+             f"detection (of {len(det)}), "
+             f"{'shown' if trusted else 'withheld'}: {len(hints)} hints")
     return HintResult(hints=hints, rms=float(rms), support=support,
                       trusted=trusted, message=message)
 

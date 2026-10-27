@@ -4,6 +4,10 @@ The All-Sky Overlay annotates your fisheye camera frames with astronomical label
 
 The feature is designed for all-sky cameras: a fisheye lens on a square (or near-square) sensor, with the whole sky circle visible in the frame. Regular lenses, or wide sensors that crop the fisheye circle, will not calibrate correctly. If a frame is much wider than it is tall, calibration still runs, but a warning is written to the [Logs](Logs); it is added to the status line only if the calibration fails.
 
+> **New in the next release** — not available in version 3.7.9 or earlier.
+>
+> **Wide sensors: use Guided Calibration.** On a frame much wider than it is tall (for example a 1920x1080 ASI662MC), the fisheye circle runs off the top and bottom of the frame. Guided Calibration now detects that: it searches the whole frame for stars and takes the lens scale from the stars you identify, instead of rejecting a correct fit as "a lens shape no real lens has". Automatic calibration still assumes the whole circle is in frame, so on a wide sensor it cannot improve or replace a guided calibration yet, and its refinements are rejected; your guided calibration is kept.
+
 ---
 
 ## How It Works
