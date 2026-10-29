@@ -116,7 +116,7 @@ class AlpacaSafetyServer:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if hasattr(socket, 'SO_REUSEPORT'):
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            s.bind(('', self._discovery_port))
+            s.bind((self.bind, self._discovery_port))
             s.settimeout(0.5)
             return s
         except OSError as e:
