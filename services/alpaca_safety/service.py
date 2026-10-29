@@ -14,6 +14,7 @@ from .server import AlpacaSafetyServer
 from .state import SafetyState, safety_state
 
 DEFAULT_PORT = 11111
+DEFAULT_BIND = '127.0.0.1'
 
 
 class AlpacaSafetyService:
@@ -30,7 +31,7 @@ class AlpacaSafetyService:
 
     def reconcile(self, ml_config: Dict[str, Any]) -> None:
         cfg = ml_config.get(CONFIG_KEY, {}) if isinstance(ml_config, dict) else {}
-        wanted = (cfg.get('bind', '0.0.0.0'), int(cfg.get('port', DEFAULT_PORT)),
+        wanted = (cfg.get('bind', DEFAULT_BIND), int(cfg.get('port', DEFAULT_PORT)),
                   bool(cfg.get('discovery', True)))
         with self._lock:
             if not cfg.get('enabled', False):

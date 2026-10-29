@@ -310,9 +310,9 @@ class ImageProcessingMLSection(QWidget):
             self.settings_changed.emit()
 
     def _show_alpaca_safety_info(self, alpaca_config):
-        port = alpaca_config.get('port', 11111)
+        address = f"{alpaca_config.get('bind', '127.0.0.1')}:{alpaca_config.get('port', 11111)}"
         self.alpaca_safety_info.setText(
-            f"Port {port}, found by Alpaca discovery. Add \"PFR Sentinel Roof\" as an Alpaca "
+            f"Listening on {address}. Add \"PFR Sentinel Roof\" as an Alpaca "
             "SafetyMonitor. Safe only after two confident Open frames; unsafe on Closed, "
             "on uncertain frames, or when no frame has arrived for "
             f"{alpaca_config.get('stale_after_seconds', 600) // 60} min."

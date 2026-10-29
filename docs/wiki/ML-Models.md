@@ -172,7 +172,9 @@ PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**
 |---------|---------|-------------|
 | **Alpaca Safety Monitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. |
 
-It listens on port **11111** on every network interface and answers Alpaca discovery (UDP port 32227), so clients on the same network find it on their own. If discovery doesn't reach it, add the server by hand as `<this computer's address>:11111`. The port, the bind address, discovery and the staleness limit are set under `ml_models.alpaca_safety_monitor` in `config.json`.
+By default it listens on **this computer only**, at `127.0.0.1:11111`. In a client on the same computer, add the server by hand as `127.0.0.1:11111`.
+
+To share it with other machines, for example NINA on a separate PC, set `bind` to `0.0.0.0` (every network interface) or to one of this computer's addresses under `ml_models.alpaca_safety_monitor` in `config.json`. It then also answers Alpaca discovery (UDP port 32227) on that address, so clients on the network can find it on their own. Anyone who can reach that address can read the roof status and connect or disconnect the device, so only share it on a network you trust. The same config block sets the port, discovery and the staleness limit.
 
 It follows the same fail-safe rules as the file:
 

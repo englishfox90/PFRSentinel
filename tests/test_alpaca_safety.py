@@ -234,6 +234,16 @@ def test_service_follows_config(state):
     assert not service.running
 
 
+def test_monitor_stays_on_this_computer_unless_shared(state):
+    assert DEFAULT_CONFIG['ml_models']['alpaca_safety_monitor']['bind'] == '127.0.0.1'
+    _FakeServer.started = []
+    service = AlpacaSafetyService(state, server_factory=_FakeServer)
+    cfg = _ml_config()
+    del cfg['alpaca_safety_monitor']['bind']
+    service.reconcile(cfg)
+    assert _FakeServer.started[0].bind == '127.0.0.1'
+
+
 def test_service_survives_a_server_that_cannot_start(state):
     class _Refuses(_FakeServer):
         def start(self):

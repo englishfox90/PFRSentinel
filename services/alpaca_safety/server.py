@@ -53,7 +53,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class AlpacaSafetyServer:
-    def __init__(self, device: SafetyMonitorDevice, bind: str = '0.0.0.0', port: int = 11111,
+    def __init__(self, device: SafetyMonitorDevice, bind: str = '127.0.0.1', port: int = 11111,
                  discovery: bool = True, discovery_port: int = DISCOVERY_PORT):
         self._device = device
         self.bind = bind
@@ -109,8 +109,9 @@ class AlpacaSafetyServer:
         self._threads.append(t)
 
     def _open_discovery_socket(self) -> Optional[socket.socket]:
-        # Other Alpaca servers on this host (ASCOM Remote, INDIGO's bridge) listen on
-        # the same port; REUSEPORT lets each of them see the broadcast too.
+        # Bound to the same address as HTTP, so a loopback-only monitor stays
+        # invisible to the LAN. Other Alpaca servers on this host (ASCOM Remote,
+        # INDIGO's bridge) share the port; REUSEPORT lets each see the probe.
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

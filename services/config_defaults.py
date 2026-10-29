@@ -192,7 +192,7 @@ DEFAULT_CONFIG = {
         # ASCOM Alpaca SafetyMonitor (NINA, INDIGO A1, any Alpaca client) — same confirmed verdict
         "alpaca_safety_monitor": {
             "enabled": False,
-            "bind": "0.0.0.0",
+            "bind": "127.0.0.1",  # This computer only; "0.0.0.0" shares it with the network
             "port": 11111,
             "discovery": True,  # Answer Alpaca discovery on UDP 32227
             "min_confidence": 0.7,
