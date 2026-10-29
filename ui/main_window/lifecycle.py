@@ -220,6 +220,9 @@ class _MainWindowLifecycleMixin:
             except Exception:
                 pass
 
+        from services.alpaca_safety import alpaca_safety_service
+        alpaca_safety_service.stop()
+
         # Controller first: its worker threads read via image_library, so
         # joining them before the library closes its SQLite connection avoids
         # an in-flight read hitting a closed DB (sqlite3.ProgrammingError on

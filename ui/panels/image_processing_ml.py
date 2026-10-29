@@ -124,6 +124,18 @@ class ImageProcessingMLSection(QWidget):
         ascom_info.setWordWrap(True)
         ml_card.add_widget(ascom_info)
 
+        self.alpaca_safety_switch = SwitchRow(
+            "Alpaca Safety Monitor",
+            "Serve roof safety as an ASCOM Alpaca SafetyMonitor (NINA, INDIGO A1, any Alpaca client)"
+        )
+        self.alpaca_safety_switch.toggled.connect(self._on_alpaca_safety_changed)
+        ml_card.add_widget(self.alpaca_safety_switch)
+
+        self.alpaca_safety_info = CaptionLabel("")
+        self.alpaca_safety_info.setStyleSheet(f"color: {Colors.text_muted}; padding: 8px;")
+        self.alpaca_safety_info.setWordWrap(True)
+        ml_card.add_widget(self.alpaca_safety_info)
+
         layout.addWidget(ml_card)
 
         # === ML DATA CONTRIBUTION ===
@@ -284,6 +296,28 @@ class ImageProcessingMLSection(QWidget):
             else:
                 app_logger.info("ASCOM Safety file output disabled")
 
+    def _on_alpaca_safety_changed(self, checked):
+        if self._loading_config:
+            return
+        if self.main_window and hasattr(self.main_window, 'config'):
+            ml_config = self.main_window.config.get('ml_models', {})
+            alpaca_config = ml_config.get('alpaca_safety_monitor', {})
+            alpaca_config['enabled'] = checked
+            ml_config['alpaca_safety_monitor'] = alpaca_config
+            self.main_window.config.set('ml_models', ml_config)
+            self.main_window.config.save()
+            self._show_alpaca_safety_info(alpaca_config)
+            self.settings_changed.emit()
+
+    def _show_alpaca_safety_info(self, alpaca_config):
+        port = alpaca_config.get('port', 11111)
+        self.alpaca_safety_info.setText(
+            f"Port {port}, found by Alpaca discovery. Add \"PFR Sentinel Roof\" as an Alpaca "
+            "SafetyMonitor. Safe only after two confident Open frames; unsafe on Closed, "
+            "on uncertain frames, or when no frame has arrived for "
+            f"{alpaca_config.get('stale_after_seconds', 600) // 60} min."
+        )
+
     def _on_ascom_path_changed(self):
         if self._loading_config:
             return
@@ -411,6 +445,10 @@ class ImageProcessingMLSection(QWidget):
             ascom_config = ml_config.get('ascom_safety_file', {})
             self.ascom_safety_switch.set_checked(ascom_config.get('enabled', False))
             self.ascom_file_path.setText(ascom_config.get('file_path', ''))
+
+            alpaca_config = ml_config.get('alpaca_safety_monitor', {})
+            self.alpaca_safety_switch.set_checked(alpaca_config.get('enabled', False))
+            self._show_alpaca_safety_info(alpaca_config)
 
             if ml_config.get('enabled', False):
                 self._initialize_ml_service()

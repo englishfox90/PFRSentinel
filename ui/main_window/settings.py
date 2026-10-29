@@ -114,6 +114,13 @@ class _MainWindowSettingsMixin:
     # SETTINGS
     # =========================================================================
 
+    def _reconcile_alpaca_safety(self):
+        from services.alpaca_safety import alpaca_safety_service
+        try:
+            alpaca_safety_service.reconcile(self.config.get('ml_models', {}))
+        except Exception as e:
+            app_logger.warning(f"Alpaca SafetyMonitor reconcile failed: {e}")
+
     def _on_settings_changed(self):
         if self.is_loading_config:
             return
@@ -128,6 +135,8 @@ class _MainWindowSettingsMixin:
         # disable actually stops it (the server outlives stop_capture by design).
         if self.is_capturing or self.web_server is not None:
             self._ensure_output_servers_started()
+
+        self._reconcile_alpaca_safety()
 
         self._update_start_button()
 

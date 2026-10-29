@@ -86,6 +86,8 @@ class ImageProcessorWorker(QThread):
         from services.ascom_safety_fsm import RoofSafetyFSM, UNSAFE_RESULT
         self._safety_fsm = RoofSafetyFSM(on_failure=self._on_safety_write_failure)
         self._unsafe_result = UNSAFE_RESULT
+        from services.alpaca_safety import AlpacaSafetyFeed
+        self._alpaca_safety = AlpacaSafetyFeed()
 
     def set_calibration_service(self, service):
         """Set calibration service for background accumulation"""
@@ -384,6 +386,7 @@ class ImageProcessorWorker(QThread):
                     self._safety_fsm.update(verdict, ascom_config)
                 except Exception as e:
                     app_logger.debug(f"ASCOM safety update skipped: {e}")
+            self._alpaca_safety.update(ml_results if _ml_produced_result else None, ml_config)
 
             # Star evidence for the observable-sky gate (issue #93), measured on
             # the same frozen pre-enhancement copy the calibration feed sees,

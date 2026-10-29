@@ -122,6 +122,7 @@ Two on-device models classify each captured frame: a **Roof Classifier** (open o
 | **Skip Sky Features When Roof Closed** | On | While the roof classifier reports Closed, star detection and the [All-Sky Overlay](All-Sky-Overlay) (including its background calibration) are paused. Turn this off if you have no roof, such as an open-air all-sky camera, so a mistaken "Closed" reading can't switch those features off. |
 | **ASCOM Safety File** | Off | Writes the roof status to a text file for NINA's GenericFile safety monitor. See below. |
 | **File Path** | `%LOCALAPPDATA%\PFRSentinel\RoofStatusFile.txt` | Where the safety file is written. Type a path or use **Browse**. |
+| **Alpaca Safety Monitor** | Off | Serves the same fail-safe roof status as an ASCOM Alpaca SafetyMonitor on port 11111 (next release). See [ML Models](ML-Models#alpaca-safety-monitor). |
 
 When ML is enabled, the tokens `{ROOF_STATUS}`, `{SKY_CONDITION}`, `{STARS_VISIBLE}` and `{STAR_DENSITY}` can be used in text overlays. See [Overlay Tokens](Overlay-Tokens).
 
