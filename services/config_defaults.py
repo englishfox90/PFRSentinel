@@ -189,6 +189,15 @@ DEFAULT_CONFIG = {
             "include_sky_condition": True,  # Include sky condition on separate line
             "min_confidence": 0.7,  # Only write if confidence >= this threshold
         },
+        # ASCOM Alpaca SafetyMonitor (NINA, INDIGO A1, any Alpaca client) — same confirmed verdict
+        "alpaca_safety_monitor": {
+            "enabled": False,
+            "bind": "127.0.0.1",  # This computer only; "0.0.0.0" shares it with the network
+            "port": 11111,
+            "discovery": True,  # Answer Alpaca discovery on UDP 32227
+            "min_confidence": 0.7,
+            "stale_after_seconds": 600,  # No frame for this long reads UNSAFE
+        },
     },
     
     # Developer Mode settings - for troubleshooting raw image data

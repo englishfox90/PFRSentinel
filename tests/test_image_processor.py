@@ -626,3 +626,55 @@ def test_a_static_frame_is_gated_without_a_star_scan(worker, tmp_path, monkeypat
     assert scans == []
     assert metadata_out[-1][REASON_KEY] == 'static'
     assert metadata_out[-1]['STAR_COUNT'] == 'N/A'
+
+
+def _alpaca_worker_state(worker):
+    from services.alpaca_safety import AlpacaSafetyFeed, SafetyState
+    state = SafetyState()
+    worker._alpaca_safety = AlpacaSafetyFeed(state)
+    worker._main_window = None
+    return state
+
+
+def test_alpaca_monitor_confirms_open_without_the_ascom_file(worker, tmp_path, monkeypatch):
+    """The Alpaca monitor runs its own FSM, so it certifies SAFE with the file output off."""
+    from services.observing_window import reset_roof_gate
+    import ui.controllers.image_processor as ip
+
+    state = _alpaca_worker_state(worker)
+
+    class _Svc:
+        def is_available(self):
+            return True
+
+        def initialize(self):
+            return True
+
+        def get_last_results(self):
+            return {'roof_status': 'Open', 'roof_confidence': 0.95}
+
+    monkeypatch.setattr(ip, 'get_ml_service', lambda: _Svc())
+    monkeypatch.setattr(ip, 'analyze_image_for_tokens', lambda arr, config=None: {})
+    cfg = _base_config(tmp_path, {'enabled': True,
+                                  'ascom_safety_file': {'enabled': False},
+                                  'alpaca_safety_monitor': {'enabled': True}})
+    reset_roof_gate()
+    try:
+        worker._process_task(ImageProcessingTask(
+            Image.new('RGB', (32, 32), (40, 40, 40)), {'FILENAME': 'x.png'}, cfg))
+        assert state.is_safe() is False
+        worker._process_task(ImageProcessingTask(
+            Image.new('RGB', (32, 32), (40, 40, 40)), {'FILENAME': 'x.png'}, cfg))
+    finally:
+        reset_roof_gate()
+    assert state.is_safe() is True
+
+
+def test_alpaca_monitor_reads_unsafe_when_ml_is_off(worker, tmp_path):
+    state = _alpaca_worker_state(worker)
+    cfg = _base_config(tmp_path, {'enabled': False, 'alpaca_safety_monitor': {'enabled': True}})
+    for _ in range(3):
+        worker._process_task(ImageProcessingTask(
+            Image.new('RGB', (32, 32), (40, 40, 40)), {'FILENAME': 'x.png'}, cfg))
+    assert state.is_stale() is False
+    assert state.is_safe() is False

@@ -135,6 +135,7 @@ class MainWindow(
         self._init_update_checker()
 
         self.load_config()
+        self._reconcile_alpaca_safety()
 
         # A coordinate saved without a hemisphere letter gets one question,
         # after the window is up and the panels show the migrated value.

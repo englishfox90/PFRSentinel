@@ -77,6 +77,7 @@ The navigation rail groups the pages:
 - **[Auto-exposure](Auto-Exposure)**: Calibration followed by per-frame adjustment and clipping protection for hands-off brightness control
 - **[ML scene classification](ML-Models)**: Local ONNX models for roof open/closed detection and sky conditions, with results available as overlay tokens
 - **ASCOM safety file**: ML roof status can be written to a file monitored by NINA's GenericFile safety monitor — see [ML Models](ML-Models)
+- **Alpaca safety monitor** (next release): the same roof status served as an ASCOM Alpaca SafetyMonitor for NINA, INDIGO A1 and other Alpaca clients — see [ML Models](ML-Models#alpaca-safety-monitor)
 - **[Overlay token system](Overlay-Tokens)**: Tokens for camera metadata, image statistics, weather data, and ML predictions
 - **Scheduled capture**: Capture only inside a time window, or at a different rate inside the window. Following the timelapse window with a margin is new in the next release
 - **[Weather integration](Weather-Setup)**: OpenWeatherMap data cached for 10 minutes, surfaced in overlays and the status strip

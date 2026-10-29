@@ -162,6 +162,29 @@ The file is designed to fail safe:
 
 Because the file only changes when frames are processed, it can only be as current as your capture interval.
 
+### Alpaca Safety Monitor
+
+> **New in the next release** — not available in version  or earlier.
+
+PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**, so any Alpaca client can use it directly: NINA (ASCOM Alpaca safety monitor), INDIGO A1 (ASCOM Alpaca Client driver), and others on Windows, macOS or Linux. No file or shared folder is needed. Like the file, it is fed in ZWO Camera mode only.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Alpaca Safety Monitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. |
+
+By default it listens on **this computer only**, at `127.0.0.1:11111`. In a client on the same computer, add the server by hand as `127.0.0.1:11111`.
+
+To share it with other machines, for example NINA on a separate PC, set `bind` to `0.0.0.0` (every network interface) or to one of this computer's addresses under `ml_models.alpaca_safety_monitor` in `config.json`. It then also answers Alpaca discovery (UDP port 32227) on that address, so clients on the network can find it on their own. Anyone who can reach that address can read the roof status and connect or disconnect the device, so only share it on a network you trust. The same config block sets the port, discovery and the staleness limit.
+
+It follows the same fail-safe rules as the file:
+
+- **Only a confident Open is safe**, at the same 70% confidence, and only after **two consecutive frames** agree. A Closed reading, a low-confidence reading, or a frame where ML is off or failed all count as unsafe.
+- **Starts unsafe.** It reports unsafe when PFR Sentinel starts and whenever it is switched back on, until two new confident Open frames arrive.
+- **Goes unsafe when frames stop.** If no frame has been processed for 10 minutes (camera stopped, capture stalled), it reports unsafe until frames return. Keep your capture interval well under that.
+- **Unsafe while disconnected.** As the Alpaca standard requires, a client that has not connected the device reads it as unsafe.
+
+It runs alongside the ASCOM safety file. You can use either or both, and each makes its own decision from the same frames.
+
 ---
 
 ## Runtime
