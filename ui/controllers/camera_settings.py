@@ -99,7 +99,11 @@ def apply_camera_settings(zwo_camera, config):
     wb_settings = config.get('white_balance', {})
     zwo_camera.wb_config = dict(wb_settings)
     zwo_camera.wb_config.setdefault('mode', 'asi_auto')
-    zwo_camera.wb_mode = wb_settings.get('mode', 'asi_auto')
+    zwo_camera.set_white_balance_live(
+        zwo_camera.wb_config['mode'],
+        profile.get('wb_r', DEFAULT_CAMERA_PROFILE['wb_r']),
+        profile.get('wb_b', DEFAULT_CAMERA_PROFILE['wb_b']),
+    )
 
     app_logger.debug(
         f"Settings updated live: exposure={exposure_ms}ms, gain={gain}, "

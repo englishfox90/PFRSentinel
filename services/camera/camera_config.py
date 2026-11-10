@@ -7,6 +7,8 @@ from other modules; call through the CameraConnection interface.
 import time
 from typing import Any, Dict, Optional, Tuple
 
+from .camera_white_balance import configure_white_balance  # re-exported for existing callers
+
 
 def _set_roi_with_retry(camera, width, height, image_type, log, attempts=5, delay=1.0):
     """Call camera.set_roi() and retry on ASI_ERROR_INVALID_SIZE.
@@ -135,33 +137,6 @@ def verify_camera_identity(camera, camera_name: Optional[str], log,
         return False
 
 
-def configure_white_balance(camera, asi, settings: Dict[str, Any], log) -> None:
-    """Configure white balance based on mode."""
-    wb_mode = settings.get('wb_mode', 'asi_auto')
-
-    if wb_mode == 'asi_auto':
-        try:
-            camera.set_control_value(asi.ASI_AUTO_MAX_BRIGHTNESS, 1)
-            log("  White balance: ASI Auto")
-        except Exception:
-            pass
-    else:
-        try:
-            camera.set_control_value(asi.ASI_AUTO_MAX_BRIGHTNESS, 0)
-        except Exception:
-            pass
-
-        if wb_mode == 'manual':
-            wb_r, wb_b = settings.get('wb_r', 75), settings.get('wb_b', 99)
-            camera.set_control_value(asi.ASI_WB_R, wb_r)
-            camera.set_control_value(asi.ASI_WB_B, wb_b)
-            log(f"  White balance: Manual (R={wb_r}, B={wb_b})")
-        elif wb_mode == 'gray_world':
-            camera.set_control_value(asi.ASI_WB_R, 50)
-            camera.set_control_value(asi.ASI_WB_B, 50)
-            log("  White balance: Gray World (software)")
-
-
 def configure_camera(camera, asi, settings: Dict[str, Any], supports_raw16: bool, log) -> Tuple[Any, int]:
     """
     Apply settings to a connected camera.
@@ -184,7 +159,7 @@ def configure_camera(camera, asi, settings: Dict[str, Any], supports_raw16: bool
         camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
         log(f"  Exposure: {exposure_us/1000000}s ({exposure_us/1000}ms)")
 
-    configure_white_balance(camera, asi, settings, log)
+    configure_white_balance(camera, asi, settings, log, controls=controls)
 
     camera.set_control_value(asi.ASI_BANDWIDTHOVERLOAD, 40)
     if 'offset' in settings:

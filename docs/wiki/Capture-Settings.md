@@ -134,13 +134,15 @@ This works whether or not timelapse recording is turned on.
 
 | Mode | Description |
 |------|-------------|
-| asi_auto | Leaves white balance to the camera SDK. |
-| manual | You set the **Red** (1–99, default 75) and **Blue** (1–99, default 99) channel values with sliders. |
+| asi_auto | Sets the camera's own default Red and Blue gains each time capture starts, with the camera SDK's automatic white balance switched on. |
+| manual | You set the camera's **Red** (1–99, default 75) and **Blue** (1–99, default 99) gains with sliders. About 50 is neutral. These are not 1.0× multipliers: a low value removes that colour, and Red and Blue both at 1 turn the image green. A warning appears under the sliders when either is below 10. |
 | gray_world | Default. A software algorithm balances the colour channels using mid-tone pixels. **Low %** (0–49, default 5) masks the darkest pixels and **High %** (51–100, default 100) masks the brightest. |
 
 The modes appear in the drop-down with the names shown above.
 
-Switching to **gray_world** takes effect on the running capture straight away. Any other white balance change (switching to **asi_auto** or **manual**, switching between them, or changing **Red**/**Blue**) takes effect the next time capture starts.
+White balance changes, including the **Red** and **Blue** sliders, take effect on the running capture straight away.
+
+> **New in the next release** — not available in version 3.7.9 or earlier. In 3.7.9 and earlier, **asi_auto** never set the camera's white balance, so the camera kept whatever another program had last left it on. The **manual** values were only written on a reconnect after a settings change. That could turn the image green partway through a night when the sliders were set very low.
 
 ### Advanced Settings
 
