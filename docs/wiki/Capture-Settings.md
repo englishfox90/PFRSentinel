@@ -33,8 +33,6 @@ On startup, PFR Sentinel scans for cameras automatically if it can find the SDK 
 
 #### Where the SDK library is looked for
 
-> **New in the next release** — not available in version 3.7.7 or earlier.
-
 If SDK Path is empty or points at a file that no longer exists, PFR Sentinel searches for the library itself, in this order, and the log says which copy it used:
 
 1. The PFR Sentinel program folder.
@@ -43,9 +41,9 @@ If SDK Path is empty or points at a file that no longer exists, PFR Sentinel sea
 
 #### ZWO cameras on macOS and Linux
 
-> **New in the next release** — not available in version 3.7.7 or earlier.
+Added in version v3.8.0.
 
-PFR Sentinel runs from source on macOS and Linux, and the ZWO library is not included there. Camera capture on these systems has not yet been confirmed on real hardware, so treat it as experimental.
+The packaged macOS app includes the ZWO library (see [macOS](macOS)). On Linux, and on a Mac copy run from source, the library is not included. Camera capture on these systems has not yet been confirmed on real hardware, so treat it as experimental.
 
 1. Get the library. On Linux, if INDI's ZWO driver (`libasi`) is installed, it is already there and nothing more is needed. Otherwise download the **ASI Camera SDK (Linux & Mac)** from the ZWO website's developer page, and take the file for your computer: `lib/mac/libASICamera2.dylib`, or `lib/x64/` (Intel/AMD PC) or `lib/armv8/` (64-bit Raspberry Pi and similar) for `libASICamera2.so`. Use a current SDK — old copies found elsewhere online do not know newer cameras such as the ASI676MC.
 2. Copy it into the `sdk` folder listed above, or anywhere you like and point **SDK Path** at it.
@@ -142,7 +140,7 @@ The modes appear in the drop-down with the names shown above.
 
 White balance changes, including the **Red** and **Blue** sliders, take effect on the running capture straight away.
 
-> **New in the next release** — not available in version 3.7.9 or earlier. In 3.7.9 and earlier, **asi_auto** never set the camera's white balance, so the camera kept whatever another program had last left it on. The **manual** values were only written on a reconnect after a settings change. That could turn the image green partway through a night when the sliders were set very low.
+Added in version v3.8.0. In 3.7.9 and earlier, **asi_auto** never set the camera's white balance, so the camera kept whatever another program had last left it on. The **manual** values were only written on a reconnect after a settings change. That could turn the image green partway through a night when the sliders were set very low.
 
 ### Advanced Settings
 

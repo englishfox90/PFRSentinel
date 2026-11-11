@@ -51,13 +51,13 @@ With the tray enabled, closing the window does not stop capture or any outputs; 
 
 **macOS.**
 
-> **New in the next release** — not available in version 3.7.9 or earlier.
+Added in version v3.8.0.
 
 The switch adds a login item for your user account (a launchd agent, `~/Library/LaunchAgents/com.pfrsentinel.app.plist`). No administrator password is needed. If PFR Sentinel crashes, macOS starts it again after 30 seconds; quitting it yourself from the menu bar icon or the window is left alone. A change takes effect at your next login, not straight away.
 
 **Linux.**
 
-> **New in the next release** — not available in version 3.7.9 or earlier.
+Added in version v3.8.0.
 
 The switch adds a desktop autostart entry (`~/.config/autostart/pfrsentinel.desktop`), which GNOME, KDE, XFCE and other desktops run when you log in. There is no relaunch after a crash on Linux.
 

@@ -1,6 +1,6 @@
 # PFR Sentinel on macOS
 
-> **New in the next release** — not available in version 3.7.9 or earlier.
+Added in version v3.8.0.
 
 PFR Sentinel runs on Apple-silicon Macs (M1 and later) as a regular app, `PFR Sentinel.app`. Windows remains the main platform; on a Mac a few Windows features are missing (see [What's different](#whats-different)).
 
