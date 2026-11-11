@@ -77,7 +77,7 @@ Recording follows the roof state from the roof classifier. Turn on **Enable ML A
 - **Sunset / Sunrise** and **Fixed Times** produce one video per window. An overnight window is not split at midnight.
 - **Always On** starts a new video at local noon, so each video holds one whole night, from noon to noon. A video that starts after midnight (after a restart, say) is named after the evening the night began.
 
-  > **New in the next release** — not available in version 3.7.9 or earlier. In 3.7.9 and earlier, **Always On** started a new video at midnight, which split each night into two files.
+  > Added in version v3.8.0. In 3.7.9 and earlier, **Always On** started a new video at midnight, which split each night into two files.
 - **Roof Open** starts a new video each time the roof opens.
 
 ---
