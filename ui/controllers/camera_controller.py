@@ -261,6 +261,7 @@ class CameraControllerQt(QObject):
                 max_exposure_sec=params['max_exposure_ms'] / 1000.0,
                 bayer_pattern=params['bayer_pattern'],
                 wb_config=params['wb_config'],
+                wb_mode=params['wb_config']['mode'],
                 scheduled_capture_mode=params['scheduled_capture_mode'],
                 scheduled_start_time=params['scheduled_start_time'],
                 scheduled_end_time=params['scheduled_end_time'],

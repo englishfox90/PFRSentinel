@@ -14,6 +14,7 @@ from ._schedule_window_source import ScheduleWindowSourceRows
 from ._missing_camera_notice import MissingCameraNotice
 from services.logger import app_logger
 from services.config import DEFAULT_CAMERA_PROFILE
+from services.camera.camera_white_balance import low_gain_warning
 from services.host_platform import zwo_sdk_library_name, zwo_sdk_dialog_filter
 
 _WB_MODES = ["asi_auto", "manual", "gray_world"]
@@ -324,6 +325,20 @@ class CameraSettingsWidget(QWidget):
         self.wb_b_slider.valueChanged.connect(lambda v: self.wb_b_slider.setToolTip(f"Blue channel white balance: {v}"))
         manual_wb_layout.addWidget(FormRow("Blue", self.wb_b_slider))
 
+        wb_scale = CaptionLabel(
+            "Camera gains, 1-99 with about 50 neutral. Low values remove that colour.")
+        wb_scale.setStyleSheet(f"color: {Colors.text_muted};")
+        wb_scale.setWordWrap(True)
+        manual_wb_layout.addWidget(wb_scale)
+
+        self.wb_low_warning = CaptionLabel()
+        self.wb_low_warning.setStyleSheet(f"color: {Colors.warning_text};")
+        self.wb_low_warning.setWordWrap(True)
+        self.wb_low_warning.hide()
+        manual_wb_layout.addWidget(self.wb_low_warning)
+        self.wb_r_slider.valueChanged.connect(self._refresh_wb_warning)
+        self.wb_b_slider.valueChanged.connect(self._refresh_wb_warning)
+
         self.manual_wb_settings.hide()
         card.add_widget(self.manual_wb_settings)
 
@@ -440,6 +455,11 @@ class CameraSettingsWidget(QWidget):
         if self._can_save:
             self._save_to_camera_profile(max_exposure_ms=value * 1000)
             self.settings_changed.emit()
+
+    def _refresh_wb_warning(self, _value=None):
+        warning = low_gain_warning(self.wb_r_slider.value(), self.wb_b_slider.value())
+        self.wb_low_warning.setText(f"⚠ {warning}." if warning else "")
+        self.wb_low_warning.setVisible(bool(warning))
 
     def _on_wb_changed(self):
         if self._can_save:

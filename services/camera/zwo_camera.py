@@ -11,6 +11,7 @@ import time
 from .camera_calibration import CameraCalibration
 from .camera_connection import CameraConnection
 from .camera_utils import is_within_scheduled_window as check_scheduled_window
+from .camera_white_balance import configure_white_balance
 from ..logger import app_logger
 from . import zwo_capture_worker
 
@@ -614,7 +615,11 @@ class ZWOCamera:
         self.capture_interval = max(1.0, seconds)
     
     def _set_control_live(self, control, value, success_msg=None) -> bool:
-        """Apply a single control value to the live camera under sdk_lock.
+        """Apply a single control value to the live camera under sdk_lock."""
+        return self._run_live(lambda cam: cam.set_control_value(control, value), success_msg)
+
+    def _run_live(self, write, success_msg=None) -> bool:
+        """Run ``write(camera)`` against the live camera under sdk_lock.
 
         Live setting writes originate on the UI thread while the capture worker
         is running; both touch the SDK, so they must serialize on sdk_lock or
@@ -630,7 +635,7 @@ class ZWOCamera:
         try:
             if not self.camera:
                 return False
-            self.camera.set_control_value(control, value)
+            write(self.camera)
             if success_msg:
                 self.log(success_msg)
             return True
@@ -639,6 +644,19 @@ class ZWOCamera:
             return False
         finally:
             lock.release()
+
+    def set_white_balance_live(self, mode, wb_r, wb_b):
+        """Store the white balance and write it to the live camera.
+
+        Every reconnect re-applies the stored values, so they must follow the
+        profile — a stale R/B here came back on the next reconnect.
+        """
+        if (mode, wb_r, wb_b) == (self.wb_mode, self.white_balance_r, self.white_balance_b):
+            return
+        self.wb_mode, self.white_balance_r, self.white_balance_b = mode, wb_r, wb_b
+        settings = {'wb_mode': mode, 'wb_r': wb_r, 'wb_b': wb_b}
+        self._run_live(lambda cam: configure_white_balance(
+            cam, self.asi, settings, self.log, controls=cam.get_controls()))
 
     def set_offset_live(self, offset):
         """Set brightness/offset, applying live to the camera under sdk_lock."""

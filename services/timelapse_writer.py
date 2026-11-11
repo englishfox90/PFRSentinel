@@ -19,7 +19,7 @@ from .ffmpeg_utils import is_ffmpeg_available, get_ffmpeg_path
 from .timelapse_finalizer import finalize_session, finalize_in_background, reap_in_background
 from .timelapse_frame_pump import FramePump
 from .timelapse_window import (
-    WindowCache, fixed_window, sun_window,
+    WindowCache, fixed_window, sun_window, observing_night,
     to_local_naive as _to_local_naive,  # re-exported for existing callers
 )
 
@@ -197,13 +197,13 @@ class TimelapseWriter:
                 if self._process is not None and self._process.poll() is not None:
                     self._handle_unexpected_exit(now)
 
-                # 'always' mode rolls over at midnight (one video per calendar day).
+                # 'always' mode rolls over at local noon (one video per night).
                 # All other modes are window-driven: only start when not already
                 # recording — midnight does NOT split an overnight session.
                 mode = self._config.get('window_mode', 'sun')
                 needs_new_session = (
                     self._process is None or
-                    (mode == 'always' and self._session_date != now.date())
+                    (mode == 'always' and self._session_date != observing_night(now))
                 )
                 if needs_new_session:
                     # Crash-loop guard: if recent starts failed immediately, wait
@@ -467,7 +467,7 @@ class TimelapseWriter:
                 **kwargs,
             )
             self._frame_size = frame_size
-            self._session_date = now.date()
+            self._session_date = observing_night(now)
             self._session_start = now
             self._session_path = output_path
             self._frame_count = 0
@@ -602,13 +602,19 @@ class TimelapseWriter:
         """
         Build output path: {output_dir}/timelapse_YYYYMMDD.mp4
 
+        Always On names the file after the night (see observing_night), so a
+        session restarted at 02:00 sits beside the one that began that evening.
+
         If a file for that date already exists (e.g. roof closed and reopened),
         appends _2, _3, … to avoid overwriting the previous session's video.
         """
         output_dir = self._config.get('output_dir', '')
         if not output_dir:
             output_dir = os.path.join(get_app_data_dir(), 'timelapse')
-        date_str = now.strftime('%Y%m%d')
+        if self._config.get('window_mode', 'sun') == 'always':
+            date_str = observing_night(now).strftime('%Y%m%d')
+        else:
+            date_str = now.strftime('%Y%m%d')
         base = os.path.join(output_dir, f'timelapse_{date_str}.mp4')
         if not os.path.exists(base):
             return base

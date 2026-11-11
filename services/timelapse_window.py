@@ -14,7 +14,7 @@ on the next UTC date, so the previous evening's dusk came back and the window
 never closed at dawn (issue #14). Every call here passes the *local* zone so
 ``day`` means the local calendar date.
 """
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from typing import Tuple
 
 from .logger import app_logger
@@ -30,6 +30,23 @@ def to_local_naive(dt: datetime, tzinfo=None) -> datetime:
     ``astimezone(None)`` converts to local.
     """
     return dt.astimezone(tzinfo).replace(tzinfo=None)
+
+
+# Always On rolls over at local noon, not midnight: midnight falls in the middle
+# of every night's recording and split each night into two videos. Same cutoff
+# as the image library's nights (services.library.sessions.NIGHT_CUTOFF_HOUR).
+ALWAYS_ROLLOVER_TIME = time(12, 0)
+
+
+def observing_night(now: datetime) -> date:
+    """Date of the evening the night containing ``now`` began on.
+
+    Local noon to the next local noon is one night, so 02:00 on the 7th
+    belongs to the 6th.
+    """
+    if now.time() < ALWAYS_ROLLOVER_TIME:
+        return now.date() - timedelta(days=1)
+    return now.date()
 
 
 def _local_tzinfo(tzinfo=None):
@@ -48,10 +65,8 @@ def window_for_day(config: dict, day: date, tzinfo=None) -> Tuple[datetime, date
     mode = config.get('window_mode', 'sun')
 
     if mode == 'always':
-        # Full day: midnight to next midnight
-        start = datetime.combine(day, datetime.min.time())
-        end = datetime.combine(day + timedelta(days=1), datetime.min.time())
-        return start, end
+        start = datetime.combine(day, ALWAYS_ROLLOVER_TIME)
+        return start, start + timedelta(days=1)
 
     if mode == 'fixed':
         return fixed_window(config, day)
