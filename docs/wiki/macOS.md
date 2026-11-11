@@ -12,17 +12,27 @@ PFR Sentinel runs on Apple-silicon Macs (M1 and later) as a regular app, `PFR Se
 
 ## Installing
 
-1. Download the `.dmg` (see below for where).
+1. Download `PFRSentinel-<version>-macos-arm64.dmg` from the [latest release](https://github.com/englishfox90/PFRSentinel/releases/latest).
 2. Open it and drag **PFR Sentinel** onto **Applications**.
-3. The app is not notarized by Apple yet, so the first time you open a downloaded copy macOS says it "cannot be opened" or "is damaged". Clear the download flag once in Terminal, then open the app normally:
+3. The first time you open it, macOS says it "cannot be opened" or "is damaged". Clear the download flag once in Terminal, then open the app normally:
 
    ```bash
    xattr -dr com.apple.quarantine "/Applications/PFR Sentinel.app"
    ```
 
-   A copy you built yourself with `build_sentinel_macos.sh` doesn't need this.
+### Why that step is needed
 
-Dev builds are published with the Windows ones: the newest is always at the [dev-latest prerelease](https://github.com/englishfox90/PFRSentinel/releases/tag/dev-latest) as `PFRSentinel-dev-unsigned-macos-arm64.dmg`, and each build is announced, with its download link, in the "Dev builds" thread under [Discussions](https://github.com/englishfox90/PFRSentinel/discussions). There is no macOS release build yet.
+Apple only opens downloaded apps without a warning when they are notarized, which needs a paid Apple Developer account. PFR Sentinel is open source and built in public on GitHub, and it isn't notarized yet. The Terminal command removes the "downloaded from the internet" flag from this one app. It doesn't turn off Gatekeeper or change any other security setting, and it only needs running once per download.
+
+A copy you built yourself with `build_sentinel_macos.sh` doesn't need it, because it was never downloaded.
+
+### Updating
+
+PFR Sentinel tells you when a new version is out and opens its release page. Download the new `.dmg`, drag the app onto **Applications** to replace the old one, and run the `xattr` command again. Your settings, logs and calibration are kept, because they live outside the app (see [Where things are kept](#where-things-are-kept)).
+
+### Dev builds
+
+To try changes before they're released, dev builds are published with the Windows ones: the newest is always at the [dev-latest prerelease](https://github.com/englishfox90/PFRSentinel/releases/tag/dev-latest) as `PFRSentinel-dev-unsigned-macos-arm64.dmg`, and each build is announced, with its download link, in the "Dev builds" thread under [Discussions](https://github.com/englishfox90/PFRSentinel/discussions). Install them the same way.
 
 ## Where things are kept
 
