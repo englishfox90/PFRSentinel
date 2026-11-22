@@ -12,6 +12,16 @@ from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, SwitchRow
 from ._camera_settings_widget import CameraSettingsWidget
+from services.camera.camera_source import ALPACA, ZWO, camera_source
+from services.camera.capabilities import static_capabilities
+
+# Segment key -> (capture_mode, camera_source); watch leaves camera_source alone.
+_SEGMENTS = {'watch': ('watch', None), ZWO: ('camera', ZWO), ALPACA: ('camera', ALPACA)}
+_MODE_DESCRIPTIONS = {
+    'watch': "Watch a folder for new images written by another program, such as NINA.",
+    ZWO: "Capture directly from a ZWO ASI camera on USB.",
+    ALPACA: "Capture from a camera on an ASCOM Alpaca server, such as ASCOM Remote, over the network.",
+}
 
 
 class CaptureSettingsPanel(QScrollArea):
@@ -19,6 +29,8 @@ class CaptureSettingsPanel(QScrollArea):
     detect_cameras_clicked = Signal()
     raw16_mode_changed = Signal(bool)
     revive_camera_clicked = Signal(str)
+    alpaca_discover_clicked = Signal()
+    alpaca_test_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,17 +66,15 @@ class CaptureSettingsPanel(QScrollArea):
         mode_header.setStyleSheet(f"color: {Colors.text_primary};")
         mode_layout.addWidget(mode_header)
 
-        mode_desc = CaptionLabel(
-            "Choose between monitoring a directory for new images or capturing directly from a ZWO camera."
-        )
-        mode_desc.setStyleSheet(f"color: {Colors.text_muted};")
-        mode_desc.setWordWrap(True)
-        mode_layout.addWidget(mode_desc)
+        self.mode_desc = CaptionLabel(_MODE_DESCRIPTIONS[ZWO])
+        self.mode_desc.setStyleSheet(f"color: {Colors.text_muted};")
+        self.mode_desc.setWordWrap(True)
+        mode_layout.addWidget(self.mode_desc)
 
         self.mode_selector = SegmentedWidget()
-        self.mode_selector.addItem('watch', 'Directory Watch', onClick=lambda: self._on_mode_changed('watch'))
-        self.mode_selector.addItem('camera', 'ZWO Camera', onClick=lambda: self._on_mode_changed('camera'))
-        self.mode_selector.setCurrentItem('camera')
+        for key, text in (('watch', 'Directory Watch'), (ZWO, 'ZWO Camera'), (ALPACA, 'Alpaca Camera')):
+            self.mode_selector.addItem(key, text, onClick=lambda k=key: self._on_mode_changed(k))
+        self.mode_selector.setCurrentItem(ZWO)
         mode_layout.addWidget(self.mode_selector)
 
         layout.addWidget(mode_card)
@@ -79,6 +89,8 @@ class CaptureSettingsPanel(QScrollArea):
         self.camera_widget.detect_cameras_clicked.connect(self.detect_cameras_clicked)
         self.camera_widget.raw16_mode_changed.connect(self.raw16_mode_changed)
         self.camera_widget.revive_camera_clicked.connect(self.revive_camera_clicked)
+        self.camera_widget.alpaca_discover_clicked.connect(self.alpaca_discover_clicked)
+        self.camera_widget.alpaca_test_clicked.connect(self.alpaca_test_clicked)
         self.settings_stack.addWidget(self.camera_widget)
 
         self.settings_stack.setCurrentIndex(1)
@@ -90,10 +102,21 @@ class CaptureSettingsPanel(QScrollArea):
     def _can_save(self):
         return not self._loading_config and self.main_window and hasattr(self.main_window, 'config')
 
-    def _on_mode_changed(self, mode: str):
-        self.settings_stack.setCurrentIndex(0 if mode == 'watch' else 1)
+    def _show_segment(self, key: str):
+        self.mode_desc.setText(_MODE_DESCRIPTIONS[key])
+        self.settings_stack.setCurrentIndex(0 if key == 'watch' else 1)
+
+    def _on_mode_changed(self, key: str):
+        mode, source = _SEGMENTS.get(key, _SEGMENTS[ZWO])
+        self._show_segment(key)
+        if source is not None:
+            self.camera_widget.apply_capabilities(static_capabilities(source))
         if self._can_save:
-            self.main_window.config.set('capture_mode', mode)
+            config = self.main_window.config
+            config.set('capture_mode', mode)
+            if source is not None:
+                config.set('camera_source', source)
+                self.camera_widget.load_from_config(config)
             self.settings_changed.emit()
 
     def _create_watch_settings(self) -> QWidget:
@@ -154,9 +177,9 @@ class CaptureSettingsPanel(QScrollArea):
     def load_from_config(self, config):
         self._loading_config = True
         try:
-            mode = config.get('capture_mode', 'camera')
-            self.mode_selector.setCurrentItem(mode)
-            self.settings_stack.setCurrentIndex(0 if mode == 'watch' else 1)
+            key = 'watch' if config.get('capture_mode', 'camera') == 'watch' else camera_source(config)
+            self.mode_selector.setCurrentItem(key)
+            self._show_segment(key)
 
             self.watch_dir_input.setText(config.get('watch_directory', ''))
             self.recursive_switch.set_checked(config.get('watch_recursive', True))
@@ -192,8 +215,25 @@ class CaptureSettingsPanel(QScrollArea):
         self.camera_widget.camera_combo.setCurrentIndex(-1)
 
     def set_capture_active(self, active: bool):
-        """Lock the camera picker while capturing (switching cameras is Stop→Start)."""
+        """Lock the camera picker and the source while capturing (Stop → change → Start):
+        stop reads the mode from config, so a mid-capture switch would orphan the camera."""
+        self.mode_selector.setEnabled(not active)
         self.camera_widget.set_capture_active(active)
+
+    def apply_camera_capabilities(self, caps):
+        self.camera_widget.apply_capabilities(caps)
+
+    def set_alpaca_discovering(self, active: bool):
+        self.camera_widget.alpaca_card.set_discovering(active)
+
+    def set_alpaca_devices(self, devices: list, error: str = ""):
+        self.camera_widget.alpaca_card.set_devices(devices, error)
+
+    def set_alpaca_testing(self, active: bool):
+        self.camera_widget.alpaca_card.set_testing(active)
+
+    def set_alpaca_test_result(self, ok: bool, message: str, details: dict):
+        self.camera_widget.alpaca_card.set_test_result(ok, message, details)
 
     def update_camera_capabilities(self, supports_raw16: bool, bit_depth: int):
         self.camera_widget.update_camera_capabilities(supports_raw16, bit_depth)
