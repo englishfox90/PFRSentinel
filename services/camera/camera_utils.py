@@ -211,6 +211,20 @@ def _write_dst(src: np.ndarray, dst) -> np.ndarray:
     return src
 
 
+def _passthrough_rgb(raw_data, width, height, bayer_pattern, bit_depth, return_raw16,
+                     dst_rgb8, dst_rgb16):
+    dtype = np.uint16 if bit_depth == 16 else np.uint8
+    if bayer_pattern == 'RGB':
+        img_rgb = np.frombuffer(raw_data, dtype=dtype).reshape((height, width, 3)).copy()
+    else:
+        plane = np.frombuffer(raw_data, dtype=dtype).reshape((height, width))
+        img_rgb = np.repeat(plane[:, :, None], 3, axis=2)
+    if bit_depth == 16:
+        img_rgb_raw16 = _write_dst(img_rgb, dst_rgb16) if return_raw16 else None
+        return _write_dst((img_rgb >> 8).astype(np.uint8), dst_rgb8), img_rgb_raw16
+    return _write_dst(img_rgb, dst_rgb8), None
+
+
 def debayer_raw_image(raw_data, width, height, bayer_pattern='BGGR', bit_depth=8, return_raw16=False,
                       dst_rgb8=None, dst_rgb16=None):
     """
@@ -230,7 +244,14 @@ def debayer_raw_image(raw_data, width, height, bayer_pattern='BGGR', bit_depth=8
         tuple: (img_rgb_uint8, img_rgb_raw16_or_None)
             - img_rgb_uint8: Always uint8 RGB array for display/processing pipeline
             - img_rgb_raw16_or_None: uint16 RGB if bit_depth=16 AND return_raw16=True, else None
+
+    ``'MONO'`` (one plane, grey copied to R=G=B) and ``'RGB'`` (three planes,
+    row-major H*W*3, as an Alpaca SensorType Color camera delivers) are not
+    mosaics and skip the debayer.
     """
+    if bayer_pattern in ('MONO', 'RGB'):
+        return _passthrough_rgb(raw_data, width, height, bayer_pattern, bit_depth,
+                                return_raw16, dst_rgb8, dst_rgb16)
     if bit_depth == 16:
         img_array = np.frombuffer(raw_data, dtype=np.uint16).reshape((height, width))
     else:
