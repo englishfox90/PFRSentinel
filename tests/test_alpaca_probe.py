@@ -12,7 +12,7 @@ from tests.alpaca_rig import alpaca_settings
 DETAIL_KEYS = {
     "name", "unique_id", "device_number", "sensor_type", "bayer_pattern",
     "physical_bayer_pattern", "width", "height", "max_adu", "bit_depth", "gain_range",
-    "offset_range", "exposure_range_s", "interface_version", "driver_info", "imagebytes",
+    "offset_range", "exposure_range_s", "interface_version", "driver_info", "imagebytes", "gains",
 }
 
 
@@ -27,6 +27,14 @@ def test_probe_summarises_the_camera():
     assert d["unique_id"] == cam.spec.unique_id and d["device_number"] == 0
     assert d["gain_range"] == (0, 570) and d["interface_version"] == 3
     assert d["imagebytes"] is None
+    assert d["gains"] == ()
+
+
+def test_probe_lists_named_gains_for_the_gain_hint():
+    net, _cam, _clock = make_fake(gain_mode="list")
+    d = probe_alpaca_camera(alpaca_settings(net), session_factory=net.session).details
+    assert len(d["gains"]) == d["gain_range"][1] + 1 >= 2
+    assert all(isinstance(name, str) and name for name in d["gains"])
 
 
 def test_probe_never_configures_and_releases_only_when_asked():

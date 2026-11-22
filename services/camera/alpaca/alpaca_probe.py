@@ -68,6 +68,7 @@ def _details(conn: AlpacaConnection) -> dict:
         "max_adu": info.max_adu,
         "bit_depth": info.sensor_bit_depth,
         "gain_range": info.gain_range,
+        "gains": tuple(info.gains or ()),
         "offset_range": info.offset_range,
         "exposure_range_s": info.exposure_range_s,
         "interface_version": info.interface_version,
