@@ -1,6 +1,6 @@
 # PFR Sentinel
 
-PFR Sentinel is a live camera monitoring and image overlay system designed for observatories. It captures images — either from a watched directory or directly from a ZWO ASI camera — applies processing, auto-stretch and overlays, then distributes the result through several outputs at once. It can also start and stop capture from a N.I.N.A. sequence, keep a browsable archive of every night, and watch the sky for meteors. Built for 24/7 unattended operation on Windows.
+PFR Sentinel is a live camera monitoring and image overlay system designed for observatories. It captures images — from a watched directory, directly from a ZWO ASI camera, or (from the next release) from an ASCOM Alpaca camera on the network — applies processing, auto-stretch and overlays, then distributes the result through several outputs at once. It can also start and stop capture from a N.I.N.A. sequence, keep a browsable archive of every night, and watch the sky for meteors. Built for 24/7 unattended operation on Windows.
 
 ---
 
@@ -24,6 +24,8 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 ## Capture Modes
 
 **ZWO Camera** captures directly from a connected ZWO ASI camera via the ASI SDK. This mode supports auto-exposure, gain control, white balance, RAW16 mode, per-camera settings, automatic recovery when the camera drops off USB, and scheduled capture (from the next release, a schedule can also follow the timelapse window). See [Capture Settings](Capture-Settings).
+
+**Alpaca Camera** captures from a camera served over the network by an ASCOM Alpaca server, such as ASCOM Remote on the observatory PC. Auto-exposure, scheduled capture, outputs, timelapse and the all-sky overlay work as in ZWO Camera mode; the USB and SDK settings don't apply. New in the next release, and not yet tested with real camera drivers. See [Alpaca Camera](Alpaca-Camera).
 
 **Directory Watch** monitors a folder for new images written by other capture software (NINA, SharpCap, or anything else). PFR Sentinel detects each file as it lands, reads any metadata file saved alongside it, processes the image, and moves on.
 
@@ -85,7 +87,7 @@ The navigation rail groups the pages:
 - **[Meteor tracker](Meteor-Detection)**: Detects meteor trails across a stack of frames, rejects planes and persistent artefacts, and keeps thumbnails for review
 - **[Image Library](Image-Library)**: A per-night archive with a scrubber, roof and cloud condition band, and live updates while capturing
 - **[NINA integration](NINA-Integration)**: Install the NINA plugin from the Output tab; capture follows your sequence
-- **Camera recovery**: Reconnects a dropped camera, resets the USB device, and restarts the app if needed
+- **Camera recovery**: Reconnects a dropped camera, resets the USB device (ZWO cameras), and restarts the app if needed
 - **Per-camera profiles**: Exposure, gain, white balance, and other settings stored independently for each camera
 - **[Diagnostics Export](Diagnostics-Export)**: One ZIP with logs, redacted settings and a fresh raw frame to attach to a bug report (new in the next release)
 - **[Output Framing](Image-Processing#output-framing)**: Crop saved and published images to a box you draw, while detection and calibration keep the full frame (new in the next release)
@@ -95,6 +97,7 @@ The navigation rail groups the pages:
 ## System Requirements
 
 - Windows 10 or later, or an Apple-silicon Mac ([macOS](macOS))
+- For Alpaca camera mode (next release): an ASCOM Alpaca server for the camera, reachable from this computer
 - For ZWO camera mode: the ZWO camera library (bundled with the app on Windows and macOS, or a folder you choose). On Linux, see [ZWO cameras on macOS and Linux](Capture-Settings#zwo-cameras-on-macos-and-linux)
 - For timelapse: ffmpeg (installable via winget from the Timelapse tab)
 - For weather data: a free OpenWeatherMap API key (see [Weather Setup](Weather-Setup))

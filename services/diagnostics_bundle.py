@@ -42,7 +42,40 @@ def redact_config(data):
     Empty values stay empty so the reader can tell "not configured" from
     "configured but hidden" — that distinction is often the whole diagnosis.
     """
-    return _redact(copy.deepcopy(data))
+    return _redact_alpaca(_redact(copy.deepcopy(data)))
+
+
+_LOOPBACK_HOSTS = ('', 'localhost', '127.0.0.1', '::1')
+ALPACA_PROFILE_PREFIX = 'alpaca:'
+
+
+def _redact_alpaca(data):
+    """Mask the Alpaca camera's address and UniqueID by path.
+
+    A generic ``host`` marker would also hide ``webserver_host`` (0.0.0.0 vs
+    127.0.0.1 is useful support information), so these are matched by where
+    they sit. A loopback host stays visible: it reveals nothing and is the
+    usual cause of pointing the camera at PFR's own SafetyMonitor port. The
+    profile keys under ``camera_profiles`` carry the same identity.
+    """
+    if not isinstance(data, dict):
+        return data
+    alpaca = data.get('alpaca_camera')
+    if isinstance(alpaca, dict):
+        host = str(alpaca.get('host') or '').strip()
+        if host.lower() not in _LOOPBACK_HOSTS:
+            alpaca['host'] = REDACTED
+        if alpaca.get('unique_id') not in ('', None):
+            alpaca['unique_id'] = REDACTED
+    profiles = data.get('camera_profiles')
+    if isinstance(profiles, dict):
+        masked = {}
+        for n, (key, value) in enumerate(profiles.items(), 1):
+            if str(key).startswith(ALPACA_PROFILE_PREFIX):
+                key = f"{ALPACA_PROFILE_PREFIX}{REDACTED}-{n}"
+            masked[key] = value
+        data['camera_profiles'] = masked
+    return data
 
 
 def _redact(node):

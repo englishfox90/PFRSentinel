@@ -22,6 +22,14 @@ from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
 from ..theme.styles import paint_border_lines
 
+CONNECTED_IDLE_LABEL = "Connected · idle"
+# A running session's link_state (set by the capture loop) -> pill text while
+# capture is on but frames have stopped. 'ok' shows the frame count.
+LINK_STATE_LABELS = {
+    'reconnecting': "Reconnecting to camera…",
+    'waiting': "Camera lost · retrying",
+}
+
 
 class AppBar(QFrame):
     """Slim application bar: brand · sprite · bell · primary action."""
@@ -34,6 +42,8 @@ class AppBar(QFrame):
         super().__init__(parent)
         self._is_capturing = False
         self._camera_connected = False
+        self._idle_label = CONNECTED_IDLE_LABEL
+        self._link_state = 'ok'
         self._action_mode = 'start'   # 'start' | 'stop' | 'connect'
         self._action_key = None       # skips redundant button rebuilds on the 1 Hz refresh
         self._start_enabled = True
@@ -220,12 +230,20 @@ class AppBar(QFrame):
         """Drive the strip's capture/camera pill from current capture state."""
         if not self._status_strip:
             return
-        if self._is_capturing:
+        if self._is_capturing and self._link_state in LINK_STATE_LABELS:
+            self._status_strip.set_capture_state('reconnecting', LINK_STATE_LABELS[self._link_state])
+        elif self._is_capturing:
             self._status_strip.set_capture_state('capturing')
         elif self._camera_connected:
-            self._status_strip.set_capture_state('idle', "Connected · idle")
+            self._status_strip.set_capture_state('idle', self._idle_label)
         else:
             self._status_strip.set_capture_state('disconnected', "Disconnected")
+
+    def refresh_camera_pill(self):
+        """Push the pill and the primary action now instead of waiting for the
+        next status tick (a click in between would hit the stale action)."""
+        self.update_primary_action(self._is_capturing, self._camera_connected)
+        self._push_pill_state()
 
     def set_capturing(self, capturing: bool):
         """Update button + pill for capturing mode."""
@@ -243,9 +261,15 @@ class AppBar(QFrame):
         if self._status_strip:
             self._status_strip.set_frame_count(count)
 
-    def set_camera_connected(self, connected: bool):
-        """Window-supplied readiness flag (covers camera-available + watch mode)."""
+    def set_camera_connected(self, connected: bool, idle_label: str = None):
+        """Window-supplied readiness flag (covers camera-available + watch mode).
+
+        ``idle_label`` replaces "Connected · idle" on the pill when the camera
+        is ready to start but nothing has answered yet (an Alpaca server that
+        was configured but never reached).
+        """
         self._camera_connected = connected
+        self._idle_label = idle_label or CONNECTED_IDLE_LABEL
 
     def update_status(self, is_capturing: bool, image_count: int,
                       camera_controller=None, live_panel=None):
@@ -253,6 +277,8 @@ class AppBar(QFrame):
         self.update_image_count(image_count)
 
         self.update_primary_action(is_capturing, self._camera_connected)
+        session = getattr(camera_controller, 'zwo_camera', None) if is_capturing else None
+        self._link_state = getattr(session, 'link_state', 'ok') or 'ok'
 
         if is_capturing:
             if camera_controller and hasattr(camera_controller, 'zwo_camera'):

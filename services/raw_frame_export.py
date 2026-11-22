@@ -38,10 +38,16 @@ FITS_HEADER_KEYS = (
 
 
 def bayer_array(metadata):
-    """The cached sensor mosaic as a 2-D array, or None when not rebuildable."""
+    """The cached sensor mosaic as a 2-D array, or None when not rebuildable.
+
+    An ``'RGB'`` frame (Alpaca SensorType Color) has no mosaic: None. A
+    ``'MONO'`` frame is returned as its single plane.
+    """
     if not is_rebuildable(metadata):
         return None
-    width, height, bit_depth, _pattern = metadata['RAW_GEOMETRY']
+    width, height, bit_depth, pattern = metadata['RAW_GEOMETRY']
+    if pattern == 'RGB':
+        return None
     dtype = np.uint16 if bit_depth == 16 else np.uint8
     return np.frombuffer(metadata['RAW_BAYER'], dtype=dtype).reshape((height, width))
 
@@ -88,10 +94,12 @@ def export_raw_frame(dest_dir, metadata, pil_image=None, stem=None) -> dict:
             np.save(npy_path, mosaic)
             files.append(npy_path)
             notes.append('FITS write failed: Bayer mosaic saved as .npy instead')
+    elif _geometry_pattern(metadata) == 'RGB':
+        notes.append('Camera delivers RGB planes, not a Bayer mosaic: FITS skipped')
     else:
         notes.append('No Bayer data cached (watch mode or no frame yet): FITS skipped')
 
-    if pil_image is None and mosaic is not None:
+    if pil_image is None and is_rebuildable(metadata):
         # Index rather than unpack: the rebuilt metadata carries the RAW16
         # companion array, and binding it would keep it alive through the save.
         pil_image = rebuild_frame(metadata)[0]
@@ -111,13 +119,22 @@ def export_raw_frame(dest_dir, metadata, pil_image=None, stem=None) -> dict:
     return {'files': files, 'notes': notes}
 
 
+def _geometry_pattern(metadata):
+    geometry = metadata.get('RAW_GEOMETRY') if is_rebuildable(metadata) else None
+    return geometry[3] if geometry else None
+
+
 def _write_bayer_fits(path, mosaic, metadata) -> bool:
     header = {}
     for meta_key, fits_key in FITS_HEADER_KEYS:
         value = metadata.get(meta_key)
         if value is not None:
             header[fits_key] = str(value) if not isinstance(value, (int, float)) else value
-    header['COMMENT'] = 'PFR Sentinel raw sensor mosaic - unscaled, not debayered'
+    if _geometry_pattern(metadata) == 'MONO':
+        header.pop('BAYERPAT', None)
+        header['COMMENT'] = 'PFR Sentinel raw monochrome frame - unscaled'
+    else:
+        header['COMMENT'] = 'PFR Sentinel raw sensor mosaic - unscaled, not debayered'
     try:
         write_fits(path, mosaic, header)
     except Exception as e:

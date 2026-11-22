@@ -11,6 +11,7 @@
 ### Image
 
 - [Capture Settings](Capture-Settings)
+- [Alpaca Camera](Alpaca-Camera)
 - [Image Processing](Image-Processing)
 - [Overlay Settings](Overlay-Settings)
 - [All-Sky Overlay](All-Sky-Overlay)

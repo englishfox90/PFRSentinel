@@ -14,8 +14,19 @@ from services.logger import app_logger
 _WATCHDOG_UI_FATAL_GRACE_SEC = 120
 
 
+def _frame_budget(cam):
+    """The session's own per-frame budget in seconds (Alpaca), or None (ZWO)."""
+    if getattr(cam, 'backend', None) != 'alpaca':
+        return None
+    try:
+        budget = float(getattr(cam, 'frame_budget_s', None))
+    except (TypeError, ValueError):
+        return None
+    return budget if budget > 0 else None
+
+
 class _CaptureWatchdogMixin:
-    """Two-stage detector for a capture thread stuck inside the ZWO SDK."""
+    """Two-stage detector for a capture thread stuck inside the camera backend."""
 
     def _check_capture_watchdog(self):
         """Two-stage wedged-capture detector.
@@ -45,6 +56,11 @@ class _CaptureWatchdogMixin:
         interval = getattr(cam, 'capture_interval', 5.0) or 5.0
         exposure_sec = getattr(cam, 'exposure_seconds', 0.0) or 0.0
         threshold = max(3 * interval, 180.0, exposure_sec + 60.0)
+        # A network camera's frame also includes its download, which over a
+        # slow link can take minutes: the session says how long a frame may take.
+        budget = _frame_budget(cam)
+        if budget is not None:
+            threshold = max(threshold, budget)
         stale_for = time.time() - last_frame
 
         if stale_for < threshold:
@@ -78,20 +94,23 @@ class _CaptureWatchdogMixin:
         since_first = time.time() - self._watchdog_first_fire_ts
         if since_first >= _WATCHDOG_UI_FATAL_GRACE_SEC:
             self._watchdog_ui_fatal_sent = True
+            alpaca = getattr(cam, 'backend', None) == 'alpaca'
+            where = "waiting on the Alpaca server" if alpaca else "inside the ZWO SDK"
             app_logger.error(
                 f"⚠ Capture still stalled after {int(since_first)}s since first "
-                "alert — SDK call not returning. Syncing UI state."
+                + ("alert — the Alpaca server is not answering. Syncing UI state." if alpaca
+                   else "alert — SDK call not returning. Syncing UI state.")
             )
             try:
                 self.camera_controller._on_camera_error(
-                    "Capture thread appears permanently wedged inside the ZWO SDK. "
+                    f"Capture thread appears permanently wedged {where}. "
                     "Auto-recovery (when enabled in Settings) will keep trying; "
                     "the app may need a manual restart if this persists.",
                     is_fatal=True,
                 )
             except TypeError:
                 self.camera_controller._on_camera_error(
-                    "Capture thread appears permanently wedged inside the ZWO SDK."
+                    f"Capture thread appears permanently wedged {where}."
                 )
 
     def _reset_watchdog_state(self):

@@ -2,7 +2,7 @@
 
 Auto Exposure adjusts the camera's exposure time to hold a target brightness as the sky changes through the night. It has three parts: a quick calibration when capture starts, small adjustments on every frame after that, and a fresh calibration if the scene changes suddenly.
 
-Auto Exposure only works in **ZWO Camera** capture mode, and it only changes exposure time. Gain always stays at the value you set on the [Capture Settings](Capture-Settings) tab. Auto Exposure is on by default for new installs.
+Auto Exposure only works in camera capture mode — **ZWO Camera**, or **[Alpaca Camera](Alpaca-Camera)** from the next release — and it only changes exposure time. Gain always stays at the value you set on the [Capture Settings](Capture-Settings) tab. Auto Exposure is on by default for new installs.
 
 ---
 

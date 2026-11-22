@@ -37,7 +37,9 @@ def migrate_legacy_camera_keys(data: dict[str, Any]) -> dict[str, Any]:
     Rules:
     - Active camera name is taken from `zwo_selected_camera_name` (falls back to
       `zwo_camera_name`). If neither is set, a synthetic `"__unassigned__"` slot
-      is used so the values aren't silently lost.
+      is used so the values aren't silently lost — except on an Alpaca config
+      (`camera_source == "alpaca"`), where the keys only mirror the Alpaca
+      profile and are dropped.
     - If the profile already has a value for a migrated key, the existing profile
       value wins — the legacy global value is dropped. This matches how the app
       actually used the keys: profile first, flat global as fallback.
@@ -57,7 +59,14 @@ def migrate_legacy_camera_keys(data: dict[str, Any]) -> dict[str, Any]:
     if not has_legacy_per_camera:
         return data
 
-    active = data.get("zwo_selected_camera_name") or data.get("zwo_camera_name") or "__unassigned__"
+    active = data.get("zwo_selected_camera_name") or data.get("zwo_camera_name")
+    if not active and data.get("camera_source") == "alpaca":
+        # Mirrors of an Alpaca profile edit (older builds wrote them on every
+        # backend); the values already live in that profile.
+        for legacy_key in LEGACY_TO_PROFILE:
+            data.pop(legacy_key, None)
+        return data
+    active = active or "__unassigned__"
     profiles = data.setdefault("camera_profiles", {})
     if not isinstance(profiles, dict):
         profiles = {}

@@ -166,7 +166,7 @@ Because the file only changes when frames are processed, it can only be as curre
 
 Added in version v3.8.0.
 
-PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**, so any Alpaca client can use it directly: NINA (ASCOM Alpaca safety monitor), INDIGO A1 (ASCOM Alpaca Client driver), and others on Windows, macOS or Linux. No file or shared folder is needed. Like the file, it is fed in ZWO Camera mode only.
+PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**, so any Alpaca client can use it directly: NINA (ASCOM Alpaca safety monitor), INDIGO A1 (ASCOM Alpaca Client driver), and others on Windows, macOS or Linux. No file or shared folder is needed. Like the file, it is fed in camera capture mode only (ZWO Camera, or [Alpaca Camera](Alpaca-Camera) from the next release). If your Alpaca camera's server also uses port 11111, see [Port 11111](Alpaca-Camera#port-11111-and-pfrs-own-safety-monitor).
 
 | Setting | Default | Description |
 |---------|---------|-------------|

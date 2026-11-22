@@ -40,11 +40,11 @@ Treat the webhook URL like a password: anyone who has it can post to your channe
 | Message | Setting | When it's posted |
 |---------|---------|------------------|
 | PFR Sentinel Started | **Post Start/Stop** | About a second after PFR Sentinel opens. Shows the capture mode and output folder. |
-| Capture Started | **Post Start/Stop** | When capture starts. Shows the capture mode and output folder. |
+| Capture Started | **Post Start/Stop** | When capture starts. Shows the capture mode and output folder. The mode reads "ZWO Camera Capture", "Directory Watch", or, from the next release, "Alpaca Camera Capture". |
 | PFR Sentinel Stopped | **Post Start/Stop** | When you exit PFR Sentinel. With **Enable System Tray** on (see [Settings](Settings)), closing the window only hides it to the tray, so nothing is posted until you exit from the tray menu. |
 | Error Detected | **Post Errors** | When capture fails to start, when the camera reports an error, or when writing the ASCOM roof safety file fails. Long messages are cut off at 1000 characters. |
 | Roof Open / Roof Closed | **Post Roof Changes** | When the roof classifier reports the same new roof state on two frames in a row. Needs **Enable ML Analysis** turned on and the roof model installed. There's no separate switch per classifier. See [ML Models](ML-Models). The first reading after PFR Sentinel starts only sets the starting state, so it isn't posted. |
-| Timelapse Complete | **Post Timelapse Video** | When a timelapse video finishes. Shows the frame count, session length and file name. Timelapse recording only works in ZWO camera mode. |
+| Timelapse Complete | **Post Timelapse Video** | When a timelapse video finishes. Shows the frame count, session length and file name. Timelapse recording only works in camera mode (ZWO, or [Alpaca](Alpaca-Camera) from the next release). |
 | PFR Sentinel - Status Update | **Periodic Updates** | At your chosen interval. See [Periodic Updates](#periodic-updates). |
 | All-Sky Calibration Needs Attention | *(none in the app — `post_calibration` in `config.json`)* | When the saved all-sky calibration has matched the stars no better than chance in two automatic runs in a row and its overlay is withheld. Once per episode. See [When the badge turns amber](All-Sky-Overlay#when-the-badge-turns-amber). Added in version v3.7.9. |
 

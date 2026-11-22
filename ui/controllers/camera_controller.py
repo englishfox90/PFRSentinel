@@ -7,37 +7,30 @@ All auto-exposure, calibration, scheduled windows, etc. are handled by ZWOCamera
 """
 from PySide6.QtCore import QObject, QTimer, Signal
 from datetime import datetime
+import collections
 import threading
 import time
 
 from services.logger import app_logger
 from services.zwo_sdk_library import library_name, resolve_library_path
-from services.camera import ZWOCamera
+from services.camera.session_factory import build_session
+from services.camera.session_params import read_capture_params
+from services.camera.camera_source import ALPACA
 from services.capture_schedule_window import gate_for_config
 from .camera_settings import apply_camera_settings_async, set_raw16_mode_async
 from .camera_usb_recovery import UsbResetWorker
-
-
-# ZWO SDK errors that corrupt the DLL for the process lifetime — only a
-# USB reset or app restart recovers.
-_UNRECOVERABLE_ERROR_PATTERNS = (
-    "access violation",
-    "0xe06d7363",
-    "winerror -529697949",
-    "exception: exception",
+from .camera_wedge_recovery import (  # noqa: F401 — re-exported for existing callers
+    _MAX_WEDGED_SKIPS, _UNRECOVERABLE_ERROR_PATTERNS, _WEDGED_THREAD_JOIN_TIMEOUT_SEC,
+    CameraRecoveryMixin, is_alpaca_session,
 )
 
 _DISCORD_ERROR_SUPPRESS_AFTER_ATTEMPTS = 3
-_WEDGED_THREAD_JOIN_TIMEOUT_SEC = 3.0
 _SUSTAINED_CAPTURE_RESET_SEC = 300
-# Wedge handling: the capture thread is stuck inside an uninterruptible ZWO SDK
-# C call. We try ONE USB disable/enable to free it (an OS-level toggle, safe
-# against the wedged DLL), then escalate. Keeping this small means we reach the
-# real cure (a process restart) in minutes, not the ~90 it used to take.
-_MAX_WEDGED_SKIPS = 2
+# Stop's teardown joins the capture thread for 3 s, then disconnects.
+_TEARDOWN_JOIN_TIMEOUT_SEC = 10.0
 
 
-class CameraControllerQt(QObject):
+class CameraControllerQt(QObject, CameraRecoveryMixin):
     """
     Qt-compatible camera controller.
     
@@ -96,8 +89,24 @@ class CameraControllerQt(QObject):
         self._restart_times = load_restart_history(self.config)
 
         self._capture_starting = False
+        self._starting_source = None
+        self._logged_errors = collections.deque(maxlen=16)
+        self._teardown_thread = None
         self._usb_reset_done.connect(self._on_usb_reset_done)
         self._capture_start_done.connect(self._on_capture_start_done)
+
+    @property
+    def camera_session(self):
+        """The running capture session (stored as ``zwo_camera`` for its many readers)."""
+        return self.zwo_camera
+
+    def capabilities(self):
+        """The running session's capabilities, else the configured source's static set."""
+        from services.camera.capabilities import static_capabilities
+        session = self.zwo_camera
+        if session is not None:
+            return session.capabilities
+        return static_capabilities(self.config.get('camera_source', 'zwo'))
 
     def detect_cameras(self):
         """Detect connected ZWO cameras"""
@@ -161,63 +170,18 @@ class CameraControllerQt(QObject):
         self._cancel_auto_recovery_timer()
         self._user_requested_stop = False
 
-        if self.zwo_camera is not None:
+        # Torn down on the start worker, before it makes any SDK call of its own.
+        stale_camera = self.zwo_camera
+        self.zwo_camera = None
+        if stale_camera is not None:
             app_logger.info("Cleaning up existing camera instance...")
-            try:
-                if self.is_connected:
-                    self.zwo_camera.disconnect()
-                self.zwo_camera = None
-            except Exception as e:
-                app_logger.warning(f"Error cleaning up old camera instance: {e}")
-                self.zwo_camera = None
 
         # Read all config on the main thread — keeps cross-thread Config access
         # out of the blocking SDK calls that run in the worker thread.
-        sdk_path = self.config.get('zwo_sdk_path', '')
-        saved_camera_index = self.config.get('zwo_selected_camera', 0)
-        camera_name = self.config.get('zwo_selected_camera_name', 'Unknown')
-        camera_serial = self.config.get('zwo_selected_camera_serial', '')
-
-        app_logger.info(f"Starting capture — saved camera: '{camera_name}' at index {saved_camera_index}")
-
-        clean_camera_name = camera_name
-        if '(Index:' in camera_name:
-            clean_camera_name = camera_name.split('(Index:')[0].strip()
-
-        from services.config import DEFAULT_CAMERA_PROFILE
-        profile = self.config.get_camera_profile(clean_camera_name, camera_serial)
-        app_logger.info(f"Loading settings from camera profile: {clean_camera_name}")
-        app_logger.debug(f"Profile contents: {profile}")
-
-        wb_config = dict(self.config.get('white_balance', {}))
-        wb_config.setdefault('mode', 'asi_auto')
-        dev_mode = self.config.get('dev_mode', {})
-
-        params = {
-            'sdk_path': sdk_path,
-            'saved_camera_index': saved_camera_index,
-            'camera_name': camera_name,
-            'camera_serial': camera_serial,
-            'clean_camera_name': clean_camera_name,
-            'exposure_ms': profile.get('exposure_ms', DEFAULT_CAMERA_PROFILE['exposure_ms']),
-            'gain': profile.get('gain', DEFAULT_CAMERA_PROFILE['gain']),
-            'max_exposure_ms': profile.get('max_exposure_ms', DEFAULT_CAMERA_PROFILE['max_exposure_ms']),
-            'target_brightness': profile.get('target_brightness', DEFAULT_CAMERA_PROFILE['target_brightness']),
-            'wb_r': profile.get('wb_r', DEFAULT_CAMERA_PROFILE['wb_r']),
-            'wb_b': profile.get('wb_b', DEFAULT_CAMERA_PROFILE['wb_b']),
-            'offset': profile.get('offset', DEFAULT_CAMERA_PROFILE['offset']),
-            'flip': profile.get('flip', DEFAULT_CAMERA_PROFILE['flip']),
-            'bayer_pattern': profile.get('bayer_pattern', DEFAULT_CAMERA_PROFILE['bayer_pattern']),
-            'auto_exposure': self.config.get('zwo_auto_exposure', False),
-            'wb_config': wb_config,
-            'capture_interval': self.config.get('zwo_interval', 5.0),
-            'scheduled_capture_mode': self.config.get('scheduled_capture_mode', 'always'),
-            'scheduled_start_time': self.config.get('scheduled_start_time', '17:00'),
-            'scheduled_end_time': self.config.get('scheduled_end_time', '09:00'),
-            'scheduled_window_interval': self.config.get('scheduled_window_interval', 5.0),
-            'use_raw16': dev_mode.get('use_raw16', False),
-            'auto_recovery': self._auto_recovery_enabled(),
-        }
+        params = read_capture_params(self.config, self._auto_recovery_enabled())
+        # Recovery decisions about this start follow its backend, not whatever
+        # the config says by the time it fails.
+        self._starting_source = params.get('camera_source')
 
         app_logger.info(
             f"Camera config: exposure_ms={params['exposure_ms']}, gain={params['gain']}, "
@@ -225,9 +189,10 @@ class CameraControllerQt(QObject):
         )
 
         self._capture_starting = True
-        threading.Thread(target=self._start_capture_worker, args=(params,), daemon=True).start()
+        threading.Thread(target=self._start_capture_worker, args=(params, stale_camera),
+                         daemon=True).start()
 
-    def _start_capture_worker(self, params: dict):
+    def _start_capture_worker(self, params: dict, stale_camera=None):
         """Blocking SDK work for start_capture — runs off the Qt main thread.
 
         _resolve_camera_index, ZWOCamera construction, and connect_camera all
@@ -235,50 +200,26 @@ class CameraControllerQt(QObject):
         instability. Running them here keeps the Qt event loop responsive.
         """
         try:
-            # Wait out any wedged prior worker — concurrent SDK access crashes the DLL.
-            if self._dying_camera is not None:
-                try:
-                    self._dying_camera.wait_for_capture_thread_exit(
-                        timeout=_WEDGED_THREAD_JOIN_TIMEOUT_SEC)
-                except Exception:
-                    pass
-                self._dying_camera = None
+            if stale_camera is not None:
+                self._stop_and_disconnect(stale_camera)
+            self._wait_for_previous_capture()
 
-            camera_index = self._resolve_camera_index(
-                params['sdk_path'], params['camera_name'], params['saved_camera_index']
-            )
+            if params.get('camera_source') == ALPACA:
+                camera_index = 0
+            else:
+                camera_index = self._resolve_camera_index(
+                    params['sdk_path'], params['camera_name'], params['saved_camera_index']
+                )
 
-            cam = ZWOCamera(
-                sdk_path=params['sdk_path'],
-                camera_index=camera_index,
-                exposure_sec=params['exposure_ms'] / 1000.0,
-                gain=params['gain'],
-                white_balance_r=params['wb_r'],
-                white_balance_b=params['wb_b'],
-                offset=params['offset'],
-                flip=params['flip'],
-                auto_exposure=params['auto_exposure'],
-                max_exposure_sec=params['max_exposure_ms'] / 1000.0,
-                bayer_pattern=params['bayer_pattern'],
-                wb_config=params['wb_config'],
-                wb_mode=params['wb_config']['mode'],
-                scheduled_capture_mode=params['scheduled_capture_mode'],
-                scheduled_start_time=params['scheduled_start_time'],
-                scheduled_end_time=params['scheduled_end_time'],
-                scheduled_window_interval=params['scheduled_window_interval'],
-                camera_name=params['clean_camera_name'],
-                camera_serial=params['camera_serial'],
+            cam = build_session(
+                params, gate_for_config(self.config), camera_index,
+                on_error=self._on_camera_error,
+                on_calibration=self._on_calibration_status,
             )
-            cam.schedule_gate = gate_for_config(self.config)
-            cam.target_brightness = params['target_brightness']
-            cam.set_capture_interval(params['capture_interval'])
-            cam.use_raw16 = params['use_raw16']
-            cam.auto_recovery_enabled = params['auto_recovery']
-            cam.on_error_callback = self._on_camera_error
-            cam.on_calibration_callback = self._on_calibration_status
 
             if not cam.connect_camera(camera_index):
-                raise Exception("Failed to connect to camera")
+                raise Exception(getattr(cam, 'last_connect_error', '')
+                                or "Failed to connect to camera")
 
             app_logger.info("Starting capture loop...")
             cam.start_capture(
@@ -297,6 +238,30 @@ class CameraControllerQt(QObject):
             app_logger.debug(f"Stack trace: {traceback.format_exc()}")
             self._capture_start_done.emit(False, str(e))
 
+    def _wait_for_previous_capture(self):
+        """Wait out the last session's teardown and capture thread; raise if it lives on.
+
+        Concurrent SDK access from a still-running capture thread crashes the
+        ZWO DLL, and two Alpaca loops would drive one camera. Stop marks the
+        session dying at once (not after its asynchronous join), so a quick
+        Stop → Start lands here rather than skipping the wait.
+        """
+        teardown = self._teardown_thread
+        if teardown is not None and teardown is not threading.current_thread():
+            teardown.join(_TEARDOWN_JOIN_TIMEOUT_SEC)
+        dying = self._dying_camera
+        if dying is None:
+            return
+        try:
+            exited = dying.wait_for_capture_thread_exit(timeout=_WEDGED_THREAD_JOIN_TIMEOUT_SEC)
+        except Exception:
+            exited = False
+        if not exited:
+            raise Exception("The previous capture is still shutting down; "
+                            "try Start again in a few seconds")
+        if self._dying_camera is dying:
+            self._dying_camera = None
+
     def _persist_learned_serial(self):
         """Persist the camera's hardware serial learned during connect.
 
@@ -304,6 +269,12 @@ class CameraControllerQt(QObject):
         """
         from services.camera.camera_identity import persist_camera_serial
         cam = self.zwo_camera
+        if is_alpaca_session(cam):
+            from services.camera.camera_source import persist_alpaca_identity
+            unique_id, name = cam.learned_identity()
+            if persist_alpaca_identity(self.config, unique_id, name):
+                app_logger.info(f"Persisted Alpaca camera identity: {name or '?'} ({unique_id or 'no UniqueID'})")
+            return
         serial = getattr(cam, 'camera_serial', None) if cam else None
         if persist_camera_serial(self.config, serial):
             app_logger.info(f"Persisted camera serial to config: {serial}")
@@ -315,12 +286,13 @@ class CameraControllerQt(QObject):
         if ok:
             if self._user_requested_stop:
                 app_logger.info("Capture connected but stop was requested — tearing down")
-                if self.zwo_camera:
-                    try:
-                        self.zwo_camera.disconnect()
-                    except Exception:
-                        pass
-                    self.zwo_camera = None
+                # The worker already started the capture loop; dropping the
+                # reference alone would leave it running with the USB handle open.
+                camera = self.zwo_camera
+                self.zwo_camera = None
+                if camera:
+                    self._dying_camera = camera
+                    self._shutdown_camera_async(camera)
                 self.is_connected = False
                 return
             self.is_capturing = True
@@ -341,14 +313,19 @@ class CameraControllerQt(QObject):
                     "Click Start when the camera is ready."
                 )
                 return
-            if self._is_unrecoverable_error(err):
+            alpaca = self._alpaca_source()
+            if not alpaca and self._is_unrecoverable_error(err):
                 if not self._usb_reset_attempted:
                     self._usb_reset_attempted = True
-                    self._start_usb_reset_worker()
+                    self._start_usb_reset_worker(alpaca=False)
                     return
-                self._enter_unrecoverable_mode(err)
+                self._enter_unrecoverable_mode(err, alpaca=False)
                 return
             if self._last_successful_frame_ts > 0:
+                self._schedule_auto_recovery()
+            elif alpaca:
+                # A rig can boot before its Alpaca server is listening.
+                app_logger.warning("Alpaca camera not reachable yet — retrying under auto-recovery")
                 self._schedule_auto_recovery()
             else:
                 app_logger.warning(
@@ -367,7 +344,6 @@ class CameraControllerQt(QObject):
         self._suppress_discord_errors = False
         self._wedged_skip_count = 0
         self._wedge_usb_reset_tried = False
-        self._dying_camera = None
 
         try:
             # Update state immediately for responsive UI
@@ -380,29 +356,10 @@ class CameraControllerQt(QObject):
             self.zwo_camera = None
 
             if camera:
-                # Run stop + disconnect in background to avoid blocking UI.
-                # stop_capture() sets is_capturing=False and aborts the exposure,
-                # then join()s the capture thread. disconnect_camera() resets the
-                # hardware. Both can involve SDK calls that may block.
-                import threading
-                def shutdown():
-                    try:
-                        camera.stop_capture()
-                    except Exception as e:
-                        app_logger.debug(f"Error stopping capture: {e}")
-                    # Wedged worker (3s join timed out) still holds the SDK;
-                    # retain it so a later start waits instead of reinitialising
-                    # the SDK concurrently (which crashes the ZWO DLL).
-                    try:
-                        if isinstance(camera.capture_thread, threading.Thread) and camera.capture_thread.is_alive():
-                            self._dying_camera = camera
-                    except Exception:
-                        pass
-                    try:
-                        camera.disconnect_camera()
-                    except Exception as e:
-                        app_logger.debug(f"Error disconnecting camera: {e}")
-                threading.Thread(target=shutdown, daemon=True).start()
+                # Dying until the teardown has joined its capture thread; a
+                # Start in between waits for it (_wait_for_previous_capture).
+                self._dying_camera = camera
+                self._shutdown_camera_async(camera)
 
             self.capture_stopped.emit()
             app_logger.info("Camera capture stopped")
@@ -410,6 +367,37 @@ class CameraControllerQt(QObject):
         except Exception as e:
             app_logger.error(f"Error stopping capture: {e}")
     
+    def _shutdown_camera_async(self, camera):
+        """Stop and disconnect ``camera`` on a daemon thread, keeping the UI responsive."""
+        thread = threading.Thread(target=self._stop_and_disconnect, args=(camera,), daemon=True)
+        self._teardown_thread = thread
+        thread.start()
+
+    def _stop_and_disconnect(self, camera):
+        """stop_capture() aborts the exposure and joins the capture thread;
+        disconnect_camera() releases the hardware. Both can block in the SDK."""
+        try:
+            camera.stop_capture()
+        except Exception as e:
+            app_logger.debug(f"Error stopping capture: {e}")
+        # Wedged worker (3s join timed out) still holds the SDK;
+        # retain it so a later start waits instead of reinitialising
+        # the SDK concurrently (which crashes the ZWO DLL). Only a joined
+        # thread lets it go.
+        try:
+            thread = camera.capture_thread
+            alive = isinstance(thread, threading.Thread) and thread.is_alive()
+        except Exception:
+            alive = True
+        if alive:
+            self._dying_camera = camera
+        elif self._dying_camera is camera:
+            self._dying_camera = None
+        try:
+            camera.disconnect_camera()
+        except Exception as e:
+            app_logger.debug(f"Error disconnecting camera: {e}")
+
     def _on_frame_captured(self, pil_image, metadata):
         """Callback from ZWOCamera when a frame is captured.
         
@@ -448,7 +436,14 @@ class CameraControllerQt(QObject):
                 is_capturing flag and emit capture_stopped so the UI (AppBar,
                 tray menu) doesn't keep pretending capture is running.
         """
-        app_logger.error(f"Camera error: {error_msg}")
+        # The one log line for this error (the main window's handler skips it,
+        # see consume_logged_error). An Alpaca loop still retrying is a network
+        # outage, logged at WARNING like the capture loop's own lines.
+        if not is_fatal and is_alpaca_session(self.zwo_camera):
+            app_logger.warning(f"Camera error: {error_msg}")
+        else:
+            app_logger.error(f"Camera error: {error_msg}")
+        self._logged_errors.append(error_msg)
         self.error.emit(error_msg)
 
         if is_fatal:
@@ -463,6 +458,15 @@ class CameraControllerQt(QObject):
             self.capture_stopped.emit()
             if not self._user_requested_stop:
                 self._schedule_auto_recovery()
+
+    def consume_logged_error(self, error_msg) -> bool:
+        """True (once) when ``error_msg`` reached the log from the capture loop's
+        callback, so the main window's error handler doesn't log it again."""
+        try:
+            self._logged_errors.remove(error_msg)
+            return True
+        except ValueError:
+            return False
 
     def _auto_recovery_enabled(self) -> bool:
         # Only an explicit False opts out — a damaged value must not silently
@@ -555,128 +559,6 @@ class CameraControllerQt(QObject):
             # failure), keep the recovery chain alive.
             app_logger.error(f"Auto-recovery restart raised: {e}")
             self._schedule_auto_recovery()
-
-    def _join_or_skip_dying_camera(self) -> bool:
-        """Wait for the previous capture thread to exit; skip recovery if it
-        is still wedged.
-
-        Returns True if it's safe to proceed with SDK calls, False if the
-        caller must abort this recovery cycle.  Calling the ZWO SDK while
-        another thread is blocked inside it crashes the DLL (SEH 0xe06d7363);
-        Windows USB IO usually times out within 30–60s, so we prefer to
-        re-schedule rather than race.
-        """
-        dying = self._dying_camera
-        if dying is None:
-            self._wedged_skip_count = 0
-            return True
-        try:
-            joined = dying.wait_for_capture_thread_exit(
-                timeout=_WEDGED_THREAD_JOIN_TIMEOUT_SEC
-            )
-        except Exception as e:
-            app_logger.warning(f"Error while joining dying capture thread: {e}")
-            joined = False
-        if joined:
-            self._dying_camera = None
-            self._wedged_skip_count = 0
-            self._wedge_usb_reset_tried = False
-            return True
-        self._wedged_skip_count += 1
-        # The thread is stuck inside an uninterruptible ZWO SDK C call; the
-        # backoff ladder alone can never free it. A USB disable/enable is an
-        # OS-level operation (NOT an SDK call — safe against the wedged DLL)
-        # that usually forces the stuck call to error out so the thread unwinds.
-        # Try it once before escalating to a restart.
-        if not self._wedge_usb_reset_tried and not self._usb_reset.in_progress:
-            self._wedge_usb_reset_tried = True
-            app_logger.warning(
-                "Capture thread wedged in the ZWO SDK — attempting USB "
-                "disable/enable to free it before escalating."
-            )
-            self._start_usb_reset_worker()
-            return False
-        if self._wedged_skip_count >= _MAX_WEDGED_SKIPS:
-            app_logger.error(
-                f"Previous capture thread still wedged after "
-                f"{self._wedged_skip_count} recovery attempts."
-            )
-            self._escalate_to_restart_or_alert(
-                "capture thread stuck inside ZWO SDK; process restart required"
-            )
-            return False
-        app_logger.warning(
-            f"Previous capture thread still wedged "
-            f"(skip {self._wedged_skip_count}/{_MAX_WEDGED_SKIPS}) — "
-            "rescheduling retry to avoid concurrent SDK crash."
-        )
-        self._schedule_auto_recovery()
-        return False
-
-    @staticmethod
-    def _is_unrecoverable_error(message: str) -> bool:
-        if not message:
-            return False
-        lowered = message.lower()
-        return any(pat in lowered for pat in _UNRECOVERABLE_ERROR_PATTERNS)
-
-    def _start_usb_reset_worker(self):
-        app_logger.warning(
-            "Attempting USB device disable/enable to recover the camera..."
-        )
-        self._usb_reset.run_async(
-            self.config.get('zwo_selected_camera_name', '') or '',
-            lambda ok, _name: self._usb_reset_done.emit(ok),
-        )
-
-    def _on_usb_reset_done(self, success: bool):
-        # The switch can't recall a reset already in flight when it was turned
-        # off; drop the result so a failure can't go on to relaunch the app.
-        if not self._auto_recovery_enabled():
-            app_logger.info("USB reset finished after automatic recovery was turned off — ignored")
-            return
-        if success:
-            # The toggle may have freed a wedged capture thread; re-run
-            # recovery, which re-joins the dying thread before any new SDK call.
-            # _wedge_usb_reset_tried stays set so a still-wedged thread escalates
-            # rather than looping resets forever.
-            self._schedule_auto_recovery()
-            return
-        # USB reset failed — usually admin denial (CM_Disable_DevNode 0x17) or
-        # not on Windows. The DLL stays corrupt for the process lifetime, so the
-        # only heal left is a clean process restart (inside the capture window);
-        # otherwise alert and wait for a manual restart.
-        self._escalate_to_restart_or_alert(
-            "USB reset failed — Administrator rights are required to "
-            "disable/enable the camera device"
-        )
-
-    def _escalate_to_restart_or_alert(self, last_error: str):
-        """Last resort once in-process recovery is exhausted: restart the app if
-        the policy allows (inside the capture window, not boot-looping), else
-        give up and alert for a manual restart. See camera_restart_policy."""
-        from .camera_restart_policy import attempt_restart
-        if attempt_restart(self, last_error):
-            return
-        self._enter_unrecoverable_mode(last_error)
-
-    def revive_missing_camera(self, camera_name: str):
-        """Best-effort user-triggered USB reset. Emits camera_revive_done."""
-        app_logger.info(f"User-initiated revive for '{camera_name}'")
-        self._usb_reset.run_async(
-            camera_name,
-            lambda ok, name: self.camera_revive_done.emit(ok, name),
-        )
-
-    def _enter_unrecoverable_mode(self, last_error: str):
-        self._unrecoverable_mode = True
-        self._cancel_auto_recovery_timer()
-        self.capture_stopped.emit()
-        self.error.emit(
-            "Camera unrecoverable — ZWO SDK state is corrupted. "
-            "Please restart the application. "
-            f"(last error: {last_error})"
-        )
 
     def recovery_state(self) -> dict:
         """Snapshot of auto-recovery state for the status API.

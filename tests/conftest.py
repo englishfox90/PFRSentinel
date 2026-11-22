@@ -40,6 +40,24 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+def _app_logger_reaches_caplog():
+    """Let ``caplog`` see ``app_logger``'s records.
+
+    ``services/logger.py`` sets ``propagate = False`` on the app's stdlib
+    logger so the running app never writes a line twice, but pytest's
+    ``caplog`` handler sits on the root logger, so without this every
+    ``caplog`` assertion on an ``app_logger`` line reads an empty log.
+    """
+    import logging
+    from services.app_config import APP_NAME
+    app_log = logging.getLogger(APP_NAME)
+    previous = app_log.propagate
+    app_log.propagate = True
+    yield
+    app_log.propagate = previous
+
+
+@pytest.fixture(autouse=True)
 def _allsky_buffer_dumps_in_tmp(tmp_path_factory, monkeypatch):
     """Keep calibration buffer dumps out of the developer's real app-data.
 

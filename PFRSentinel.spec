@@ -358,6 +358,16 @@ hiddenimports = [
     
     # --- ZWO Camera (optional, fails gracefully) ---
     'zwoasi',
+
+    # --- ASCOM Alpaca camera (imported lazily by session_factory) ---
+    'services.camera.alpaca', 'services.camera.alpaca.alpaca_camera',
+    'services.camera.alpaca.alpaca_capture_frame', 'services.camera.alpaca.alpaca_connection',
+    'services.camera.alpaca.alpaca_device', 'services.camera.alpaca.alpaca_probe',
+    'services.camera.alpaca.alpaca_download', 'services.camera.alpaca.alpaca_shared_camera',
+    'services.camera.alpaca.alpaca_frame_budget', 'services.camera.alpaca.alpaca_static_info',
+    'services.camera.alpaca.alpaca_warnings',
+    # Discovery's per-interface broadcasts (pure Python; picks a backend per OS).
+    'ifaddr', 'ifaddr._shared', 'ifaddr._win32', 'ifaddr._posix',
     
     # --- Package management (Python 3.13 compatibility) ---
     'importlib.metadata', 'importlib.resources',

@@ -1,6 +1,6 @@
 # Capture Settings
 
-The **Capture** tab configures where images come from. The **Capture Mode** card at the top switches between **Directory Watch** and **ZWO Camera**, and the settings below it change to match the selected mode. New installs start in **ZWO Camera** mode.
+The **Capture** tab configures where images come from. The **Capture Mode** card at the top switches between **Directory Watch**, **ZWO Camera** and **Alpaca Camera**, and the settings below it change to match the selected mode. New installs start in **ZWO Camera** mode.
 
 ---
 
@@ -14,6 +14,14 @@ Directory Watch mode monitors a folder for new image files written by other capt
 | Include Subfolders | On | Also watch folders inside the watch directory. |
 
 When a new file is detected and has finished being written, PFR Sentinel reads any metadata file saved alongside the image, processes the image, and pushes it to all active outputs.
+
+---
+
+## Alpaca Camera
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+Alpaca Camera mode captures from a camera served over the network by an ASCOM Alpaca server, such as ASCOM Remote on the observatory PC. It uses the same Exposure, Auto Exposure, Scheduled Capture, White Balance and Advanced cards as ZWO Camera mode below, with a **Camera Connection** card for the server's host, port and device number in place of the SDK and camera drop-down. Some settings are hidden or work differently because they depend on the ZWO SDK: see [Alpaca Camera](Alpaca-Camera) for setup and the full list.
 
 ---
 
@@ -75,7 +83,7 @@ While capture is running, the **Camera** drop-down and **Detect** button are dis
 |---------|-------|---------|-------------|
 | Exposure | 0.001–3600 s | 0.1 s | Length of each exposure. When [Auto Exposure](Auto-Exposure) is on, this is only the starting value. |
 | Gain | 0–600 | 100 | Camera gain (sensitivity). Higher is brighter but noisier. Auto Exposure never changes gain. |
-| Interval | 0.1–3600 s | 300 s | How long to wait after each frame before starting the next one. Values below 1 s run as 1 s. |
+| Interval | 0.1–3600 s | 300 s | How long to wait after each frame before starting the next one. Values below 1 s run as 1 s. From the next release, the hint under it follows the Scheduled Capture mode: "Time between captures inside the Scheduled Capture window" in **Only within time window**, and "Used outside the Scheduled Capture window; inside it, the in-window interval applies" in **Different rate within time window**. |
 
 ### Auto Exposure
 
@@ -161,6 +169,8 @@ Exposure, Gain, Target Brightness, Max Exposure, the manual white balance values
 
 Profiles are tied to each camera's hardware serial number, which PFR Sentinel learns the first time the camera connects. Two cameras of the same model therefore keep separate settings. Until a camera has connected once, it uses the settings saved for its model name.
 
+From the next release, an [Alpaca camera](Alpaca-Camera)'s profile is tied to the unique ID its server reports instead, learned the same way on the first connect.
+
 The other settings on this tab (Interval, Enable Auto Exposure, Scheduled Capture, White Balance mode and the gray-world **Low %**/**High %**) apply to whichever camera is in use.
 
 ---
@@ -173,7 +183,11 @@ PFR Sentinel is built to run unattended, so it tries hard to recover a camera th
 - **Still unreachable** — PFR Sentinel keeps retrying at growing intervals (5 minutes, 15 minutes, then hourly) instead of giving up. It reports once that the camera is unreachable, and again when capture recovers.
 - **Camera stuck in the SDK** — PFR Sentinel tries a USB reset (Administrator rights required). If that doesn't clear it, the app can restart itself to load a fresh copy of the SDK. It only does this inside the **Fixed times** capture window (or at any time in **Always capture** mode), only after at least one successful frame this session, and no more than three times an hour.
 
-Details of each attempt are written to the [Logs](Logs) tab.
+Details of each attempt are written to the [Logs](Logs) tab. From the next release, the camera pill in the status strip reads **Reconnecting to camera…** or **Camera lost · retrying** while this happens (see [Live Monitoring](Live-Monitoring)).
+
+If you click **Stop** and then **Start** while the old capture is still letting go of the camera, Start waits briefly, and if it still hasn't finished shows "The previous capture is still shutting down; try Start again in a few seconds". New in the next release.
+
+From the next release, an [Alpaca camera](Alpaca-Camera#when-the-connection-drops) gets the same reconnects and retries, but never a USB reset. The app restart is used only if the capture thread itself stops responding.
 
 ### Turning recovery off
 

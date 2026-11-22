@@ -7,7 +7,9 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QProgressDialog
 
 from services.logger import app_logger
+from services.camera.camera_source import camera_ready, is_alpaca
 
+from .alpaca_camera import _AlpacaCameraMixin
 from .camera_detect import (  # re-exported for existing callers
     _CameraDetectMixin,
     _sdk_call_with_timeout,
@@ -16,7 +18,7 @@ from .camera_detect import (  # re-exported for existing callers
 from .capture_watchdog import _WATCHDOG_UI_FATAL_GRACE_SEC, _CaptureWatchdogMixin
 
 
-class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
+class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin, _AlpacaCameraMixin):
 
 
     def _wait_for_timelapse_finalization(self, timeout_sec: float = 75.0):
@@ -72,7 +74,11 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
         if self.is_capturing:
             return
         mode = self.config.get('capture_mode', 'camera')
-        if mode == 'camera':
+        if mode == 'camera' and is_alpaca(self.config):
+            if not camera_ready(self.config, self.camera_controller):
+                self.app_bar.set_start_enabled(False, "Set the Alpaca server's host on the Capture tab")
+                return
+        elif mode == 'camera':
             cameras = self.config.get('available_cameras', [])
             if not cameras:
                 self.app_bar.set_start_enabled(False, "No ZWO cameras detected — click Detect Cameras on the Capture tab")
@@ -149,6 +155,7 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
                 self.camera_controller.stop_capture()
                 if hasattr(self, 'capture_panel'):
                     self.capture_panel.reset_camera_capabilities()
+                    self._reapply_known_alpaca_capabilities()
             elif self.watch_controller:
                 self.watch_controller.stop_watching()
 
@@ -316,7 +323,9 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
             app_logger.info(f"Watch mode started: {watch_dir}")
 
     def _on_camera_error(self, error_msg: str):
-        app_logger.error(f"Camera error received: {error_msg}")
+        controller = self.camera_controller
+        if controller is None or not controller.consume_logged_error(error_msg):
+            app_logger.error(f"Camera error received: {error_msg}")
         self._set_capture_error(error_msg)
         self.push_capture_status()
         self._notify(f"Camera error: {error_msg}", "error")
@@ -384,6 +393,13 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
         if not cam or not hasattr(self, 'capture_panel'):
             return
         try:
+            caps = getattr(cam, 'capabilities', None)
+            if caps is not None and caps.backend != 'zwo':
+                # The session may just have learned the camera's UniqueID.
+                self.capture_panel.reload_camera_settings(self.config)
+                names, caps = self._remember_alpaca_session_capabilities(cam)
+                self.capture_panel.apply_camera_capabilities(caps, names)
+                return
             self.capture_panel.update_camera_capabilities(
                 cam.supports_raw16, cam.sensor_bit_depth)
         except Exception as e:
@@ -399,6 +415,9 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
     def _on_raw16_mode_done(self, enabled: bool, ok: bool):
         # Revert the toggle if the SDK rejected or failed the mode change.
         if not ok and hasattr(self, 'capture_panel'):
-            self.capture_panel._loading_config = True
-            self.capture_panel.raw16_switch.set_checked(not enabled)
-            self.capture_panel._loading_config = False
+            widget = self.capture_panel.camera_widget
+            widget._loading_config = True
+            try:
+                widget.raw16_switch.set_checked(not enabled)
+            finally:
+                widget._loading_config = False

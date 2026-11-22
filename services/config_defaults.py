@@ -85,7 +85,25 @@ DEFAULT_CONFIG = {
     # identity: index and model name are non-unique/unstable. Learned on the
     # first clean connect for configs that predate this key.
     "zwo_selected_camera_serial": "",
-    
+
+    # Camera backend, read only when capture_mode == "camera" (issue #43):
+    # "zwo" (USB, ZWO SDK) or "alpaca" (ASCOM Alpaca over the network).
+    # See services/camera/camera_source.py.
+    "camera_source": "zwo",
+    "alpaca_camera": {
+        "host": "",                    # IP / hostname of the Alpaca server
+        "port": 11111,                 # ASCOM default; PFR's own SafetyMonitor default is 11111 too
+        "device_number": 0,
+        "unique_id": "",               # learned on connect: identity gate + profile key
+        "name": "",                    # last-seen device Name (display / logs only)
+        "use_imagebytes": True,        # Accept: application/imagebytes; JSON when off or unsupported
+        "connect_timeout_s": 3.0,
+        "request_timeout_s": 10.0,
+        # PUT Connected=false on stop. Off: never disconnect a device another
+        # client (NINA through ASCOM Remote) may be sharing.
+        "release_on_disconnect": False,
+    },
+
     # Per-camera profiles (NEW: stores settings per camera to prevent cross-contamination)
     # NOTE: auto_exposure is NOT stored here - it's a global algorithm setting, not camera-specific
     # NOTE: auto_wb/WB mode is NOT stored here - stored in global white_balance config

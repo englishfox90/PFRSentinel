@@ -98,3 +98,29 @@ def test_changing_spin_emits_margin_changed(qapp):
     rows.margin_spin.setValue(45)
 
     assert seen == [45]
+
+
+@pytest.mark.parametrize("mode, needle", [
+    ("always", "Time between captures"),
+    ("gated", "inside the Scheduled Capture window"),
+    ("variable", "in-window interval applies"),
+])
+def test_interval_hint_says_when_the_schedule_sets_the_rate(qapp, tmp_path, mode, needle):
+    """QA #43: with "Different rate within time window" the typed Interval only
+    applies outside the window; the Interval row now says so (display only)."""
+    from PySide6.QtWidgets import QWidget
+    from qfluentwidgets import CaptionLabel
+    from services.config import Config
+    from ui.panels._camera_settings_widget import CameraSettingsWidget
+    config = Config(str(tmp_path / "config.json"))
+    config.set('scheduled_capture_mode', mode)
+    host = QWidget()
+    host.config = config
+    widget = CameraSettingsWidget(host)
+    widget.load_from_config(config)
+    hint = widget.interval_row.findChildren(CaptionLabel)[0]
+    assert needle in hint.text()
+    combo = widget.schedule_card.schedule_mode_combo
+    combo.setCurrentIndex(0)
+    assert hint.text() == "Time between captures"
+    host.deleteLater()

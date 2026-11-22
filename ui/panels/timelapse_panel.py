@@ -73,7 +73,7 @@ class TimelapsePanel(QScrollArea):
         notice_layout = QVBoxLayout(self._watch_mode_notice)
         notice_layout.setContentsMargins(Spacing.card_padding, Spacing.card_padding,
                                           Spacing.card_padding, Spacing.card_padding)
-        notice_lbl = BodyLabel("Timelapse recording is only available in Camera (ZWO) capture mode.")
+        notice_lbl = BodyLabel("Timelapse recording is only available in Camera capture mode.")
         notice_lbl.setWordWrap(True)
         notice_lbl.setStyleSheet(f"color: {Colors.text_secondary};")
         notice_layout.addWidget(notice_lbl)

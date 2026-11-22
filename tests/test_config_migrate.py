@@ -251,3 +251,35 @@ class TestCoordinateNormalisationAtLoadTime:
 
         assert cfg.get("weather")["latitude"] == "somewhere"
         assert json.loads(cfg_path.read_text())["weather"]["latitude"] == "somewhere"
+
+
+class TestAlpacaMirrorKeys:
+    """QA #43: an Alpaca-only config must not grow an `__unassigned__` profile."""
+
+    def test_alpaca_config_drops_the_mirrors_without_a_profile(self):
+        data = {"camera_source": "alpaca", "zwo_gain": 250, "zwo_exposure_ms": 200.0,
+                "zwo_auto_exposure": True,
+                "camera_profiles": {"alpaca:uid-1": {"gain": 250}}}
+        result = migrate_legacy_camera_keys(data)
+        assert "__unassigned__" not in result["camera_profiles"]
+        assert result["camera_profiles"] == {"alpaca:uid-1": {"gain": 250}}
+        assert "zwo_gain" not in result and "zwo_exposure_ms" not in result
+        assert result["zwo_auto_exposure"] is True
+
+    def test_alpaca_config_with_a_zwo_camera_still_folds_into_it(self):
+        data = {"camera_source": "alpaca", "zwo_selected_camera_name": "Cam", "zwo_gain": 200}
+        result = migrate_legacy_camera_keys(data)
+        assert result["camera_profiles"]["Cam"]["gain"] == 200
+
+    def test_zwo_config_without_a_name_keeps_the_unassigned_slot(self):
+        result = migrate_legacy_camera_keys({"camera_source": "zwo", "zwo_gain": 200})
+        assert result["camera_profiles"]["__unassigned__"]["gain"] == 200
+
+    def test_alpaca_restart_round_trip_makes_no_stray_profile(self, tmp_path):
+        from services.config import Config
+        path = str(tmp_path / "config.json")
+        config = Config(path)
+        config.set("camera_source", "alpaca")
+        config.set("zwo_gain", 250)  # what older builds mirrored
+        config.save()
+        assert "__unassigned__" not in Config(path).list_camera_profiles()

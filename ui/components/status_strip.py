@@ -184,13 +184,16 @@ class StatePill(QFrame):
         return pm
 
     def set_state(self, mode: str, text: str):
-        """mode in {'capturing', 'idle', 'disconnected'}."""
+        """mode in {'capturing', 'reconnecting', 'idle', 'disconnected'}."""
         if (mode, text) == self._state_key:
             return
         self._state_key = (mode, text)
         if mode == 'capturing':
             bg, label, vcolor = Colors.success_bg, "CAPTURE", Colors.success_text
             self.indicator.setPixmap(self._dot_pixmap(Colors.success_default))
+        elif mode == 'reconnecting':
+            bg, label, vcolor = Colors.warning_bg, "CAPTURE", Colors.warning_text
+            self.indicator.setPixmap(self._dot_pixmap(Colors.warning_default))
         elif mode == 'disconnected':
             bg, label, vcolor = Colors.error_bg, "CAMERA", Colors.error_text
             self.indicator.setPixmap(mdi('camera-off-outline', Colors.error_text).pixmap(_ICON_SIZE))

@@ -1,37 +1,26 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
-from PySide6.QtCore import Qt, Signal, QTime
-from qfluentwidgets import (
-    BodyLabel, CaptionLabel,
-    PushButton, ComboBox, LineEdit,
-    TimePicker
-)
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PySide6.QtCore import Qt, Signal
+from qfluentwidgets import BodyLabel, CaptionLabel, ComboBox
 from ..components.scroll_safe_spinbox import SpinBox, DoubleSpinBox
 
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, FormRow, SwitchRow, ClickSlider, CollapsibleCard
-from ._schedule_window_source import ScheduleWindowSourceRows
-from ._missing_camera_notice import MissingCameraNotice
+from ._scheduled_capture_card import ScheduledCaptureCard
+from ._zwo_connection_card import ZwoConnectionCard, clean_camera_name
+from ._alpaca_connection_card import AlpacaConnectionCard
+from ._camera_capability_gate import apply_capabilities, show_gain_name, ZWO_WB_MODES
+from ..controllers.alpaca_identity import AlpacaIdentityMemory
 from services.logger import app_logger
 from services.config import DEFAULT_CAMERA_PROFILE
 from services.camera.camera_white_balance import low_gain_warning
-from services.host_platform import zwo_sdk_library_name, zwo_sdk_dialog_filter
+from services.camera.capabilities import ZWO_STATIC, static_capabilities
+from services.camera.camera_source import (
+    ALPACA, alpaca_profile_key, alpaca_settings, camera_source,
+)
 
-_WB_MODES = ["asi_auto", "manual", "gray_world"]
+_WB_MODES = ZWO_WB_MODES  # re-exported for existing callers
 _BAYER_PATTERNS = ["BGGR", "RGGB", "GRBG", "GBRG"]
-
-# Scheduled-capture modes. Order matches the ComboBox.
-_SCHEDULE_MODES = ["always", "gated", "variable"]
-_SCHEDULE_MODE_LABELS = [
-    "Always capture",
-    "Only within time window",
-    "Different rate within time window",
-]
-_SCHEDULE_MODE_HINTS = {
-    "always": "Capture 24/7 at the interval set above.",
-    "gated": "Capture only during the window below; pause (and disconnect the camera) outside it.",
-    "variable": "Capture 24/7, but use the faster rate below while inside the window — useful for night timelapses.",
-}
 
 
 class CameraSettingsWidget(QWidget):
@@ -39,12 +28,22 @@ class CameraSettingsWidget(QWidget):
     detect_cameras_clicked = Signal()
     raw16_mode_changed = Signal(bool)
     revive_camera_clicked = Signal(str)  # Saved camera name to revive via USB reset
+    alpaca_discover_clicked = Signal()
+    alpaca_test_clicked = Signal()
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self.main_window = main_window
         self._loading_config = False
+        self._caps = ZWO_STATIC
+        self._wb_modes = list(ZWO_WB_MODES)
+        self._stored_wb_mode = None
+        self._profile_bayer = None
+        self._raw16_status_borrowed = False
+        self._gain_names = ()
+        self.alpaca_identities = AlpacaIdentityMemory()
         self._setup_ui()
+        apply_capabilities(self, self._caps)
 
     @property
     def _can_save(self):
@@ -54,60 +53,43 @@ class CameraSettingsWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(Spacing.card_gap)
-        layout.addWidget(self._build_connection_card())
+        self._build_connection_cards()
+        layout.addWidget(self.zwo_card)
+        layout.addWidget(self.alpaca_card)
         layout.addWidget(self._build_exposure_card())
         layout.addWidget(self._build_auto_exposure_card())
-        layout.addWidget(self._build_schedule_card())
+        self.schedule_card = ScheduledCaptureCard(self)
+        self.schedule_source_rows = self.schedule_card.schedule_source_rows
+        layout.addWidget(self.schedule_card)
         layout.addWidget(self._build_wb_card())
         layout.addWidget(self._build_advanced_card())
         layout.addStretch()
 
-    def _build_connection_card(self):
-        card = SettingsCard("Camera Connection", "Connect to your ZWO ASI camera")
+    def _build_connection_cards(self):
+        self.zwo_card = ZwoConnectionCard()
+        self.zwo_card.sdk_path_changed.connect(self._on_sdk_path_changed)
+        self.zwo_card.camera_picked.connect(self._on_camera_selected)
+        self.zwo_card.detect_clicked.connect(self.detect_cameras_clicked)
+        self.zwo_card.revive_clicked.connect(self.revive_camera_clicked)
+        self.sdk_path_input = self.zwo_card.sdk_path_input
+        self.camera_combo = self.zwo_card.camera_combo
+        self.detect_btn = self.zwo_card.detect_btn
+        self._missing_notice = self.zwo_card.missing_notice
 
-        sdk_row = QHBoxLayout()
-        sdk_row.setSpacing(Spacing.sm)
-        self.sdk_path_input = LineEdit()
-        self.sdk_path_input.setPlaceholderText(f"Path to {zwo_sdk_library_name()}")
-        self.sdk_path_input.textChanged.connect(self._on_sdk_path_changed)
-        sdk_row.addWidget(self.sdk_path_input, 1)
-        sdk_browse = PushButton("Browse")
-        sdk_browse.setIcon(mdi('folder-outline'))
-        sdk_browse.clicked.connect(self._browse_sdk)
-        sdk_row.addWidget(sdk_browse)
-        sdk_widget = QWidget()
-        sdk_widget.setLayout(sdk_row)
-        card.add_row("SDK Path", sdk_widget)
-
-        camera_row = QHBoxLayout()
-        camera_row.setSpacing(Spacing.sm)
-        self.camera_combo = ComboBox()
-        self.camera_combo.setPlaceholderText("No cameras detected")
-        self.camera_combo.currentIndexChanged.connect(self._on_camera_selected)
-        camera_row.addWidget(self.camera_combo, 1)
-        self.detect_btn = PushButton("Detect")
-        self.detect_btn.setIcon(mdi('refresh'))
-        self.detect_btn.clicked.connect(self._on_detect_cameras)
-        camera_row.addWidget(self.detect_btn)
-        camera_widget = QWidget()
-        camera_widget.setLayout(camera_row)
-        card.add_row("Camera", camera_widget)
-
-        self._missing_notice = MissingCameraNotice()
-        self._missing_notice.connect_detect(self._on_detect_cameras)
-        self._missing_notice.revive_clicked.connect(self.revive_camera_clicked)
-        card.add_widget(self._missing_notice)
-
-        return card
+        self.alpaca_card = AlpacaConnectionCard()
+        self.alpaca_card.connection_edited.connect(self._on_alpaca_connection)
+        self.alpaca_card.device_picked.connect(self._on_alpaca_connection)
+        self.alpaca_card.discover_clicked.connect(self.alpaca_discover_clicked)
+        self.alpaca_card.test_clicked.connect(self.alpaca_test_clicked)
 
     def set_missing_camera_warning(self, saved_name: str, phantom_count: int = 0):
         """Pass empty saved_name to hide. phantom_count>0 shows Revive (Windows) or
         Detect Again with unplug guidance (elsewhere)."""
-        self._missing_notice.set_warning(saved_name, phantom_count)
+        self.zwo_card.missing_notice.set_warning(saved_name, phantom_count)
 
     def reset_revive_button(self):
         """Restore the Revive button after an async reset finishes."""
-        self._missing_notice.reset_revive_button()
+        self.zwo_card.missing_notice.reset_revive_button()
 
     def _build_exposure_card(self):
         card = SettingsCard("Exposure Settings", "Control exposure time and gain")
@@ -119,14 +101,15 @@ class CameraSettingsWidget(QWidget):
         self.exposure_spin.setValue(1.0)
         self.exposure_spin.setToolTip("Single frame exposure time (0.001s to 3600s)")
         self.exposure_spin.valueChanged.connect(self._on_exposure_changed)
-        card.add_row("Exposure", self.exposure_spin, "0.001s to 3600s")
+        self.exposure_row = card.add_row("Exposure", self.exposure_spin, "0.001s to 3600s")
 
         self.gain_spin = SpinBox()
         self.gain_spin.setRange(0, 600)
         self.gain_spin.setValue(100)
         self.gain_spin.setToolTip("Camera gain/sensitivity (higher = brighter but more noise)")
         self.gain_spin.valueChanged.connect(self._on_gain_changed)
-        card.add_row("Gain", self.gain_spin, "0 to 600")
+        self.gain_spin.valueChanged.connect(lambda *_: show_gain_name(self))
+        self.gain_row = card.add_row("Gain", self.gain_spin, "0 to 600")
 
         self.interval_spin = DoubleSpinBox()
         self.interval_spin.setRange(0.1, 3600.0)
@@ -135,7 +118,7 @@ class CameraSettingsWidget(QWidget):
         self.interval_spin.setValue(5.0)
         self.interval_spin.setToolTip("Time to wait between capturing frames")
         self.interval_spin.valueChanged.connect(self._on_interval_changed)
-        card.add_row("Interval", self.interval_spin, "Time between captures")
+        self.interval_row = card.add_row("Interval", self.interval_spin, "Time between captures")
 
         return card
 
@@ -190,84 +173,6 @@ class CameraSettingsWidget(QWidget):
 
         return card
 
-    def _build_schedule_card(self):
-        card = CollapsibleCard("Scheduled Capture", mdi('calendar-clock'))
-
-        # Mode selector
-        self.schedule_mode_combo = ComboBox()
-        self.schedule_mode_combo.addItems(_SCHEDULE_MODE_LABELS)
-        self.schedule_mode_combo.setToolTip(
-            "Always: capture 24/7. "
-            "Only within window: pause outside the window. "
-            "Different rate within window: switch rate inside vs outside (e.g. fast at night, slow by day)."
-        )
-        self.schedule_mode_combo.currentIndexChanged.connect(self._on_schedule_mode_changed)
-        card.add_row("Mode", self.schedule_mode_combo)
-
-        # Per-mode description line — updated by _on_schedule_mode_changed
-        self.schedule_mode_hint = CaptionLabel(_SCHEDULE_MODE_HINTS["always"])
-        self.schedule_mode_hint.setStyleSheet(f"color: {Colors.text_muted}; padding: 0 8px;")
-        self.schedule_mode_hint.setWordWrap(True)
-        card.add_widget(self.schedule_mode_hint)
-
-        # Window-source rows (fixed vs. follow-timelapse) — shown for gated + variable
-        self.schedule_source_rows = ScheduleWindowSourceRows()
-        self.schedule_source_rows.source_changed.connect(self._on_schedule_source_changed)
-        self.schedule_source_rows.margin_changed.connect(self._on_schedule_margin_changed)
-        self.schedule_source_rows.hide()
-        card.add_widget(self.schedule_source_rows)
-
-        # Time window row (shown for gated + variable, fixed source only)
-        self.schedule_time_widget = QWidget()
-        time_row = QHBoxLayout(self.schedule_time_widget)
-        time_row.setContentsMargins(0, 0, 0, 0)
-        time_row.setSpacing(Spacing.md)
-
-        time_label_start = BodyLabel("Window:")
-        time_label_start.setStyleSheet(f"color: {Colors.text_secondary};")
-        time_row.addWidget(time_label_start)
-
-        self.schedule_start = TimePicker()
-        self.schedule_start.setTime(QTime(17, 0))
-        self.schedule_start.setToolTip("Window start time (24hr format)")
-        self.schedule_start.timeChanged.connect(self._on_schedule_time_changed)
-        time_row.addWidget(self.schedule_start)
-
-        time_label_to = BodyLabel("to")
-        time_label_to.setStyleSheet(f"color: {Colors.text_muted};")
-        time_row.addWidget(time_label_to)
-
-        self.schedule_end = TimePicker()
-        self.schedule_end.setTime(QTime(9, 0))
-        self.schedule_end.setToolTip("Window end time (24hr format; crossing midnight is supported)")
-        self.schedule_end.timeChanged.connect(self._on_schedule_time_changed)
-        time_row.addWidget(self.schedule_end)
-        time_row.addStretch()
-
-        self.schedule_time_widget.hide()
-        card.add_widget(self.schedule_time_widget)
-
-        # Window interval row (shown for variable only)
-        self.schedule_window_interval_spin = DoubleSpinBox()
-        self.schedule_window_interval_spin.setRange(0.1, 3600.0)
-        self.schedule_window_interval_spin.setDecimals(1)
-        self.schedule_window_interval_spin.setSuffix(" s")
-        self.schedule_window_interval_spin.setValue(5.0)
-        self.schedule_window_interval_spin.setToolTip(
-            "Time between captures while inside the window. Outside the window, the "
-            "Interval above is used."
-        )
-        self.schedule_window_interval_spin.valueChanged.connect(self._on_schedule_window_interval_changed)
-        self.schedule_window_row = FormRow(
-            "In-window interval",
-            self.schedule_window_interval_spin,
-            "Overrides the Interval above while inside the window."
-        )
-        self.schedule_window_row.hide()
-        card.add_widget(self.schedule_window_row)
-
-        return card
-
     def _build_wb_card(self):
         card = CollapsibleCard("White Balance", mdi('palette'))
 
@@ -305,9 +210,14 @@ class CameraSettingsWidget(QWidget):
         card.add_widget(self.gray_world_settings)
 
         self.manual_wb_settings = QWidget()
-        manual_wb_layout = QVBoxLayout(self.manual_wb_settings)
+        manual_box = QVBoxLayout(self.manual_wb_settings)
+        manual_box.setContentsMargins(0, 0, 0, 0)
+        self.hw_wb_settings = QWidget()
+        manual_wb_layout = QVBoxLayout(self.hw_wb_settings)
         manual_wb_layout.setContentsMargins(0, 0, 0, 0)
         manual_wb_layout.setSpacing(Spacing.input_gap)
+        manual_box.addWidget(self.hw_wb_settings)
+        manual_box.addWidget(self._build_software_wb())
 
         self.wb_r_slider = ClickSlider(Qt.Horizontal)
         self.wb_r_slider.setRange(1, 99)
@@ -344,6 +254,29 @@ class CameraSettingsWidget(QWidget):
 
         return card
 
+    def _build_software_wb(self):
+        """Red/Blue multipliers applied to the debayered frame, for a camera
+        without hardware white balance (white_balance.manual_*_gain)."""
+        self.sw_wb_settings = QWidget()
+        layout = QVBoxLayout(self.sw_wb_settings)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(Spacing.input_gap)
+        for attr, label in (('sw_red_gain_spin', "Red gain"), ('sw_blue_gain_spin', "Blue gain")):
+            spin = DoubleSpinBox()
+            spin.setRange(0.1, 4.0)
+            spin.setSingleStep(0.05)
+            spin.setDecimals(2)
+            spin.setValue(1.0)
+            spin.valueChanged.connect(self._on_software_wb_changed)
+            setattr(self, attr, spin)
+            layout.addWidget(FormRow(label, spin))
+        note = CaptionLabel("Applied in software, 1.00 leaves the colour as it is.")
+        note.setStyleSheet(f"color: {Colors.text_muted};")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.sw_wb_settings.hide()
+        return self.sw_wb_settings
+
     def _build_advanced_card(self):
         card = CollapsibleCard("Advanced Settings", mdi('tune-variant'))
 
@@ -352,7 +285,7 @@ class CameraSettingsWidget(QWidget):
         self.offset_spin.setValue(20)
         self.offset_spin.setToolTip("Black level offset to prevent clipping")
         self.offset_spin.valueChanged.connect(self._on_offset_changed)
-        card.add_row("Offset", self.offset_spin, "Black level (0-255)")
+        self.offset_row = card.add_row("Offset", self.offset_spin, "Black level (0-255)")
 
         self.flip_combo = ComboBox()
         self.flip_combo.addItems(["None", "Horizontal", "Vertical", "Both"])
@@ -364,7 +297,7 @@ class CameraSettingsWidget(QWidget):
         self.bayer_combo.addItems(_BAYER_PATTERNS)
         self.bayer_combo.setToolTip("Color filter array pattern - BGGR for most ZWO cameras")
         self.bayer_combo.currentIndexChanged.connect(self._on_bayer_changed)
-        card.add_row("Bayer Pattern", self.bayer_combo, "BGGR for most ASI cameras")
+        self.bayer_row = card.add_row("Bayer Pattern", self.bayer_combo, "BGGR for most ASI cameras")
 
         self.raw16_switch = SwitchRow(
             "Use RAW16 Mode",
@@ -380,31 +313,16 @@ class CameraSettingsWidget(QWidget):
 
         return card
 
-    @staticmethod
-    def _clean_camera_name(name: str) -> str:
-        return name.split('(Index:')[0].strip() if '(Index:' in name else name
-
-    def _browse_sdk(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select ASI SDK", "", zwo_sdk_dialog_filter())
-        if file_path:
-            self.sdk_path_input.setText(file_path)
+    _clean_camera_name = staticmethod(clean_camera_name)
 
     def _on_sdk_path_changed(self, text):
         if self._can_save:
             self.main_window.config.set('zwo_sdk_path', text)
             self.settings_changed.emit()
 
-    def _on_detect_cameras(self):
-        self.detect_cameras_clicked.emit()
-
-    def _on_camera_selected(self, index):
+    def _on_camera_selected(self, actual_index, camera_name):
         if not self._can_save:
             return
-        camera_name = self._clean_camera_name(self.camera_combo.currentText())
-        # The SDK index now rides as hidden item data (set in set_cameras), so
-        # we no longer parse it out of the visible label.
-        data = self.camera_combo.currentData()
-        actual_index = data if isinstance(data, int) else index
         self.main_window.config.set('zwo_selected_camera', actual_index)
         self.main_window.config.set('zwo_selected_camera_name', camera_name)
         # Identity is keyed by serial, which is learned on connect. A manual
@@ -415,15 +333,40 @@ class CameraSettingsWidget(QWidget):
         self.load_from_config(self.main_window.config)
         self.settings_changed.emit()
 
+    def _on_alpaca_connection(self, values: dict):
+        """Typed or discovered address; see AlpacaIdentityMemory.edited_settings."""
+        if not self._can_save:
+            return
+        current = self.main_window.config.get('alpaca_camera') or {}
+        cfg = self.alpaca_identities.edited_settings(current, values)
+        self.main_window.config.set('alpaca_camera', cfg)
+        self.load_from_config(self.main_window.config)
+        self.settings_changed.emit()
+
+    def _alpaca_identity(self, config):
+        settings = alpaca_settings(config)
+        return settings['name'], alpaca_profile_key(settings)
+
     def _save_to_camera_profile(self, **kwargs):
         if not self.main_window or not hasattr(self.main_window, 'config'):
             return
-        camera_name = self._clean_camera_name(self.main_window.config.get('zwo_selected_camera_name', ''))
-        serial = self.main_window.config.get('zwo_selected_camera_serial', '')
+        config = self.main_window.config
+        if camera_source(config) == ALPACA:
+            camera_name, serial = self._alpaca_identity(config)
+            if serial:
+                config.update_camera_profile(camera_name, serial=serial, **kwargs)
+            # Capture reads zwo_auto_exposure on either backend. The other zwo_*
+            # mirrors are legacy ZWO keys: on an Alpaca config the migration
+            # would fold them into a stray profile at the next start.
+            if 'auto_exposure' in kwargs:
+                config.set('zwo_auto_exposure', kwargs['auto_exposure'])
+            return
+        camera_name = self._clean_camera_name(config.get('zwo_selected_camera_name', ''))
+        serial = config.get('zwo_selected_camera_serial', '')
         if camera_name:
-            self.main_window.config.update_camera_profile(camera_name, serial=serial, **kwargs)
+            config.update_camera_profile(camera_name, serial=serial, **kwargs)
         for key, value in kwargs.items():
-            self.main_window.config.set(f'zwo_{key}', value)
+            config.set(f'zwo_{key}', value)
 
     def _on_exposure_changed(self, value):
         if self._can_save:
@@ -495,58 +438,40 @@ class CameraSettingsWidget(QWidget):
             f"{'Full' if checked else 'Standard 8-bit'} sensor bit depth will be used"
         )
 
-    def _update_schedule_window_visibility(self, mode: str):
-        """Shared visibility rule for the window rows, keyed by mode + source."""
-        uses_window = mode in ("gated", "variable")
-        self.schedule_source_rows.setVisible(uses_window)
-        self.schedule_time_widget.setVisible(uses_window and not self.schedule_source_rows.uses_timelapse())
+    def _select_wb_mode(self, stored):
+        """Show `stored`; a mode this camera lacks (asi_auto) reads as gray_world
+        without being written back."""
+        shown = "gray_world" if stored == "asi_auto" and stored not in self._wb_modes else stored
+        if shown in self._wb_modes:
+            self.wb_mode_combo.blockSignals(True)
+            self.wb_mode_combo.setCurrentIndex(self._wb_modes.index(shown))
+            self.wb_mode_combo.blockSignals(False)
+        self.manual_wb_settings.setVisible(shown == "manual")
+        self.gray_world_settings.setVisible(shown == "gray_world")
 
-    def _on_schedule_mode_changed(self, index):
-        mode = _SCHEDULE_MODES[index] if 0 <= index < len(_SCHEDULE_MODES) else "always"
-        self.schedule_mode_hint.setText(_SCHEDULE_MODE_HINTS.get(mode, ""))
-        self._update_schedule_window_visibility(mode)
-        # In-window interval is only meaningful in variable mode.
-        self.schedule_window_row.setVisible(mode == "variable")
-        if self._can_save:
-            self.main_window.config.set('scheduled_capture_mode', mode)
-            # Keep legacy flag in sync so any external tooling still reading it
-            # (migrations, pre-update installs) sees a sensible value.
-            self.main_window.config.set('scheduled_capture_enabled', mode != "always")
-            self.settings_changed.emit()
+    def _select_bayer(self, pattern) -> bool:
+        if pattern not in _BAYER_PATTERNS:
+            return False
+        self.bayer_combo.setCurrentIndex(_BAYER_PATTERNS.index(pattern))
+        return True
 
-    def _on_schedule_time_changed(self):
+    def _on_software_wb_changed(self, _value=None):
         if not self._can_save:
             return
-        start_time = self.schedule_start.getTime()
-        end_time = self.schedule_end.getTime()
-        self.main_window.config.set('scheduled_start_time', start_time.toString('HH:mm'))
-        self.main_window.config.set('scheduled_end_time', end_time.toString('HH:mm'))
+        wb_settings = self.main_window.config.get('white_balance', {})
+        wb_settings['manual_red_gain'] = round(self.sw_red_gain_spin.value(), 2)
+        wb_settings['manual_blue_gain'] = round(self.sw_blue_gain_spin.value(), 2)
+        self.main_window.config.set('white_balance', wb_settings)
         self.settings_changed.emit()
 
-    def _on_schedule_window_interval_changed(self, value):
-        if self._can_save:
-            self.main_window.config.set('scheduled_window_interval', value)
-            self.settings_changed.emit()
-
-    def _on_schedule_source_changed(self, source):
-        mode = _SCHEDULE_MODES[self.schedule_mode_combo.currentIndex()]
-        self._update_schedule_window_visibility(mode)
-        if self._can_save:
-            self.main_window.config.set('scheduled_window_source', source)
-            self.schedule_source_rows.refresh_preview(self.main_window.config)
-            self.settings_changed.emit()
-
-    def _on_schedule_margin_changed(self, value):
-        if self._can_save:
-            self.main_window.config.set('scheduled_window_margin_min', value)
-            self.schedule_source_rows.refresh_preview(self.main_window.config)
-            self.settings_changed.emit()
-
     def _on_wb_mode_changed(self, index):
-        mode = _WB_MODES[index]
+        if not 0 <= index < len(self._wb_modes):
+            return
+        mode = self._wb_modes[index]
         self.manual_wb_settings.setVisible(mode == "manual")
         self.gray_world_settings.setVisible(mode == "gray_world")
         if self._can_save:
+            self._stored_wb_mode = mode
             wb_settings = self.main_window.config.get('white_balance', {})
             wb_settings['mode'] = mode
             self.main_window.config.set('white_balance', wb_settings)
@@ -561,17 +486,39 @@ class CameraSettingsWidget(QWidget):
         self.main_window.config.set('white_balance', wb_settings)
         self.settings_changed.emit()
 
+    def apply_capabilities(self, caps, gain_names=()):
+        """Gate the widgets on `caps` (static per source, or a live session's);
+        `gain_names` labels a camera that offers named gains (display only)."""
+        apply_capabilities(self, caps, gain_names)
+
+    def _active_profile(self, config):
+        if camera_source(config) == ALPACA:
+            # Read, never create: a profile per keystroke of a typed host would
+            # pile up. The first edited setting creates it.
+            name, key = self._alpaca_identity(config)
+            if key and key in config.list_camera_profiles():
+                return config.get_camera_profile(name, key) or dict(DEFAULT_CAMERA_PROFILE)
+            return dict(DEFAULT_CAMERA_PROFILE)
+        active_name = config.get('zwo_selected_camera_name', '') or config.get('zwo_camera_name', '')
+        active_serial = config.get('zwo_selected_camera_serial', '')
+        return (
+            self.main_window.config.get_camera_profile(active_name, active_serial)
+            if active_name else dict(DEFAULT_CAMERA_PROFILE)
+        )
+
     def load_from_config(self, config):
         self._loading_config = True
         try:
+            source = camera_source(config)
+            if self._caps.backend != source:
+                self._caps = static_capabilities(source)
+            # Ranges first, so a stored value is never clamped by the last
+            # camera's limits.
+            apply_capabilities(self, self._caps)
             self.sdk_path_input.setText(config.get('zwo_sdk_path', ''))
-
-            active_name = config.get('zwo_selected_camera_name', '') or config.get('zwo_camera_name', '')
-            active_serial = config.get('zwo_selected_camera_serial', '')
-            profile = (
-                self.main_window.config.get_camera_profile(active_name, active_serial)
-                if active_name else dict(DEFAULT_CAMERA_PROFILE)
-            )
+            self.alpaca_card.load(alpaca_settings(config))
+            self.alpaca_identities.remember(alpaca_settings(config))
+            profile = self._active_profile(config)
 
             self.exposure_spin.setValue(
                 profile.get('exposure_ms', DEFAULT_CAMERA_PROFILE['exposure_ms']) / 1000.0
@@ -589,85 +536,37 @@ class CameraSettingsWidget(QWidget):
             )
             self.auto_exp_settings.setVisible(auto_exp_enabled)
 
-            # Derive the scheduled-capture mode, accepting legacy configs that
-            # only stored the boolean flag.
-            mode = config.get('scheduled_capture_mode')
-            if mode not in _SCHEDULE_MODES:
-                mode = 'gated' if config.get('scheduled_capture_enabled', False) else 'always'
-            self.schedule_mode_combo.setCurrentIndex(_SCHEDULE_MODES.index(mode))
-            self.schedule_mode_hint.setText(_SCHEDULE_MODE_HINTS.get(mode, ""))
-
-            start_h, start_m = map(int, config.get('scheduled_start_time', '17:00').split(':'))
-            end_h, end_m = map(int, config.get('scheduled_end_time', '09:00').split(':'))
-            self.schedule_start.setTime(QTime(start_h, start_m))
-            self.schedule_end.setTime(QTime(end_h, end_m))
-            self.schedule_window_interval_spin.setValue(config.get('scheduled_window_interval', 5.0))
-
-            self.schedule_source_rows.load(config)
-            self._update_schedule_window_visibility(mode)
-            self.schedule_window_row.setVisible(mode == "variable")
+            self.schedule_card.load(config)
 
             wb_settings = config.get('white_balance', {})
-            wb_mode = wb_settings.get('mode', 'asi_auto')
-            if wb_mode in _WB_MODES:
-                self.wb_mode_combo.setCurrentIndex(_WB_MODES.index(wb_mode))
+            self._stored_wb_mode = wb_settings.get('mode', 'asi_auto')
+            self._select_wb_mode(self._stored_wb_mode)
             self.wb_low_spin.setValue(wb_settings.get('gray_world_low_pct', 5))
             self.wb_high_spin.setValue(wb_settings.get('gray_world_high_pct', 95))
-            self.manual_wb_settings.setVisible(wb_mode == "manual")
-            self.gray_world_settings.setVisible(wb_mode == "gray_world")
+            self.sw_red_gain_spin.setValue(float(wb_settings.get('manual_red_gain', 1.0)))
+            self.sw_blue_gain_spin.setValue(float(wb_settings.get('manual_blue_gain', 1.0)))
 
             self.wb_r_slider.setValue(profile.get('wb_r', DEFAULT_CAMERA_PROFILE['wb_r']))
             self.wb_b_slider.setValue(profile.get('wb_b', DEFAULT_CAMERA_PROFILE['wb_b']))
             self.offset_spin.setValue(profile.get('offset', DEFAULT_CAMERA_PROFILE['offset']))
             self.flip_combo.setCurrentIndex(profile.get('flip', DEFAULT_CAMERA_PROFILE['flip']))
 
-            bayer = profile.get('bayer_pattern', DEFAULT_CAMERA_PROFILE['bayer_pattern'])
-            if bayer in _BAYER_PATTERNS:
-                self.bayer_combo.setCurrentIndex(_BAYER_PATTERNS.index(bayer))
+            self._profile_bayer = profile.get('bayer_pattern', DEFAULT_CAMERA_PROFILE['bayer_pattern'])
+            if not self._caps.bayer_from_device:
+                self._select_bayer(self._profile_bayer)
         finally:
             self._loading_config = False
 
     def set_cameras(self, camera_list: list):
-        self.camera_combo.blockSignals(True)
-        self.camera_combo.clear()
-        if camera_list:
-            # Display the model name only — the hardware serial is the identity
-            # now. The SDK index is kept as hidden item data (a starting hint for
-            # connect); it shifts on hot-plug, so showing it is misleading.
-            # NB: pass the index as userData, NOT positionally — ComboBox.addItem
-            # is (text, icon, userData), so a bare int lands in the icon slot and
-            # crashes the dropdown ('int' object has no attribute 'icon') when the
-            # menu renders. currentData() also reads userData, so this is the slot
-            # _on_camera_selected expects.
-            for pos, entry in enumerate(camera_list):
-                idx = pos
-                if '(Index: ' in entry:
-                    try:
-                        idx = int(entry.split('(Index: ')[1].rstrip(')'))
-                    except (IndexError, ValueError):
-                        idx = pos
-                self.camera_combo.addItem(self._clean_camera_name(entry), userData=idx)
-        else:
-            self.camera_combo.setPlaceholderText("No cameras detected")
-        self.camera_combo.blockSignals(False)
+        self.zwo_card.set_cameras(camera_list)
 
     def set_detecting(self, is_detecting: bool):
-        self.detect_btn.setEnabled(not is_detecting)
-        self.detect_btn.setText("Detecting..." if is_detecting else "Detect")
+        self.zwo_card.set_detecting(is_detecting)
 
     def set_capture_active(self, active: bool):
-        """Disable camera selection/detection while capturing.
-
-        Changing the selected camera does not switch the live hardware — it only
-        pushes the picked camera's profile onto the running one (the
-        selection/connection decoupling). Locking the picker during capture
-        enforces the real workflow: Stop → pick a camera → Start.
-        """
-        self.camera_combo.setEnabled(not active)
-        self.detect_btn.setEnabled(not active)
-        self.camera_combo.setToolTip(
-            "Stop capture to change cameras" if active else ""
-        )
+        """Lock camera selection while capturing: Stop → pick a camera → Start."""
+        self.zwo_card.set_capture_active(active)
+        self.alpaca_card.set_capture_active(active)
 
     def update_camera_capabilities(self, supports_raw16: bool, bit_depth: int):
         self._loading_config = True
@@ -688,6 +587,9 @@ class CameraSettingsWidget(QWidget):
             self._loading_config = False
 
     def reset_camera_capabilities(self):
+        if self._caps.backend != 'zwo':
+            apply_capabilities(self, static_capabilities(self._caps.backend))
+            return
         self._loading_config = True
         try:
             self.raw16_switch.setEnabled(False)

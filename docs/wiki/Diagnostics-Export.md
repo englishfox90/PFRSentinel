@@ -9,7 +9,7 @@
 ## Creating a Bundle
 
 1. Open the [Logs](Logs) tab.
-2. If you are reporting an image problem in ZWO camera mode, leave capture running so the bundle can include a fresh frame.
+2. If you are reporting an image problem in camera mode (ZWO, or Alpaca from the next release), leave capture running so the bundle can include a fresh frame.
 3. Click **Export Diagnostics**.
 
 While the export runs, the button reads **Exporting…** and a status line below the controls shows progress:
@@ -59,7 +59,7 @@ If capture is not running, the most recent frame captured since the app was star
 | `allsky/calibration_history/cal_....json` | Every calibration that has been in use, with when and why it was saved and the one it replaced (see [All-Sky Overlay](All-Sky-Overlay#calibration-history)). A few kilobytes each, at most 40. *Added in version v3.7.9.* |
 | `allsky/custom_...` | A custom calibration file, if your all-sky settings point to one outside the usual location. |
 | `allsky/buffer_....json` | The newest **calibration buffer dump**, if one exists: the star positions automatic calibration has been working from, with the time of each frame and the site coordinates rounded to about a kilometre. No images. Written when automatic re-calibration gives up, and by **Dump calibration buffer** on the All-Sky card (see [All-Sky Overlay](All-Sky-Overlay#dump-calibration-buffer)). *New in the next release — not available in version 3.7.7 or earlier.* |
-| `summary.json` | App version, Windows version, capture mode, whether capture or directory watching was running, the selected camera name, the live camera settings (exposure, gain, offset, auto-exposure, maximum exposure, target brightness, capture interval, RAW16, Bayer pattern, white balance), notes explaining anything that was skipped, and a list of included and missing files. It also carries `resources`: the latest memory and CPU figures from the [resource line](Logs#resource-lines). *Added in version v3.7.9.* |
+| `summary.json` | App version, Windows version, capture mode, whether capture or directory watching was running, the selected camera name, the live camera settings (exposure, gain, offset, auto-exposure, maximum exposure, target brightness, capture interval, RAW16, Bayer pattern, white balance), notes explaining anything that was skipped, and a list of included and missing files. It also carries `resources`: the latest memory and CPU figures from the [resource line](Logs#resource-lines). *Added in version v3.7.9.* From the next release it also names the camera source (`zwo` or `alpaca`), and for a running [Alpaca camera](Alpaca-Camera) adds the driver, interface version, sensor type, MaxADU and bit depth, Bayer pattern, image format, and the last image download's size, time and speed. The Alpaca server address and the camera's unique ID are not included. |
 
 Items that don't exist on your system (for example, no all-sky calibration) are simply left out and listed as missing in `summary.json`.
 
@@ -75,6 +75,7 @@ Before your settings are written to `config.redacted.json`, any setting whose na
 | Webhooks and addresses | `webhook`, `url` |
 | Location | `latitude`, `longitude`, `location`, `elevation` |
 | Identifiers | `distinct_id` (the anonymous analytics ID), `serial` |
+| Alpaca camera | The server address (`alpaca_camera.host`, unless it is this computer: `localhost` or `127.0.0.1`), the camera's unique ID (`alpaca_camera.unique_id`), and the unique ID in the names of Alpaca camera profiles. New in the next release. |
 
 This covers, for example, your Discord webhook, OpenWeatherMap API key, web server control token, notification webhook URLs and secrets, and your observatory coordinates.
 
@@ -87,6 +88,7 @@ Check the ZIP before sharing it publicly. The following are included as they are
 - **Log files.** Redaction applies to the settings file only. Logs are copied unchanged and can contain anything the app logged, such as folder paths, camera names, and web addresses. Your observatory coordinates, weather city name, and OpenWeatherMap API key are not written to the log, so they don't appear there. (Version 3.7.6 and earlier did log the coordinates and city, and could log the API key in weather error messages; those older logs are in a different folder and are not included in the bundle, but check them before sharing them any other way. See [Logs](Logs#log-files-on-disk).)
 - **File and folder paths** in settings and logs. These often include your Windows user name (for example `C:\Users\YourName\...`).
 - **Camera name** and camera settings in `summary.json`.
+- **Alpaca server address in the logs.** From the next release, connection lines in the log name the [Alpaca camera](Alpaca-Camera)'s server address and port, and sometimes its unique ID. Only the settings file hides them.
 - **Images.** The raw frame and latest output show whatever the camera sees, including any text overlays such as the date, time, or weather.
 - **Approximate site coordinates** in the calibration buffer dump, rounded to two decimal places (about a kilometre). Replaying a calibration needs to know where the sky was seen from; the exact coordinates in your settings stay redacted.
 

@@ -1,6 +1,6 @@
 # Timelapse
 
-The **Timelapse** tab records a video of each night from the frames PFR Sentinel captures. Every captured frame inside the recording window becomes one frame of the video, which is encoded as it goes, so there is no long render at the end of the night. Timelapse is designed for **ZWO Camera** capture mode. When **Directory Watch** mode is selected, the tab shows the notice "Timelapse recording is only available in Camera (ZWO) capture mode."
+The **Timelapse** tab records a video of each night from the frames PFR Sentinel captures. Every captured frame inside the recording window becomes one frame of the video, which is encoded as it goes, so there is no long render at the end of the night. Timelapse is designed for camera capture: **ZWO Camera** mode, or **Alpaca Camera** mode from the next release. When **Directory Watch** mode is selected, the tab shows the notice "Timelapse recording is only available in Camera capture mode." (In version 3.8.0 and earlier the notice ends "in Camera (ZWO) capture mode".)
 
 Timelapse recording needs ffmpeg, a free video encoder. If ffmpeg isn't found, the tab shows an install card instead of the recording settings.
 

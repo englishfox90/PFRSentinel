@@ -51,6 +51,11 @@ class CameraCalibration:
         # Abort flag: set this to interrupt a running run_calibration() loop
         self._abort = threading.Event()
 
+        # A handle whose exposures are not zwoasi's start / poll / read can do
+        # one calibration exposure itself: hook(seconds, abort_event) -> the
+        # raw readout bytes. None (every ZWO session) keeps the code below.
+        self.exposure_hook = None
+
         # Throttle state for the "pinned at max exposure, still too dark" warning.
         # Tracks whether we are currently in that state (so clearing it re-arms
         # an immediate warning next time) and when we last logged it.
@@ -67,6 +72,41 @@ class CameraCalibration:
             self.logger_callback(message)
         else:
             app_logger.debug(message)
+
+    def _expose_and_read(self):
+        """One ZWO calibration exposure: start, poll, read out (bounded)."""
+        # REL-003: Use snapshot mode (consistent with capture_loop).
+        # Bounded so a wedged USB call can't outlast stop_capture's
+        # 3s join — the loop's _abort check then breaks promptly.
+        call_with_timeout(self.camera.start_exposure, 10.0,
+                          hint="calibration start_exposure")
+
+        # Wait for exposure to complete
+        import time
+        timeout = self.exposure_seconds + 2.0
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            if self._abort.is_set():
+                raise Exception("Calibration aborted during exposure wait")
+            status = self.camera.get_exposure_status()
+            if status == self.asi.ASI_EXP_SUCCESS:
+                break
+            elif status == self.asi.ASI_EXP_FAILED:
+                raise Exception("Calibration exposure failed")
+            time.sleep(0.05)
+
+        # Check for timeout
+        if time.time() - start_time >= timeout:
+            raise Exception(f"Calibration exposure timeout ({timeout}s)")
+
+        # Get the captured data (bounded — see start_exposure above)
+        data = call_with_timeout(
+            self.camera.get_data_after_exposure,
+            max(10.0, self.exposure_seconds),
+            hint="calibration readout — USB may be wedged",
+        )
+        return data
 
     def run_calibration(self, max_attempts=15):
         """
@@ -101,37 +141,10 @@ class CameraCalibration:
                 return False
 
             try:
-                # REL-003: Use snapshot mode (consistent with capture_loop).
-                # Bounded so a wedged USB call can't outlast stop_capture's
-                # 3s join — the loop's _abort check then breaks promptly.
-                call_with_timeout(self.camera.start_exposure, 10.0,
-                                  hint="calibration start_exposure")
-
-                # Wait for exposure to complete
-                import time
-                timeout = self.exposure_seconds + 2.0
-                start_time = time.time()
-
-                while time.time() - start_time < timeout:
-                    if self._abort.is_set():
-                        raise Exception("Calibration aborted during exposure wait")
-                    status = self.camera.get_exposure_status()
-                    if status == self.asi.ASI_EXP_SUCCESS:
-                        break
-                    elif status == self.asi.ASI_EXP_FAILED:
-                        raise Exception("Calibration exposure failed")
-                    time.sleep(0.05)
-
-                # Check for timeout
-                if time.time() - start_time >= timeout:
-                    raise Exception(f"Calibration exposure timeout ({timeout}s)")
-
-                # Get the captured data (bounded — see start_exposure above)
-                data = call_with_timeout(
-                    self.camera.get_data_after_exposure,
-                    max(10.0, self.exposure_seconds),
-                    hint="calibration readout — USB may be wedged",
-                )
+                if self.exposure_hook is not None:
+                    data = self.exposure_hook(self.exposure_seconds, self._abort)
+                else:
+                    data = self._expose_and_read()
 
                 # Get camera dimensions for reshaping
                 camera_info = self.camera.get_camera_property()

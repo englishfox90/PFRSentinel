@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from services.app_config import APP_DISPLAY_NAME, APP_SUBTITLE, APP_AUTHOR
 from services.config import Config
+from services.camera.camera_source import camera_ready, is_alpaca
 from services.logger import app_logger
 from services.web_output import WebOutputServer
 from services.ml_data_collector import init_ml_collector
@@ -383,6 +384,7 @@ class MainWindow(
         self.capture_panel.revive_camera_clicked.connect(self._on_revive_camera)
 
         self.cameras_detected.connect(self._on_cameras_detected)
+        self._setup_alpaca_connections()
 
         self.output_panel.test_discord_requested.connect(self._on_test_discord)
         self.output_panel.test_hermes_requested.connect(self._on_test_hermes)
@@ -437,7 +439,7 @@ class MainWindow(
         by which point the user was already wondering why recovery didn't
         work. Surface it at startup instead.
         """
-        if sys.platform != 'win32':
+        if sys.platform != 'win32' or is_alpaca(self.config):
             return
         # Admin only matters for USB recovery; nothing to warn about when it's off.
         if self.config.get('camera_auto_recovery', True) is False:
@@ -611,21 +613,12 @@ class MainWindow(
     # =========================================================================
 
     def _camera_ready(self) -> bool:
-        """Whether the primary action should offer Start (vs Connect Camera).
-
-        Watch mode is always 'ready' (start is gated separately by a valid
-        directory); camera mode is ready when a camera is connected or at least
-        one has been detected.
-        """
-        if self.config.get('capture_mode', 'camera') == 'watch':
-            return True
-        if self.camera_controller and getattr(self.camera_controller, 'is_connected', False):
-            return True
-        return bool(self.config.get('available_cameras'))
+        """Whether the primary action should offer Start (vs Connect Camera)."""
+        return camera_ready(self.config, self.camera_controller)
 
     def _update_status(self):
         try:
-            self.app_bar.set_camera_connected(self._camera_ready())
+            self.app_bar.set_camera_connected(self._camera_ready(), self._camera_idle_label())
             self.app_bar.update_status(
                 is_capturing=self.is_capturing,
                 image_count=self.image_count,

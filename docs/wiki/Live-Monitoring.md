@@ -38,7 +38,7 @@ The app reopens on the page you were last using.
 
 | Button | When shown | What it does |
 |--------|------------|--------------|
-| **Connect Camera** | ZWO camera mode with no camera detected | Searches for connected ZWO cameras. |
+| **Connect Camera** | ZWO camera mode with no camera detected, or Alpaca camera mode with no server host set (next release) | ZWO: searches for connected ZWO cameras. Alpaca: runs **Discover** on the [Alpaca Camera](Alpaca-Camera) connection card. |
 | **Start Capture** | A camera is available, or directory watch mode is selected | Starts capture or directory watching. |
 | **Stop** (red) | While capturing | Stops capture. |
 
@@ -82,6 +82,8 @@ At the right-hand end, the capture/camera pill shows:
 |-------|---------|
 | Capturing | Green **CAPTURE** pill with "Capturing · frame N", counting frames captured since the app started. The count goes up when a frame is captured, before it has been processed. |
 | Idle | **CAMERA** "Connected · idle" |
+| Idle, Alpaca camera not yet reached | **CAMERA** "Alpaca · not connected": in [Alpaca Camera](Alpaca-Camera) mode, shown until a **Test Connection** passes or capture runs against the current host, port and device. **Start Capture** is still available. New in the next release. |
+| Capturing, camera recovering | Amber **CAPTURE** pill with "Reconnecting to camera…" while a reconnect runs, or "Camera lost · retrying" while it waits for the next attempt. ZWO and Alpaca cameras alike. New in the next release. |
 | No camera | Red **CAMERA** "Disconnected" (or "Camera error" after a camera failure) |
 
 ---
@@ -106,7 +108,7 @@ Zoom and pan are for inspection only and don't change the output. The zoom level
 
 When there is no live frame, a message is shown over the preview:
 
-- **No camera connected**: "Connect a ZWO ASI camera, or choose a directory to watch for incoming frames."
+- **No camera connected**: "Connect a camera, or choose a directory to watch for incoming frames." (Version 3.8.0 and earlier read "Connect a ZWO ASI camera, ...".)
 - **Capture stopped**: the last frame stays on screen with "Showing last frame" and its capture time.
 
 The message clears as soon as a new frame arrives.
@@ -117,7 +119,7 @@ The message clears as soon as a new frame arrives.
 
 The **Histogram** card plots the red, green, and blue channels of the latest frame, measured before the stretch is applied, so it reflects what the camera actually recorded.
 
-In ZWO camera mode with auto-exposure turned on, two extra markers are drawn:
+In camera mode (ZWO, or Alpaca from the next release) with auto-exposure turned on, two extra markers are drawn:
 
 | Marker | Meaning |
 |--------|---------|
