@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 SESSION_ATTRIBUTES = (
-    'camera_name', 'camera_serial',
+    'backend', 'capabilities', 'camera_name', 'camera_serial',
     'is_capturing', 'capture_thread', 'camera', 'asi', '_connection',
     'exposure_seconds', 'exposure_start_time', 'exposure_remaining', 'gain',
     'offset', 'flip', 'bayer_pattern', 'wb_config', 'wb_mode', 'use_raw16',
@@ -163,3 +163,114 @@ def test_loop_prints_the_zwo_troubleshooting_steps(run_loop):
     cam = _DeadCamera()
     run_loop(cam)
     assert _troubleshooting_block(cam.lines) == ZWO_TROUBLESHOOTING_LINES
+
+
+def test_session_protocol_names_every_contract_member():
+    from services.camera.session import CaptureSession
+    declared = set(CaptureSession.__annotations__) | {
+        name for name in vars(CaptureSession) if not name.startswith('__')}
+    assert set(SESSION_ATTRIBUTES) | set(SESSION_METHODS) <= declared
+
+
+def test_zwo_session_satisfies_the_protocol():
+    from services.camera.session import CaptureSession
+    assert isinstance(_zwo_session(), CaptureSession)
+
+
+def test_loop_owned_attributes_are_left_to_the_loop():
+    from services.camera.session import LOOP_OWNED_ATTRIBUTES
+    cam = _zwo_session()
+    for name in LOOP_OWNED_ATTRIBUTES:
+        assert not hasattr(cam, name)
+
+
+def test_driver_contract_names_match():
+    from services.camera.driver import HANDLE_METHOD_NAMES, SDK_CONSTANT_NAMES, ExposureHandle
+    assert HANDLE_METHOD_NAMES == HANDLE_METHODS
+    assert set(SDK_CONSTANT_NAMES) == set(SDK_CONSTANTS)
+    assert set(HANDLE_METHODS) <= set(vars(ExposureHandle))
+
+
+def test_zwoasi_camera_is_an_exposure_handle():
+    zwoasi = pytest.importorskip('zwoasi')
+    from services.camera.driver import ExposureHandle
+    assert issubclass(zwoasi.Camera, ExposureHandle)
+
+
+def test_zwo_session_is_a_capture_session_base():
+    from services.camera.capture_session_base import CaptureSessionBase
+    from services.camera.zwo_camera import ZWOCamera
+    assert issubclass(ZWOCamera, CaptureSessionBase)
+    assert ZWOCamera.backend == 'zwo'
+    for name in ('__del__', '__enter__', '__exit__'):
+        assert name in vars(ZWOCamera), f"{name} must stay on ZWOCamera"
+
+
+def test_stop_capture_takes_the_connections_sdk_lock():
+    cam = _zwo_session()
+    lock = MagicMock()
+    lock.acquire.return_value = True
+    cam._connection.sdk_lock = lock
+    cam._connection.camera = MagicMock()
+    cam.is_capturing = True
+    cam.exposure_start_time = 1.0
+    cam.stop_capture()
+    lock.acquire.assert_called_once_with(timeout=2.0)
+    cam._connection.camera.stop_exposure.assert_called_once()
+    lock.release.assert_called_once()
+
+
+def test_set_gain_clamps_to_the_session_limits():
+    cam = _zwo_session()
+    cam.set_gain(900)
+    assert cam.gain == 600
+    cam.set_gain(-5)
+    assert cam.gain == 0
+
+
+def test_factory_applies_the_post_construction_settings():
+    from services.camera.session_factory import build_session
+    params = {k: 1000 for k in ('exposure_ms', 'max_exposure_ms')}
+    params.update(
+        sdk_path='', camera_name='ZWO ASI676MC (Index: 0)', clean_camera_name='ZWO ASI676MC',
+        camera_serial='ABC', gain=120, wb_r=50, wb_b=60, offset=10, flip=1,
+        bayer_pattern='RGGB', auto_exposure=True, wb_config={'mode': 'manual'},
+        scheduled_capture_mode='variable', scheduled_start_time='18:00',
+        scheduled_end_time='06:00', scheduled_window_interval=7.0,
+        target_brightness=90, capture_interval=12.0, use_raw16=True, auto_recovery=False)
+    gate, on_error, on_cal = MagicMock(), MagicMock(), MagicMock()
+    with patch('services.camera.zwo_camera.CameraConnection') as conn_cls:
+        conn_cls.return_value = MagicMock(asi=None, camera=None, sdk_lock=MagicMock())
+        cam = build_session(params, gate, 3, on_error, on_cal)
+    assert cam.backend == 'zwo'
+    assert (cam.camera_index, cam.camera_name, cam.camera_serial) == (3, 'ZWO ASI676MC', 'ABC')
+    assert (cam.exposure_seconds, cam.max_exposure, cam.wb_mode) == (1.0, 1.0, 'manual')
+    assert cam.schedule_gate is gate
+    assert (cam.target_brightness, cam.capture_interval, cam.use_raw16) == (90, 12.0, True)
+    assert cam._connection.auto_recovery_enabled is False
+    assert cam.on_error_callback is on_error and cam.on_calibration_callback is on_cal
+
+
+def test_read_capture_params_reads_the_saved_camera_profile():
+    from services.camera.session_params import read_capture_params
+    values = {'zwo_selected_camera_name': 'ZWO ASI676MC (Index: 1)',
+              'zwo_selected_camera_serial': 'ABC', 'zwo_selected_camera': 1,
+              'white_balance': {'manual_red_gain': 1.0}, 'dev_mode': {'use_raw16': True}}
+    config = MagicMock()
+    config.get = MagicMock(side_effect=lambda key, default=None: values.get(key, default))
+    config.get_camera_profile.return_value = {'gain': 222}
+    params = read_capture_params(config, auto_recovery=True)
+    config.get_camera_profile.assert_called_once_with('ZWO ASI676MC', 'ABC')
+    assert params['clean_camera_name'] == 'ZWO ASI676MC'
+    assert params['gain'] == 222
+    assert params['wb_config'] == {'manual_red_gain': 1.0, 'mode': 'asi_auto'}
+    assert values['white_balance'] == {'manual_red_gain': 1.0}
+    assert params['use_raw16'] is True and params['auto_recovery'] is True
+
+
+def test_loop_uses_a_sessions_own_troubleshooting_steps(run_loop):
+    cam = _DeadCamera(troubleshooting_hints=("Check the server", "Check the port"))
+    run_loop(cam)
+    start = cam.lines.index("Troubleshooting steps:")
+    assert cam.lines[start + 1:start + 3] == ["  1. Check the server", "  2. Check the port"]
+    assert not cam.lines[start + 3].startswith("  3.")

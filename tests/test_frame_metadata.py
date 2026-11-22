@@ -201,3 +201,21 @@ def test_camera_property_fallbacks(capture):
     _cam, (_img, metadata) = capture(handle)
     assert (metadata['CAMERA_BIT_DEPTH'], metadata['PIXEL_SIZE'],
             metadata['ELEC_PER_ADU']) == (8, 0, 1.0)
+
+
+def test_builder_key_list_is_the_golden_one():
+    from services.camera.frame_metadata import FRAME_METADATA_KEYS
+    assert FRAME_METADATA_KEYS == GOLDEN_KEYS
+
+
+def test_builder_alone_produces_the_golden_keys():
+    from services.camera.frame_metadata import build_frame_metadata, temperature_fields
+    metadata = build_frame_metadata(
+        camera_name='cam', exposure_seconds=1.0, gain=0, start_time=0.0,
+        temp=temperature_fields(None), width=2, height=2,
+        stats={k: 0 for k in ('mean', 'median', 'min', 'max', 'std_dev', 'p25', 'p75', 'p95')},
+        arrays={'RAW_RGB_NO_WB': None, 'RAW_RGB_16BIT': None}, raw_bytes=b'\0' * 4,
+        bit_depth=8, bayer_pattern='RGGB', wb_config=None, camera_bit_depth=8,
+        pixel_size=0, elec_per_adu=1.0)
+    assert tuple(metadata) == GOLDEN_KEYS
+    assert metadata['WB_CONFIG'] == {}

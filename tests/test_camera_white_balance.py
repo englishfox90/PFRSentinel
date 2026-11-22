@@ -155,13 +155,14 @@ def test_apply_camera_settings_pushes_the_profile_white_balance():
 
 
 def test_capture_start_hands_the_configured_mode_to_the_camera(monkeypatch):
+    import services.camera.session_factory as factory
     import ui.controllers.camera_controller as cc
     seen = {}
 
     def fake_camera(**kwargs):
         seen.update(kwargs)
         raise RuntimeError("stop after construction")
-    monkeypatch.setattr(cc, 'ZWOCamera', fake_camera)
+    monkeypatch.setattr(factory, 'ZWOCamera', fake_camera)
 
     params = {k: 0 for k in (
         'exposure_ms', 'gain', 'max_exposure_ms', 'offset', 'flip', 'capture_interval',
@@ -173,7 +174,8 @@ def test_capture_start_hands_the_configured_mode_to_the_camera(monkeypatch):
                   scheduled_start_time='17:00', scheduled_end_time='09:00')
     fake_self = SimpleNamespace(
         _dying_camera=None, _resolve_camera_index=lambda *a: 0,
-        _capture_start_done=MagicMock(), config=MagicMock())
+        _capture_start_done=MagicMock(), config=MagicMock(),
+        _on_camera_error=MagicMock(), _on_calibration_status=MagicMock())
     cc.CameraControllerQt._start_capture_worker(fake_self, params)
 
     assert seen['wb_mode'] == 'manual'

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services.camera import camera_reconnect, zwo_capture_worker
+from services.camera import camera_reconnect, capture_loop, zwo_capture_worker
 from services.camera.camera_connection import CameraConnection
 from services.config import DEFAULT_CONFIG
 
@@ -85,7 +85,7 @@ def test_zwo_camera_flag_reaches_the_connection():
 # --------------------------------------------------------------------------
 
 class _Clock:
-    """Stands in for the worker's `time` module so settle waits cost nothing."""
+    """Stands in for the loop's `time` module so settle waits cost nothing."""
 
     def __init__(self):
         self.now = 1_000_000.0
@@ -147,8 +147,10 @@ class _FakeCamera:
 
 @pytest.fixture
 def run_loop(monkeypatch):
-    monkeypatch.setattr(zwo_capture_worker, 'time', _Clock())
-    monkeypatch.setattr(zwo_capture_worker, 'capture_error', lambda *a, **k: None)
+    # Patch the module the loop body lives in: patching the re-exporting
+    # zwo_capture_worker would leave the real time.sleep in place.
+    monkeypatch.setattr(capture_loop, 'time', _Clock())
+    monkeypatch.setattr(capture_loop, 'capture_error', lambda *a, **k: None)
     return zwo_capture_worker.capture_loop
 
 

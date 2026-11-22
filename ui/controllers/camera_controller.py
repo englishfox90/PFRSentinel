@@ -12,7 +12,8 @@ import time
 
 from services.logger import app_logger
 from services.zwo_sdk_library import library_name, resolve_library_path
-from services.camera import ZWOCamera
+from services.camera.session_factory import build_session
+from services.camera.session_params import read_capture_params
 from services.capture_schedule_window import gate_for_config
 from .camera_settings import apply_camera_settings_async, set_raw16_mode_async
 from .camera_usb_recovery import UsbResetWorker
@@ -99,6 +100,19 @@ class CameraControllerQt(QObject):
         self._usb_reset_done.connect(self._on_usb_reset_done)
         self._capture_start_done.connect(self._on_capture_start_done)
 
+    @property
+    def camera_session(self):
+        """The running capture session (stored as ``zwo_camera`` for its many readers)."""
+        return self.zwo_camera
+
+    def capabilities(self):
+        """The running session's capabilities, else the configured source's static set."""
+        from services.camera.capabilities import static_capabilities
+        session = self.zwo_camera
+        if session is not None:
+            return session.capabilities
+        return static_capabilities(self.config.get('camera_source', 'zwo'))
+
     def detect_cameras(self):
         """Detect connected ZWO cameras"""
         app_logger.info("Detecting cameras...")
@@ -169,51 +183,7 @@ class CameraControllerQt(QObject):
 
         # Read all config on the main thread — keeps cross-thread Config access
         # out of the blocking SDK calls that run in the worker thread.
-        sdk_path = self.config.get('zwo_sdk_path', '')
-        saved_camera_index = self.config.get('zwo_selected_camera', 0)
-        camera_name = self.config.get('zwo_selected_camera_name', 'Unknown')
-        camera_serial = self.config.get('zwo_selected_camera_serial', '')
-
-        app_logger.info(f"Starting capture — saved camera: '{camera_name}' at index {saved_camera_index}")
-
-        clean_camera_name = camera_name
-        if '(Index:' in camera_name:
-            clean_camera_name = camera_name.split('(Index:')[0].strip()
-
-        from services.config import DEFAULT_CAMERA_PROFILE
-        profile = self.config.get_camera_profile(clean_camera_name, camera_serial)
-        app_logger.info(f"Loading settings from camera profile: {clean_camera_name}")
-        app_logger.debug(f"Profile contents: {profile}")
-
-        wb_config = dict(self.config.get('white_balance', {}))
-        wb_config.setdefault('mode', 'asi_auto')
-        dev_mode = self.config.get('dev_mode', {})
-
-        params = {
-            'sdk_path': sdk_path,
-            'saved_camera_index': saved_camera_index,
-            'camera_name': camera_name,
-            'camera_serial': camera_serial,
-            'clean_camera_name': clean_camera_name,
-            'exposure_ms': profile.get('exposure_ms', DEFAULT_CAMERA_PROFILE['exposure_ms']),
-            'gain': profile.get('gain', DEFAULT_CAMERA_PROFILE['gain']),
-            'max_exposure_ms': profile.get('max_exposure_ms', DEFAULT_CAMERA_PROFILE['max_exposure_ms']),
-            'target_brightness': profile.get('target_brightness', DEFAULT_CAMERA_PROFILE['target_brightness']),
-            'wb_r': profile.get('wb_r', DEFAULT_CAMERA_PROFILE['wb_r']),
-            'wb_b': profile.get('wb_b', DEFAULT_CAMERA_PROFILE['wb_b']),
-            'offset': profile.get('offset', DEFAULT_CAMERA_PROFILE['offset']),
-            'flip': profile.get('flip', DEFAULT_CAMERA_PROFILE['flip']),
-            'bayer_pattern': profile.get('bayer_pattern', DEFAULT_CAMERA_PROFILE['bayer_pattern']),
-            'auto_exposure': self.config.get('zwo_auto_exposure', False),
-            'wb_config': wb_config,
-            'capture_interval': self.config.get('zwo_interval', 5.0),
-            'scheduled_capture_mode': self.config.get('scheduled_capture_mode', 'always'),
-            'scheduled_start_time': self.config.get('scheduled_start_time', '17:00'),
-            'scheduled_end_time': self.config.get('scheduled_end_time', '09:00'),
-            'scheduled_window_interval': self.config.get('scheduled_window_interval', 5.0),
-            'use_raw16': dev_mode.get('use_raw16', False),
-            'auto_recovery': self._auto_recovery_enabled(),
-        }
+        params = read_capture_params(self.config, self._auto_recovery_enabled())
 
         app_logger.info(
             f"Camera config: exposure_ms={params['exposure_ms']}, gain={params['gain']}, "
@@ -247,34 +217,11 @@ class CameraControllerQt(QObject):
                 params['sdk_path'], params['camera_name'], params['saved_camera_index']
             )
 
-            cam = ZWOCamera(
-                sdk_path=params['sdk_path'],
-                camera_index=camera_index,
-                exposure_sec=params['exposure_ms'] / 1000.0,
-                gain=params['gain'],
-                white_balance_r=params['wb_r'],
-                white_balance_b=params['wb_b'],
-                offset=params['offset'],
-                flip=params['flip'],
-                auto_exposure=params['auto_exposure'],
-                max_exposure_sec=params['max_exposure_ms'] / 1000.0,
-                bayer_pattern=params['bayer_pattern'],
-                wb_config=params['wb_config'],
-                wb_mode=params['wb_config']['mode'],
-                scheduled_capture_mode=params['scheduled_capture_mode'],
-                scheduled_start_time=params['scheduled_start_time'],
-                scheduled_end_time=params['scheduled_end_time'],
-                scheduled_window_interval=params['scheduled_window_interval'],
-                camera_name=params['clean_camera_name'],
-                camera_serial=params['camera_serial'],
+            cam = build_session(
+                params, gate_for_config(self.config), camera_index,
+                on_error=self._on_camera_error,
+                on_calibration=self._on_calibration_status,
             )
-            cam.schedule_gate = gate_for_config(self.config)
-            cam.target_brightness = params['target_brightness']
-            cam.set_capture_interval(params['capture_interval'])
-            cam.use_raw16 = params['use_raw16']
-            cam.auto_recovery_enabled = params['auto_recovery']
-            cam.on_error_callback = self._on_camera_error
-            cam.on_calibration_callback = self._on_calibration_status
 
             if not cam.connect_camera(camera_index):
                 raise Exception("Failed to connect to camera")

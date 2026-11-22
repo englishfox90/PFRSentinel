@@ -29,7 +29,7 @@ These are real bugs that have shipped in this project. Get them right.
 
 ## Disconnect / cleanup
 - The cleanup safety net is layered, and since the camera package split it spans two classes: `ZWOCamera` owns `__del__` and `__enter__`/`__exit__` (`services/camera/zwo_camera.py`); `CameraConnection` owns the `_cleanup_lock` that serialises teardown (`services/camera/camera_connection.py`). Don't remove any of them — improper cleanup leaves the USB device hung until reboot.
-- `stop_capture()` aborts the in-progress exposure and any running calibration, then joins the worker thread with a **3-second timeout**. Preserve that flow — the aborts are what make the short join safe. Dropping the aborts and keeping a short join will race; an unbounded join can deadlock shutdown.
+- `stop_capture()` (`CaptureSessionBase`, `services/camera/capture_session_base.py`, shared by every backend) aborts the in-progress exposure and any running calibration, then joins the worker thread with a **3-second timeout**. Preserve that flow — the aborts are what make the short join safe. Dropping the aborts and keeping a short join will race; an unbounded join can deadlock shutdown.
 
 ## Per-camera profiles
 - Camera-specific settings live under `camera_profiles[<key>]`, keyed by the **hardware serial**: settings belong to a physical body, not a model, and two ASI676MC bodies need different gains. The serial can only be read off an open handle (`ASIGetSerialNumber`, `services/camera/camera_identity.py`), so it is learned on the first clean connect.
