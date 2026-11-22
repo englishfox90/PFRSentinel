@@ -18,7 +18,7 @@ from .config import Config
 from .camera import ZWOCamera
 from .camera.camera_utils import get_selected_camera_name
 from .camera.camera_source import active_camera_profile, alpaca_settings, camera_source, is_alpaca
-from .headless_alpaca import open_alpaca_camera, reconnect_after_error
+from .headless_alpaca import after_failed_frame, log_failure_trace, note_good_frame, open_alpaca_camera
 from .capture_schedule_window import gate_for_config
 from .output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from .web_image_encode import encode_for_web
@@ -386,6 +386,7 @@ class HeadlessRunner:
                 process_time = time.time() - start_time - capture_time
 
                 self.image_count += 1
+                note_good_frame(self.zwo_camera)
                 self._last_capture_epoch = time.time()
                 self._last_error = None
                 self._last_error_epoch = None
@@ -404,15 +405,15 @@ class HeadlessRunner:
 
             except Exception as e:
                 self._log(f"ERROR in capture loop: {e}")
-                import traceback
-                self._log(traceback.format_exc())
+                log_failure_trace(self.zwo_camera, e, self._log)
                 self._last_error = str(e)
                 self._last_error_epoch = time.time()
                 self._push_capture_status(running=False, state="error")
                 # Wait before retrying
                 self._wait(5)
                 if self.running and not self._shutdown_event.is_set():
-                    reconnect_after_error(self.zwo_camera, self._log)
+                    if after_failed_frame(self.zwo_camera, self._log):
+                        self._paused.set()
 
     def _handle_capture_command(self, command: str):
         """Execute a control-API capture command (headless host).

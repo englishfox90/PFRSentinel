@@ -111,3 +111,72 @@ def test_dropped_server_is_reopened_after_a_failed_frame(monkeypatch, tmp_path, 
     runner.zwo_camera.capture_single_frame()
     assert reconnect_after_error(MagicMock(backend="zwo"), runner._log) is None
     runner.zwo_camera.disconnect_camera()
+
+
+def test_recovery_off_spends_one_reconnect_until_a_good_frame(monkeypatch, tmp_path, fake_net):
+    from services.headless_alpaca import note_good_frame, recovery_exhausted
+    net, _cam = fake_net
+    runner = _runner(monkeypatch, tmp_path)
+    assert runner._init_camera()
+    cam = runner.zwo_camera
+    cam.auto_recovery_enabled = False
+    attempts = []
+    original = cam.reconnect_camera_safe
+    cam.reconnect_camera_safe = lambda: attempts.append(1) or original()
+    assert reconnect_after_error(cam, runner._log) is True
+    assert recovery_exhausted(cam) is True
+    assert reconnect_after_error(cam, runner._log) is False
+    assert len(attempts) == 1
+    note_good_frame(cam)
+    assert recovery_exhausted(cam) is False
+    assert reconnect_after_error(cam, runner._log) is True and len(attempts) == 2
+    cam.disconnect_camera()
+
+
+def test_recovery_on_always_reconnects(monkeypatch, tmp_path, fake_net):
+    from services.headless_alpaca import recovery_exhausted
+    runner = _runner(monkeypatch, tmp_path)
+    assert runner._init_camera()
+    cam = runner.zwo_camera
+    for _ in range(3):
+        assert reconnect_after_error(cam, runner._log) is True
+    assert recovery_exhausted(cam) is False
+    cam.disconnect_camera()
+
+
+def test_open_logs_one_line_and_no_connection_duplicates(monkeypatch, tmp_path, fake_net, caplog):
+    import logging
+    net, _cam = fake_net
+    net.faults.refused_hosts.add(net.host)
+    runner = _runner(monkeypatch, tmp_path)
+    with caplog.at_level(logging.INFO, logger="PFRSentinel"):
+        assert runner._init_camera() is False
+    info = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert not [m for m in info if m.startswith("✗ Alpaca connect failed")]
+    assert runner._log.call_count == 1
+    assert "ERROR: Failed to connect" in runner._log.call_args.args[0]
+
+
+def test_expected_failures_keep_their_traceback_at_debug():
+    from services.camera.alpaca.alpaca_protocol import AlpacaTransportError
+    from services.headless_alpaca import is_expected_failure
+    alpaca = MagicMock(backend="alpaca")
+    assert is_expected_failure(alpaca, AlpacaTransportError("gone"))
+    assert is_expected_failure(alpaca, Exception("Camera not connected"))
+    assert not is_expected_failure(alpaca, KeyError("RES"))
+    assert not is_expected_failure(MagicMock(backend="zwo"), Exception("x"))
+
+
+def test_after_failed_frame_pauses_once_the_single_reconnect_is_spent(monkeypatch, tmp_path,
+                                                                     fake_net):
+    from services.headless_alpaca import after_failed_frame, recovery_exhausted
+    runner = _runner(monkeypatch, tmp_path)
+    assert runner._init_camera()
+    cam = runner.zwo_camera
+    cam.auto_recovery_enabled = False
+    assert after_failed_frame(cam, runner._log) is False      # the one reconnect
+    assert after_failed_frame(cam, runner._log) is True       # pause
+    assert "Capture paused" in runner._log.call_args.args[0]
+    assert recovery_exhausted(cam) is False                   # a resume may reconnect again
+    assert after_failed_frame(MagicMock(backend="zwo"), runner._log) is False
+    cam.disconnect_camera()
