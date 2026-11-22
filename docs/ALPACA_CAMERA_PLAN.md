@@ -10,6 +10,7 @@ Design and phased plan for issue #43. Line numbers are against `85cb511`; they d
 - **SensorType 1 (Color):** Rank-3 RGB passes through (`'RGB'` branch, no Bayer FITS). CMYG / CMYG2 / LRGB read as mono with a one-time warning.
 - **Redaction:** `alpaca_camera.host` and `unique_id` masked by path; `webserver_host` stays visible.
 - **Pre-existing bugs** (§1.11 items 1–2) fixed in their own commits.
+- **Bayer names (correction to §3):** `debayer_raw_image` passes the pattern name to OpenCV's `COLOR_Bayer<XY>2RGB`, and OpenCV names a tile by row 2's 2nd/3rd pixels — the physical tile turned 180°. Measured: a physical RGGB mosaic decodes red only through `BG2RGB`. So the pipeline name is the physical string reversed (a body with red at (0,0) is "BGGR" here). `alpaca_sensor.physical_bayer_pattern()` gives the ASCOM physical pattern; `bayer_pattern_for()` gives the pipeline name, and is what `BAYER_PATTERN` and the debayer use.
 
 ## 0. Why this seam
 
