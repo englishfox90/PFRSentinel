@@ -73,10 +73,19 @@ class LogsPanel(QScrollArea):
         
         # === CONTROLS ===
         controls_card = CardWidget()
-        controls_layout = QHBoxLayout(controls_card)
-        controls_layout.setContentsMargins(Spacing.card_padding, Spacing.md,
-                                          Spacing.card_padding, Spacing.md)
+        # Filters on one row, actions on the next: in one row the toolbar was
+        # wider than the page beside the preview and clipped its buttons.
+        controls_rows = QVBoxLayout(controls_card)
+        controls_rows.setContentsMargins(Spacing.card_padding, Spacing.md,
+                                         Spacing.card_padding, Spacing.md)
+        controls_rows.setSpacing(Spacing.sm)
+        controls_layout = QHBoxLayout()
         controls_layout.setSpacing(Spacing.md)
+        actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(Spacing.md)
+        actions_layout.addStretch()
+        controls_rows.addLayout(controls_layout)
+        controls_rows.addLayout(actions_layout)
         
         # Filter by level
         filter_label = BodyLabel("Level:")
@@ -124,13 +133,13 @@ class LogsPanel(QScrollArea):
         self.clear_btn = PushButton("Clear")
         self.clear_btn.setIcon(mdi('delete-outline'))
         self.clear_btn.clicked.connect(self._clear_logs)
-        controls_layout.addWidget(self.clear_btn)
+        actions_layout.addWidget(self.clear_btn)
         
         # Open log folder
         self.open_folder_btn = PushButton("Open Folder")
         self.open_folder_btn.setIcon(mdi('folder-outline'))
         self.open_folder_btn.clicked.connect(self._open_log_folder)
-        controls_layout.addWidget(self.open_folder_btn)
+        actions_layout.addWidget(self.open_folder_btn)
 
         self.export_diag_btn = PushButton("Export Diagnostics")
         self.export_diag_btn.setIcon(mdi('folder-zip-outline'))
@@ -139,7 +148,7 @@ class LogsPanel(QScrollArea):
             "frame (captured fresh when the camera is running) to attach to a bug report"
         )
         self.export_diag_btn.clicked.connect(self._on_export_diagnostics)
-        controls_layout.addWidget(self.export_diag_btn)
+        actions_layout.addWidget(self.export_diag_btn)
 
         layout.addWidget(controls_card)
 
@@ -183,6 +192,10 @@ class LogsPanel(QScrollArea):
         log_path = app_logger.get_log_location()
         log_info = CaptionLabel(f"Log file: {log_path}")
         log_info.setStyleSheet(f"color: {Colors.text_muted}; padding-top: 8px;")
+        # A long path must not widen the page (no horizontal scrolling here).
+        log_info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        log_info.setToolTip(str(log_path))
+        log_info.setTextInteractionFlags(Qt.TextSelectableByMouse)
         log_layout.addWidget(log_info)
         
         layout.addWidget(log_card, 1)
