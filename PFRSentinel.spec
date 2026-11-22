@@ -358,6 +358,11 @@ hiddenimports = [
     
     # --- ZWO Camera (optional, fails gracefully) ---
     'zwoasi',
+
+    # --- ASCOM Alpaca camera (imported lazily by session_factory) ---
+    'services.camera.alpaca', 'services.camera.alpaca.alpaca_camera',
+    'services.camera.alpaca.alpaca_capture_frame', 'services.camera.alpaca.alpaca_connection',
+    'services.camera.alpaca.alpaca_device', 'services.camera.alpaca.alpaca_probe',
     
     # --- Package management (Python 3.13 compatibility) ---
     'importlib.metadata', 'importlib.resources',
