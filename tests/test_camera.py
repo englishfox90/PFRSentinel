@@ -1350,4 +1350,6 @@ class TestControllerRecoveryWiring:
         assert ctrl._usb_reset_attempted is False
         assert ctrl._suppress_discord_errors is False
         assert ctrl._wedged_skip_count == 0
+        # Stop marks the session dying until its async teardown has joined.
+        ctrl._teardown_thread.join(5)
         assert ctrl._dying_camera is None
