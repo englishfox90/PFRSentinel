@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from PySide6.QtCore import QTimer
 
 from services import api_auth
-from services.camera import frame_builder
+from services.camera import camera_source as _camera_source, frame_builder
 from services.logger import app_logger
 from services.notifications import ERROR, LIFECYCLE, PERIODIC_IMAGE, NotificationEvent
 from services.web_image_encode import encode_for_web
@@ -94,7 +94,7 @@ class _MainWindowOutputMixin:
             return
 
         mode = self.config.get('capture_mode', 'camera')
-        mode_text = "ZWO Camera Capture" if mode == 'camera' else "Directory Watch"
+        mode_text = _camera_source.capture_source_label(self.config)
         output_path = self.config.get('output_directory', 'Not configured')
         self.notifier.notify(NotificationEvent(
             type=LIFECYCLE,
@@ -539,9 +539,9 @@ class _MainWindowOutputMixin:
             state = "capturing"
 
         return api_status.build_capture_snapshot(
-            mode="camera", enabled=True, running=running, state=state,
-            interval_seconds=interval, effective_interval_seconds=effective_interval,
-            schedule=schedule,
+            mode="camera", camera_source=_camera_source.camera_source(self.config),
+            enabled=True, running=running, state=state, interval_seconds=interval,
+            effective_interval_seconds=effective_interval, schedule=schedule,
             last_capture_epoch=(cc.last_successful_frame_epoch() if cc else None),
             last_error=self._last_capture_error,
             last_error_epoch=self._last_capture_error_epoch, recovery=recovery,
@@ -700,7 +700,7 @@ class _MainWindowOutputMixin:
 
     def _build_periodic_body(self) -> str:
         """Token-formatted description shared by the periodic-image event."""
-        mode = "ZWO Camera" if self.is_capturing else "Directory Watch"
+        mode = _camera_source.capture_source_label(self.config, True) if self.is_capturing else "Directory Watch"
         count = self.image_count
 
         camera_info = ""

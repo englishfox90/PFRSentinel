@@ -112,3 +112,27 @@ class TestDeriveStatusView:
         cap = view["capture"]
         for name, _type, _desc in api_status.CAPTURE_FIELDS:
             assert name in cap, f"missing documented field: {name}"
+
+
+class TestCameraSource:
+    """Issue #43: the backend rides along additively; ``mode`` keeps its enum."""
+
+    def test_camera_mode_reports_its_source(self):
+        snap = build_capture_snapshot(mode="camera", camera_source="alpaca", enabled=True)
+        assert snap["mode"] == "camera" and snap["camera_source"] == "alpaca"
+        view = derive_status_view(snap, image_age=None, now=NOW)
+        assert view["capture"]["camera_source"] == "alpaca"
+
+    def test_watch_and_idle_report_no_source(self):
+        for mode in ("watch", "idle"):
+            assert build_capture_snapshot(mode=mode, camera_source="zwo")["camera_source"] is None
+        assert derive_status_view({}, image_age=None, now=NOW)["capture"]["camera_source"] is None
+
+    def test_old_feeders_without_the_argument_still_work(self):
+        assert build_capture_snapshot(mode="camera")["camera_source"] is None
+
+    def test_field_is_documented_and_in_the_openapi_schema(self):
+        names = [name for name, _t, _d in api_status.CAPTURE_FIELDS]
+        assert names.index("camera_source") == names.index("mode") + 1
+        from services.api_docs import build_openapi_spec
+        assert "camera_source" in str(build_openapi_spec())

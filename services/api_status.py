@@ -32,6 +32,9 @@ _STALL_INTERVAL_MULTIPLIER = 3
 # from the same source of truth as the payload below.
 CAPTURE_FIELDS = [
     ("mode", "string", "Capture mode: 'camera', 'watch', or 'idle'."),
+    ("camera_source", "string",
+     "Camera backend in camera mode: 'zwo' (ZWO ASI over USB) or 'alpaca' (an ASCOM "
+     "Alpaca camera on the network); null in watch or idle mode."),
     ("enabled", "boolean", "Whether capture is currently enabled in the app."),
     ("running", "boolean", "Whether capture is actively producing frames right now."),
     ("state", "string",
@@ -138,6 +141,7 @@ def build_schedule(config, zwo_camera=None) -> dict:
 def build_capture_snapshot(
     *,
     mode: str = "idle",
+    camera_source=None,
     enabled: bool = False,
     running: bool = False,
     state: str = "stopped",
@@ -156,6 +160,7 @@ def build_capture_snapshot(
     """
     return {
         "mode": mode,
+        "camera_source": camera_source if mode == "camera" else None,
         "enabled": bool(enabled),
         "running": bool(running),
         "state": state,

@@ -117,11 +117,16 @@ def active_camera_profile(config) -> dict:
     return config.get_camera_profile(name, serial) or dict(DEFAULT_CAMERA_PROFILE)
 
 
-def capture_source_label(config) -> str:
-    """Status text for the capture mode; ZWO keeps "ZWO Camera Capture"."""
+def capture_source_label(config, short: bool = False) -> str:
+    """Status text for the capture mode; ZWO keeps "ZWO Camera Capture".
+
+    ``short`` drops the trailing "Capture" ("ZWO Camera"), the form the
+    periodic Discord update has always used.
+    """
     if config.get("capture_mode", "camera") == "watch":
         return _WATCH_LABEL
-    return _SOURCE_LABELS[camera_source(config)]
+    label = _SOURCE_LABELS[camera_source(config)]
+    return label[:-len(" Capture")] if short else label
 
 
 def camera_ready(config, controller=None) -> bool:

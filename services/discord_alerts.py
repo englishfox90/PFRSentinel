@@ -331,8 +331,9 @@ class DiscordAlerts:
             return False
         
         # Get current mode
+        from .camera.camera_source import capture_source_label
         mode = self.config.get('capture_mode', 'watch')
-        mode_text = "Directory Watch" if mode == 'watch' else "ZWO Camera Capture"
+        mode_text = "Directory Watch" if mode == 'watch' else capture_source_label(self.config)
         
         # Get output path
         output_path = self.config.get('output_directory', 'Not configured')
@@ -374,8 +375,9 @@ Application has been closed."""
             return False
         
         # Get current mode
+        from .camera.camera_source import capture_source_label
         mode = self.config.get('capture_mode', 'watch')
-        mode_text = "Directory Watch" if mode == 'watch' else "ZWO Camera Capture"
+        mode_text = "Directory Watch" if mode == 'watch' else capture_source_label(self.config)
         
         # Get output path
         output_path = self.config.get('output_directory', 'Not configured')
