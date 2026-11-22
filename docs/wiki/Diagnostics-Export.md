@@ -75,7 +75,7 @@ Before your settings are written to `config.redacted.json`, any setting whose na
 | Webhooks and addresses | `webhook`, `url` |
 | Location | `latitude`, `longitude`, `location`, `elevation` |
 | Identifiers | `distinct_id` (the anonymous analytics ID), `serial` |
-| Alpaca camera | The server address (`alpaca_camera.host`) and the camera's unique ID (`alpaca_camera.unique_id`). New in the next release. |
+| Alpaca camera | The server address (`alpaca_camera.host`, unless it is this computer: `localhost` or `127.0.0.1`), the camera's unique ID (`alpaca_camera.unique_id`), and the unique ID in the names of Alpaca camera profiles. New in the next release. |
 
 This covers, for example, your Discord webhook, OpenWeatherMap API key, web server control token, notification webhook URLs and secrets, and your observatory coordinates.
 

@@ -130,13 +130,18 @@ The messages below appear on the Camera Connection card after **Test Connection*
 | `Enter the server's host first` | **Test Connection** was clicked with the Host box empty. |
 | `No Alpaca server host is configured` | Capture was started with no host set. |
 | `No Alpaca cameras answered. Enter the server address instead.` | **Discover** found nothing. See [Network and Firewall](#network-and-firewall). |
-| `Cannot reach Alpaca server for ... (host:port #n): ...` | Nothing answered at that address. Check the server is running, the host and port are right, and the firewall allows the port. |
-| `Timed out on ... (host:port #n)` | The server accepted the connection but did not reply in time. |
-| `No answer from host:port within N s` | Test Connection gave up waiting for the server. |
+| `Connection refused by host:port — is the Alpaca server running?` | The computer is there, but nothing is listening on that port. Start the server, or check the port. |
+| `Host name '...' not found — check the server address` | The host name can't be looked up. Check the spelling, or use the IP address. |
+| `No route to ... — check the address and that it is on this network` | The address can't be reached from this computer. |
+| `No answer from host:port within N s` | The server didn't reply in time: it is busy or stalled, or a firewall is silently dropping the connection. |
+| `host:port closed the connection — is it an Alpaca server?` | Something answered on that port and hung up. It is probably not an Alpaca server. |
+| `Cannot reach the Alpaca server at host:port` | Any other network failure. The full detail is in the log at debug level. |
+| `Server at host:port is not an Alpaca server (HTTP 404 on /management) — check the port` | A web server answered, but not an Alpaca one. Often the port belongs to another program. |
 | `host:port answers but has no Camera device (it lists: ...)` | The server is there but has no camera. Often this is PFR's own safety monitor; see [Port 11111](#port-11111-and-pfrs-own-safety-monitor). |
 | `host:port has no camera #n (cameras: ...)` | The device number is wrong. The message lists the cameras the server does have. |
 | `The camera with UniqueID ... is no longer on host:port. Run Discover / Test Connection to pick it again.` | The server no longer lists the camera PFR Sentinel was set up with, for example after the camera was removed or replaced in the server. Pick it again from **Discover**. |
 | `Device did not report Connected after connect` or `Device still connecting after N s` | The server could not connect to the camera itself. Check the camera is powered and set up in the server. |
+| `Alpaca camera not reachable yet — retrying under auto-recovery` | Capture was started but the camera couldn't be opened. With **Automatic camera recovery** on, the start is retried; see [When the Connection Drops](#when-the-connection-drops). |
 | `Alpaca server host:port has no Management API; using device #n without an identity check` | A warning, not an error. The server can't list its devices, so PFR Sentinel uses the device number as given and can't notice if a different camera takes that number. |
 | `Exposure failed (camera reported CameraState Error)` | The driver reported a failed exposure. Recovery reconnects and tries again. |
 | `Exposure timeout: camera did not complete ...` | The exposure took more than 30 seconds longer than it should have. |
