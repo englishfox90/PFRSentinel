@@ -186,6 +186,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Behave like INDIGO's Alpaca bridge: ReadoutModes 'RAW 8' (default) and "
                         "'RAW 16', 8-bit or MSB-aligned 16-bit data, MaxADU unchanged, and "
                         "ImageBytes replies 44 bytes short")
+    p.add_argument("--stall-after-exposures", type=int, default=0, metavar="N",
+                   help="Issue #177: after N exposures, keep answering but never finish an "
+                        "exposure (CameraState Exposing) until Connected is set false")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -211,7 +214,9 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)
-    server = SimServer(FakeAlpacaCamera(spec_from_args(args)), host=args.host, port=args.port,
+    camera = FakeAlpacaCamera(spec_from_args(args))
+    camera.faults.stall_after_exposures = max(0, args.stall_after_exposures)
+    server = SimServer(camera, host=args.host, port=args.port,
                        discovery_port=None if args.no_discovery else args.discovery_port)
     server.start()
     LOG.info("ALPACA_SIM_PORT=%d", server.port)

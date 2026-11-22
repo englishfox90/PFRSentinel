@@ -115,6 +115,12 @@ class SimFaults:
     imagearray_errors: int = 0          # next N ImageArray reads fail with 0x500
     driver_error_members: set = field(default_factory=set)   # GET → 0x500 (old V2 drivers)
     invalid_operation_reads: Dict[str, int] = field(default_factory=dict)  # next N GETs → 0x40B
+    # Issue #177 (ZWO's ASCOM driver after NINA opened another ZWO camera): the
+    # driver still says Connected and answers, exposures start and never finish
+    # (CameraState Exposing, ImageReady false) until the driver reopens the
+    # camera (Connected=false then true, or V4 Disconnect + Connect).
+    stall_exposures: bool = False
+    stall_after_exposures: int = 0      # >0: stall_exposures turns on after that many exposures
 
 
 @dataclass
@@ -172,6 +178,11 @@ class FakeAlpacaCamera:
         """The driver lost the camera: every camera member answers 0x407."""
         with self.lock:
             self.connected = False
+
+    def driver_reopened(self) -> None:
+        """Connected=false / Disconnect: the driver lets go of the camera, which
+        ends a stalled-exposure fault (the next connect reopens it cleanly)."""
+        self.faults.stall_exposures = False
 
     def renumber(self, device_number: int) -> None:
         with self.lock:
@@ -271,6 +282,8 @@ class FakeAlpacaCamera:
         if self.connecting_until is not None and now >= self.connecting_until:
             self.connecting_until = None
             self.connected = True
+        if self.state == EXPOSING and self.faults.stall_exposures:
+            return
         if self.state == EXPOSING and now >= self.exposure_start + self.duration:
             self.state = READING
             self.reading_since = self.exposure_start + self.duration
@@ -297,6 +310,10 @@ class FakeAlpacaCamera:
         self.image_ready = False
         self.image = None
         self.exposure_count += 1
+        stall_after = self.faults.stall_after_exposures
+        if stall_after > 0 and self.exposure_count > stall_after:
+            self.faults.stall_after_exposures = 0
+            self.faults.stall_exposures = True
 
     def stop_exposure(self, abort: bool) -> None:
         if self.state in (EXPOSING, WAITING, READING):
