@@ -7,7 +7,9 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QProgressDialog
 
 from services.logger import app_logger
+from services.camera.camera_source import camera_ready, is_alpaca
 
+from .alpaca_camera import _AlpacaCameraMixin
 from .camera_detect import (  # re-exported for existing callers
     _CameraDetectMixin,
     _sdk_call_with_timeout,
@@ -16,7 +18,7 @@ from .camera_detect import (  # re-exported for existing callers
 from .capture_watchdog import _WATCHDOG_UI_FATAL_GRACE_SEC, _CaptureWatchdogMixin
 
 
-class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
+class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin, _AlpacaCameraMixin):
 
 
     def _wait_for_timelapse_finalization(self, timeout_sec: float = 75.0):
@@ -72,7 +74,11 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
         if self.is_capturing:
             return
         mode = self.config.get('capture_mode', 'camera')
-        if mode == 'camera':
+        if mode == 'camera' and is_alpaca(self.config):
+            if not camera_ready(self.config, self.camera_controller):
+                self.app_bar.set_start_enabled(False, "Set the Alpaca server's host on the Capture tab")
+                return
+        elif mode == 'camera':
             cameras = self.config.get('available_cameras', [])
             if not cameras:
                 self.app_bar.set_start_enabled(False, "No ZWO cameras detected — click Detect Cameras on the Capture tab")
@@ -384,6 +390,10 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
         if not cam or not hasattr(self, 'capture_panel'):
             return
         try:
+            caps = getattr(cam, 'capabilities', None)
+            if caps is not None and caps.backend != 'zwo':
+                self.capture_panel.apply_camera_capabilities(caps)
+                return
             self.capture_panel.update_camera_capabilities(
                 cam.supports_raw16, cam.sensor_bit_depth)
         except Exception as e:

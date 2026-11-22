@@ -11,6 +11,7 @@ import time
 from PySide6.QtCore import QTimer
 
 from services.logger import app_logger
+from services.camera.camera_source import is_alpaca
 from services.zwo_sdk_library import library_name, missing_library_help, resolve_library_path
 
 
@@ -59,6 +60,8 @@ class _CameraDetectMixin:
     """Camera enumeration and saved-camera restoration."""
 
     def _auto_detect_cameras(self):
+        if is_alpaca(self.config):
+            return  # an Alpaca camera is addressed, not enumerated
         if resolve_library_path(self.config.get('zwo_sdk_path', '')):
             app_logger.info("Auto-detecting cameras on startup...")
             self._startup_detect_retries = 3
@@ -72,6 +75,9 @@ class _CameraDetectMixin:
         # detection is enough; ignore re-entrant calls until it completes. The
         # flag is cleared in _on_cameras_detected, which every detect path
         # reaches via the cameras_detected signal.
+        if is_alpaca(self.config):
+            self._on_alpaca_discover()  # the app bar's Connect Camera, on an Alpaca rig
+            return
         if getattr(self, '_detection_in_progress', False):
             app_logger.debug("Camera detection already in progress — ignoring duplicate trigger")
             return
