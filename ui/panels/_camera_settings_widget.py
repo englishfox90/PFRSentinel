@@ -9,7 +9,8 @@ from ..components.cards import SettingsCard, FormRow, SwitchRow, ClickSlider, Co
 from ._scheduled_capture_card import ScheduledCaptureCard
 from ._zwo_connection_card import ZwoConnectionCard, clean_camera_name
 from ._alpaca_connection_card import AlpacaConnectionCard
-from ._camera_capability_gate import apply_capabilities, ZWO_WB_MODES
+from ._camera_capability_gate import apply_capabilities, show_gain_name, ZWO_WB_MODES
+from ..controllers.alpaca_identity import AlpacaIdentityMemory
 from services.logger import app_logger
 from services.config import DEFAULT_CAMERA_PROFILE
 from services.camera.camera_white_balance import low_gain_warning
@@ -39,6 +40,8 @@ class CameraSettingsWidget(QWidget):
         self._stored_wb_mode = None
         self._profile_bayer = None
         self._raw16_status_borrowed = False
+        self._gain_names = ()
+        self.alpaca_identities = AlpacaIdentityMemory()
         self._setup_ui()
         apply_capabilities(self, self._caps)
 
@@ -98,13 +101,14 @@ class CameraSettingsWidget(QWidget):
         self.exposure_spin.setValue(1.0)
         self.exposure_spin.setToolTip("Single frame exposure time (0.001s to 3600s)")
         self.exposure_spin.valueChanged.connect(self._on_exposure_changed)
-        card.add_row("Exposure", self.exposure_spin, "0.001s to 3600s")
+        self.exposure_row = card.add_row("Exposure", self.exposure_spin, "0.001s to 3600s")
 
         self.gain_spin = SpinBox()
         self.gain_spin.setRange(0, 600)
         self.gain_spin.setValue(100)
         self.gain_spin.setToolTip("Camera gain/sensitivity (higher = brighter but more noise)")
         self.gain_spin.valueChanged.connect(self._on_gain_changed)
+        self.gain_spin.valueChanged.connect(lambda *_: show_gain_name(self))
         self.gain_row = card.add_row("Gain", self.gain_spin, "0 to 600")
 
         self.interval_spin = DoubleSpinBox()
@@ -114,7 +118,7 @@ class CameraSettingsWidget(QWidget):
         self.interval_spin.setValue(5.0)
         self.interval_spin.setToolTip("Time to wait between capturing frames")
         self.interval_spin.valueChanged.connect(self._on_interval_changed)
-        card.add_row("Interval", self.interval_spin, "Time between captures")
+        self.interval_row = card.add_row("Interval", self.interval_spin, "Time between captures")
 
         return card
 
@@ -330,13 +334,11 @@ class CameraSettingsWidget(QWidget):
         self.settings_changed.emit()
 
     def _on_alpaca_connection(self, values: dict):
-        """Typed address: forget the learned UniqueID and Name, like a manual ZWO
-        pick forgets the serial. A discovered device brings its own."""
+        """Typed or discovered address; see AlpacaIdentityMemory.edited_settings."""
         if not self._can_save:
             return
-        cfg = dict(self.main_window.config.get('alpaca_camera') or {})
-        cfg.update({'unique_id': '', 'name': ''})
-        cfg.update(values)
+        current = self.main_window.config.get('alpaca_camera') or {}
+        cfg = self.alpaca_identities.edited_settings(current, values)
         self.main_window.config.set('alpaca_camera', cfg)
         self.load_from_config(self.main_window.config)
         self.settings_changed.emit()
@@ -353,12 +355,16 @@ class CameraSettingsWidget(QWidget):
             camera_name, serial = self._alpaca_identity(config)
             if serial:
                 config.update_camera_profile(camera_name, serial=serial, **kwargs)
-        else:
-            camera_name = self._clean_camera_name(config.get('zwo_selected_camera_name', ''))
-            serial = config.get('zwo_selected_camera_serial', '')
-            if camera_name:
-                config.update_camera_profile(camera_name, serial=serial, **kwargs)
-        # The zwo_* mirror is what capture reads for auto-exposure, on either backend.
+            # Capture reads zwo_auto_exposure on either backend. The other zwo_*
+            # mirrors are legacy ZWO keys: on an Alpaca config the migration
+            # would fold them into a stray profile at the next start.
+            if 'auto_exposure' in kwargs:
+                config.set('zwo_auto_exposure', kwargs['auto_exposure'])
+            return
+        camera_name = self._clean_camera_name(config.get('zwo_selected_camera_name', ''))
+        serial = config.get('zwo_selected_camera_serial', '')
+        if camera_name:
+            config.update_camera_profile(camera_name, serial=serial, **kwargs)
         for key, value in kwargs.items():
             config.set(f'zwo_{key}', value)
 
@@ -480,9 +486,10 @@ class CameraSettingsWidget(QWidget):
         self.main_window.config.set('white_balance', wb_settings)
         self.settings_changed.emit()
 
-    def apply_capabilities(self, caps):
-        """Gate the widgets on `caps` (static per source, or a live session's)."""
-        apply_capabilities(self, caps)
+    def apply_capabilities(self, caps, gain_names=()):
+        """Gate the widgets on `caps` (static per source, or a live session's);
+        `gain_names` labels a camera that offers named gains (display only)."""
+        apply_capabilities(self, caps, gain_names)
 
     def _active_profile(self, config):
         if camera_source(config) == ALPACA:
@@ -510,6 +517,7 @@ class CameraSettingsWidget(QWidget):
             apply_capabilities(self, self._caps)
             self.sdk_path_input.setText(config.get('zwo_sdk_path', ''))
             self.alpaca_card.load(alpaca_settings(config))
+            self.alpaca_identities.remember(alpaca_settings(config))
             profile = self._active_profile(config)
 
             self.exposure_spin.setValue(

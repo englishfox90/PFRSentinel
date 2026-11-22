@@ -5,8 +5,8 @@ Layout and signals only (issue #43). Discovery and the test run in
 back through `set_devices` / `set_test_result`. The settings widget writes the
 `alpaca_camera` config from `connection_edited` / `device_picked`.
 """
-from PySide6.QtWidgets import QWidget, QHBoxLayout
-from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QSizePolicy
+from PySide6.QtCore import Qt, Signal
 from qfluentwidgets import PushButton, ComboBox, LineEdit, CaptionLabel
 
 from ..theme.tokens import Colors, Spacing
@@ -17,6 +17,28 @@ from ..components.scroll_safe_spinbox import SpinBox
 _NOT_TESTED = "Not tested yet. Test Connection checks the camera without starting capture."
 _NO_DEVICES = "Not searched yet"
 _STATUS_CHARS = 140
+
+
+class _ElidingComboBox(ComboBox):
+    """A found camera's label ("Name — host:port #n") can be long: the box shows
+    it elided in the middle to its own width, so it never widens the card past
+    the page (the list and the tooltip keep the whole label)."""
+
+    _full_text = ''
+
+    def setText(self, text: str):
+        self._full_text = text or ''
+        self._show_elided()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._show_elided()
+
+    def _show_elided(self):
+        width = max(24, self.width() - 44)  # room for the drop-down arrow
+        shown = (self.fontMetrics().elidedText(self._full_text, Qt.ElideMiddle, width)
+                 if self._full_text else '')
+        QPushButton.setText(self, shown)  # ComboBox.setText would adjustSize() to the full text
 
 
 def describe_probe(details: dict) -> str:
@@ -53,9 +75,11 @@ class AlpacaConnectionCard(SettingsCard):
     def _build(self):
         found_row = QHBoxLayout()
         found_row.setSpacing(Spacing.sm)
-        self.device_combo = ComboBox()
+        self.device_combo = _ElidingComboBox()
         self.device_combo.setPlaceholderText(_NO_DEVICES)
         self.device_combo.currentIndexChanged.connect(self._on_device_selected)
+        self.device_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.device_combo.setMinimumWidth(120)
         found_row.addWidget(self.device_combo, 1)
         self.discover_btn = PushButton("Discover")
         self.discover_btn.setIcon(mdi('access-point-network'))
@@ -89,7 +113,6 @@ class AlpacaConnectionCard(SettingsCard):
         self.test_status.setWordWrap(True)
         self.test_status.setStyleSheet(f"color: {Colors.text_muted};")
         test_row = QHBoxLayout()
-        test_row.setContentsMargins(0, 0, 0, 0)
         test_row.addWidget(self.test_btn)
         test_row.addStretch(1)
         test_widget = QWidget()
@@ -143,6 +166,7 @@ class AlpacaConnectionCard(SettingsCard):
             self.device_combo.clear()
             for device in devices:
                 self.device_combo.addItem(device.label(), userData=device)
+            self.device_combo.setToolTip("\n".join(d.label() for d in devices))
             self.device_combo.setCurrentIndex(-1)
             if error:
                 placeholder = "Search failed"

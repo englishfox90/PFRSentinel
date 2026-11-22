@@ -155,6 +155,7 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin, _Alpaca
                 self.camera_controller.stop_capture()
                 if hasattr(self, 'capture_panel'):
                     self.capture_panel.reset_camera_capabilities()
+                    self._reapply_known_alpaca_capabilities()
             elif self.watch_controller:
                 self.watch_controller.stop_watching()
 
@@ -392,7 +393,10 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin, _Alpaca
         try:
             caps = getattr(cam, 'capabilities', None)
             if caps is not None and caps.backend != 'zwo':
-                self.capture_panel.apply_camera_capabilities(caps)
+                # The session may just have learned the camera's UniqueID.
+                self.capture_panel.reload_camera_settings(self.config)
+                names, caps = self._remember_alpaca_session_capabilities(cam)
+                self.capture_panel.apply_camera_capabilities(caps, names)
                 return
             self.capture_panel.update_camera_capabilities(
                 cam.supports_raw16, cam.sensor_bit_depth)

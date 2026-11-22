@@ -17,6 +17,7 @@ SOFTWARE_WB_MODES = ["manual", "gray_world"]
 _OPEN_RANGE = (0, 65535)
 _MAX_EXPOSURE_S = 3600.0
 
+_GAIN_TOOLTIP = "Camera gain/sensitivity (higher = brighter but more noise)"
 _ZWO_BAYER_TOOLTIP = "Color filter array pattern - BGGR for most ZWO cameras"
 _ZWO_BAYER_HINT = "BGGR for most ASI cameras"
 _DEVICE_BAYER_TOOLTIP = "Reported by the camera (SensorType/BayerOffset)"
@@ -28,9 +29,16 @@ def _set_hint(row, text: str):
         labels[0].setText(text)
 
 
-def apply_capabilities(widget, caps):
-    """Make `widget` (a CameraSettingsWidget) match `caps`. Idempotent."""
+def apply_capabilities(widget, caps, gain_names=()):
+    """Make `widget` (a CameraSettingsWidget) match `caps`. Idempotent.
+
+    `gain_names` (an Alpaca camera's ``Gains`` list) labels the gain index the
+    spin box holds; any other caps clear them.
+    """
     widget._caps = caps
+    names = tuple(str(n) for n in (gain_names or ()))
+    lo_hi = caps.gain_range
+    widget._gain_names = names if names and lo_hi == (0, len(names) - 1) else ()
     was_loading = widget._loading_config
     widget._loading_config = True
     try:
@@ -59,6 +67,7 @@ def _ranges(widget, caps):
     widget.gain_spin.setEnabled(caps.gain)
     _set_hint(widget.gain_row, f"{lo} to {hi}" if caps.gain_range
               else "Range is read from the camera when it connects")
+    show_gain_name(widget)
 
     lo, hi = caps.offset_range or _OPEN_RANGE
     widget.offset_spin.setRange(lo, hi)
@@ -71,6 +80,22 @@ def _ranges(widget, caps):
         longest = min(_MAX_EXPOSURE_S, float(caps.exposure_range_s[1]))
     widget.exposure_spin.setMaximum(longest)
     widget.max_exposure_spin.setMaximum(longest)
+    span = f"{widget.exposure_spin.minimum():g}s to {longest:g}s"
+    widget.exposure_spin.setToolTip(f"Single frame exposure time ({span})")
+    _set_hint(getattr(widget, 'exposure_row', None), span)
+
+
+def show_gain_name(widget):
+    """With named gains, the hint names the selected one and the tooltip lists them."""
+    names = getattr(widget, '_gain_names', ())
+    if not names:
+        widget.gain_spin.setToolTip(_GAIN_TOOLTIP)
+        return
+    index = widget.gain_spin.value()
+    current = names[index] if 0 <= index < len(names) else "?"
+    _set_hint(widget.gain_row, f"{current} (gain setting {index} of 0 to {len(names) - 1})")
+    listed = "\n".join(f"{i}: {name}" for i, name in enumerate(names))
+    widget.gain_spin.setToolTip(f"Gain settings this camera offers:\n{listed}")
 
 
 def _white_balance(widget, caps):

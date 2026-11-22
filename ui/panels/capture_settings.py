@@ -31,6 +31,7 @@ class CaptureSettingsPanel(QScrollArea):
     revive_camera_clicked = Signal(str)
     alpaca_discover_clicked = Signal()
     alpaca_test_clicked = Signal()
+    camera_source_selected = Signal(str)  # a camera segment was clicked; its source
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,6 +119,8 @@ class CaptureSettingsPanel(QScrollArea):
                 config.set('camera_source', source)
                 self.camera_widget.load_from_config(config)
             self.settings_changed.emit()
+            if source is not None:
+                self.camera_source_selected.emit(source)
 
     def _create_watch_settings(self) -> QWidget:
         widget = QWidget()
@@ -220,8 +223,12 @@ class CaptureSettingsPanel(QScrollArea):
         self.mode_selector.setEnabled(not active)
         self.camera_widget.set_capture_active(active)
 
-    def apply_camera_capabilities(self, caps):
-        self.camera_widget.apply_capabilities(caps)
+    def apply_camera_capabilities(self, caps, gain_names=()):
+        self.camera_widget.apply_capabilities(caps, gain_names)
+
+    def reload_camera_settings(self, config):
+        """Show the camera settings again, e.g. after the camera's identity was learned."""
+        self.camera_widget.load_from_config(config)
 
     def set_alpaca_discovering(self, active: bool):
         self.camera_widget.alpaca_card.set_discovering(active)

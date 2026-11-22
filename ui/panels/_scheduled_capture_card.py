@@ -27,6 +27,13 @@ _SCHEDULE_MODE_HINTS = {
     "variable": "Capture 24/7, but use the faster rate below while inside the window — useful for night timelapses.",
 }
 
+# The Interval row's hint, so a schedule that sets its own rate says so there.
+_INTERVAL_HINTS = {
+    "always": "Time between captures",
+    "gated": "Time between captures inside the Scheduled Capture window",
+    "variable": "Used outside the Scheduled Capture window; inside it, the in-window interval applies",
+}
+
 
 class ScheduledCaptureCard(CollapsibleCard):
     def __init__(self, owner, parent=None):
@@ -122,12 +129,19 @@ class ScheduledCaptureCard(CollapsibleCard):
         self._update_schedule_window_visibility(mode)
         # In-window interval is only meaningful in variable mode.
         self.schedule_window_row.setVisible(mode == "variable")
+        self._show_interval_hint(mode)
         if self._owner._can_save:
             self._owner.main_window.config.set('scheduled_capture_mode', mode)
             # Keep legacy flag in sync so any external tooling still reading it
             # (migrations, pre-update installs) sees a sensible value.
             self._owner.main_window.config.set('scheduled_capture_enabled', mode != "always")
             self._owner.settings_changed.emit()
+
+    def _show_interval_hint(self, mode: str):
+        row = getattr(self._owner, 'interval_row', None)
+        labels = row.findChildren(CaptionLabel) if row is not None else []
+        if labels:
+            labels[0].setText(_INTERVAL_HINTS.get(mode, _INTERVAL_HINTS["always"]))
 
     def _on_schedule_time_changed(self):
         if not self._owner._can_save:
@@ -175,3 +189,4 @@ class ScheduledCaptureCard(CollapsibleCard):
         self.schedule_source_rows.load(config)
         self._update_schedule_window_visibility(mode)
         self.schedule_window_row.setVisible(mode == "variable")
+        self._show_interval_hint(mode)

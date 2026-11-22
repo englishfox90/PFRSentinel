@@ -19,9 +19,16 @@ def config(tmp_path):
 
 
 def _window(config, **kw):
-    w = SimpleNamespace(config=config, is_capturing=False, camera_controller=None,
-                        app_bar=MagicMock(), capture_panel=MagicMock(), _notify=MagicMock(),
-                        alpaca_discovery=MagicMock())
+    """A stand-in main window: the real mixin methods over mocked widgets."""
+    from ui.main_window.capture import _MainWindowCaptureMixin
+
+    class _Window(_MainWindowCaptureMixin):
+        pass
+
+    w = _Window()
+    w.__dict__.update(config=config, is_capturing=False, camera_controller=None,
+                      app_bar=MagicMock(), capture_panel=MagicMock(), _notify=MagicMock(),
+                      alpaca_discovery=MagicMock())
     w.__dict__.update(kw)
     return w
 
@@ -102,5 +109,5 @@ def test_live_alpaca_session_capabilities_go_to_the_panel(config):
     session = SimpleNamespace(capabilities=caps)
     w = _window(config, camera_controller=SimpleNamespace(zwo_camera=session))
     _MainWindowCaptureMixin._update_camera_capabilities(w)
-    w.capture_panel.apply_camera_capabilities.assert_called_once_with(caps)
+    w.capture_panel.apply_camera_capabilities.assert_called_once_with(caps, ())
     w.capture_panel.update_camera_capabilities.assert_not_called()
