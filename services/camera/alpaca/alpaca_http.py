@@ -26,6 +26,7 @@ import requests
 
 from services.logger import app_logger
 
+from .alpaca_transport_text import describe_transport_failure
 from .alpaca_imagebytes import IMAGEBYTES_MIME, parse_imagearray_json, parse_imagebytes
 from .alpaca_protocol import (
     API_VERSION,
@@ -50,6 +51,14 @@ _ERROR_TEXT_LIMIT = 200
 CLIENT_ID = random.SystemRandom().randint(1, 2 ** 31 - 1)
 _transaction_ids = itertools.count(1)
 _transaction_lock = threading.Lock()
+
+
+def lan_session() -> requests.Session:
+    """A Session that ignores proxy settings: an Alpaca server is on the local
+    network, and Windows' registry proxy bypass does not cover bare LAN IPs."""
+    session = requests.Session()
+    session.trust_env = False
+    return session
 
 
 def next_transaction_id() -> int:
@@ -89,12 +98,15 @@ def _http_error(response, what: str) -> Exception:
     text = (getattr(response, "text", "") or "").strip()[:_ERROR_TEXT_LIMIT]
     detail = f"HTTP {status} for {what}" + (f": {text}" if text else "")
     if status == 400:
-        return AlpacaInvalidValueError(INVALID_VALUE, detail)
-    if status == 404:
-        return AlpacaNotImplementedError(NOT_IMPLEMENTED, detail)
-    if status >= 500:
-        return AlpacaTransportError(detail)
-    return AlpacaError(None, detail)
+        error = AlpacaInvalidValueError(INVALID_VALUE, detail)
+    elif status == 404:
+        error = AlpacaNotImplementedError(NOT_IMPLEMENTED, detail)
+    elif status >= 500:
+        error = AlpacaTransportError(detail)
+    else:
+        error = AlpacaError(None, detail)
+    error.http_status = status
+    return error
 
 
 class AlpacaHttpClient:
@@ -103,7 +115,7 @@ class AlpacaHttpClient:
     def __init__(self, host: str, port: int = DEFAULT_PORT, device_number: int = 0, *,
                  device_type: str = "camera", connect_timeout: float = 3.0,
                  request_timeout: float = 10.0,
-                 session_factory: Callable[[], requests.Session] = requests.Session):
+                 session_factory: Callable[[], requests.Session] = lan_session):
         self.host = (host or "").strip()
         self.port = int(port)
         self._device_number = int(device_number)
@@ -148,15 +160,21 @@ class AlpacaHttpClient:
         read = self.request_timeout if timeout is None else float(timeout)
         return (self.connect_timeout, read)
 
+    def _transport_error(self, exc, what: str, read_timeout: float):
+        """The Alpaca exception for a failed request: plain words, raw text at DEBUG."""
+        app_logger.debug(f"Alpaca {what} to {self.describe()} failed: {exc!r}")
+        wait = self.connect_timeout if isinstance(exc, requests.ConnectTimeout) else read_timeout
+        message = describe_transport_failure(exc, self.host, self.port, wait)
+        if isinstance(exc, requests.Timeout):
+            return AlpacaTimeoutError(message)
+        return AlpacaTransportError(message)
+
     def _send(self, method: str, url: str, what: str, timeout, **kwargs):
+        timeouts = self._timeout(timeout)
         try:
-            return self._session.request(method, url, timeout=self._timeout(timeout),
-                                         **kwargs)
-        except requests.Timeout as exc:
-            raise AlpacaTimeoutError(f"Timed out on {what} ({self.describe()})") from exc
+            return self._session.request(method, url, timeout=timeouts, **kwargs)
         except requests.RequestException as exc:
-            raise AlpacaTransportError(
-                f"Cannot reach Alpaca server for {what} ({self.describe()}): {exc}") from exc
+            raise self._transport_error(exc, what, timeouts[1]) from exc
 
     @staticmethod
     def _decode_envelope(response, what: str):
@@ -239,13 +257,8 @@ class AlpacaHttpClient:
                 response = session.get(self.member_url("imagearray"), params=self._ids(),
                                        headers=headers, stream=True,
                                        timeout=(self.connect_timeout, timeout))
-            except requests.Timeout as exc:
-                raise AlpacaTimeoutError(
-                    f"Timed out starting image download ({self.describe()})") from exc
             except requests.RequestException as exc:
-                raise AlpacaTransportError(
-                    f"Cannot reach Alpaca server for image download "
-                    f"({self.describe()}): {exc}") from exc
+                raise self._transport_error(exc, "image download", timeout) from exc
             try:
                 payload, content_type = self._read_body(response, deadline, abort_event,
                                                         timeout)
@@ -294,12 +307,13 @@ class AlpacaHttpClient:
                     if len(buf) > MAX_IMAGE_BYTES:
                         raise AlpacaProtocolError("Image download is implausibly large")
         except requests.Timeout as exc:
+            app_logger.debug(f"Alpaca image download stalled after {len(buf)} bytes: {exc!r}")
             raise AlpacaTimeoutError(
-                f"Image download stalled ({self.describe()})") from exc
+                f"Image download from {self.host}:{self.port} stalled") from exc
         except requests.RequestException as exc:
-            app_logger.debug(f"Alpaca image download failed after {len(buf)} bytes: {exc}")
+            app_logger.debug(f"Alpaca image download failed after {len(buf)} bytes: {exc!r}")
             raise AlpacaTransportError(
-                f"Image download interrupted ({self.describe()}): {exc}") from exc
+                f"Image download from {self.host}:{self.port} was interrupted") from exc
         if abort_event is not None and abort_event.is_set():
             raise AlpacaCancelledError(OPERATION_CANCELLED, "Image download aborted")
         return buf, content_type

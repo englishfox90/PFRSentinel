@@ -179,7 +179,7 @@ def test_three_transient_poll_failures_are_tolerated(monkeypatch):
 def test_a_fourth_consecutive_poll_failure_raises(monkeypatch):
     rig = _connected(monkeypatch, session_kwargs={"exposure_sec": 0.5})
     _fail_polls_after_start(rig, monkeypatch, 4)
-    with pytest.raises(CameraError, match="Cannot reach"):
+    with pytest.raises(CameraError, match="Connection refused by"):
         rig.session.capture_single_frame()
 
 

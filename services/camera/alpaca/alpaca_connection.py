@@ -19,25 +19,16 @@ this class gives them those without any ZWO knowledge:
 import threading
 from typing import Callable, Optional
 
-import requests
-
 from services.logger import app_logger
 
 from ..camera_source import alpaca_profile_key
 from ..errors import CameraConfigurationError, CameraError
 from .alpaca_device import AlpacaCameraDevice
-from .alpaca_http import AlpacaHttpClient, ci_get
+from .alpaca_http import AlpacaHttpClient, ci_get, lan_session  # noqa: F401 — re-exported
 from .alpaca_protocol import ALPACA_SDK, AlpacaNotImplementedError
+from .alpaca_transport_text import not_alpaca_server_text
 
 CLEANUP_LOCK_TIMEOUT_S = 5.0
-
-
-def lan_session() -> requests.Session:
-    """A Session that ignores proxy settings: an Alpaca server is on the local
-    network, and Windows' registry proxy bypass does not cover bare LAN IPs."""
-    session = requests.Session()
-    session.trust_env = False
-    return session
 
 
 class AlpacaIdentityError(CameraConfigurationError):
@@ -74,6 +65,7 @@ class AlpacaConnection:
         self.current_bit_depth = 8
         self.auto_recovery_enabled = True
         self.last_error = ""
+        self._management_missing = False
         self.renumbered_from = None
 
     # -- identity ---------------------------------------------------------
@@ -118,7 +110,9 @@ class AlpacaConnection:
         """
         try:
             devices = client.management_configured_devices()
-        except AlpacaNotImplementedError:
+        except AlpacaNotImplementedError as exc:
+            if getattr(exc, "http_status", None) == 404:
+                self._management_missing = True
             app_logger.warning(f"Alpaca server {self.host}:{self.port} has no Management API; "
                                f"using device #{self.device_number} without an identity check")
             return
@@ -163,6 +157,7 @@ class AlpacaConnection:
     def connect(self, camera_settings: Optional[dict] = None, *, configure: bool = True) -> bool:
         """Open the camera; False (with ``last_error``) when it cannot be."""
         self.last_error = ""
+        self._management_missing = False
         if not self.host:
             self.last_error = "No Alpaca server host is configured"
             self.log(f"✗ {self.last_error}")
@@ -185,7 +180,8 @@ class AlpacaConnection:
             if configure:
                 self._configure(device, camera_settings or {})
         except Exception as exc:
-            self.last_error = str(exc) or exc.__class__.__name__
+            self.last_error = self._failure_text(exc)
+            app_logger.debug(f"Alpaca connect to {self.describe()} failed: {exc!r}")
             self.log(f"✗ Alpaca connect failed ({self.describe()}): {self.last_error}")
             if device is not None:
                 device.disconnect()
@@ -197,6 +193,13 @@ class AlpacaConnection:
                  f"{info.width}x{info.height}, {info.physical_bayer_pattern}, "
                  f"{info.sensor_bit_depth}-bit (MaxADU {info.max_adu})")
         return True
+
+    def _failure_text(self, exc) -> str:
+        """What a failed connect tells the user: a 404 from both the Management
+        API and the device means the port is some other web server."""
+        if self._management_missing and getattr(exc, "http_status", None) == 404:
+            return not_alpaca_server_text(self.host, self.port)
+        return str(exc) or exc.__class__.__name__
 
     def _configure(self, device: AlpacaCameraDevice, settings: dict) -> None:
         device.set_full_frame_roi()
