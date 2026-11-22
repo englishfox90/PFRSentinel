@@ -83,7 +83,7 @@ While capture is running, the **Camera** drop-down and **Detect** button are dis
 |---------|-------|---------|-------------|
 | Exposure | 0.001–3600 s | 0.1 s | Length of each exposure. When [Auto Exposure](Auto-Exposure) is on, this is only the starting value. |
 | Gain | 0–600 | 100 | Camera gain (sensitivity). Higher is brighter but noisier. Auto Exposure never changes gain. |
-| Interval | 0.1–3600 s | 300 s | How long to wait after each frame before starting the next one. Values below 1 s run as 1 s. |
+| Interval | 0.1–3600 s | 300 s | How long to wait after each frame before starting the next one. Values below 1 s run as 1 s. From the next release, the hint under it follows the Scheduled Capture mode: "Time between captures inside the Scheduled Capture window" in **Only within time window**, and "Used outside the Scheduled Capture window; inside it, the in-window interval applies" in **Different rate within time window**. |
 
 ### Auto Exposure
 
@@ -183,7 +183,9 @@ PFR Sentinel is built to run unattended, so it tries hard to recover a camera th
 - **Still unreachable** — PFR Sentinel keeps retrying at growing intervals (5 minutes, 15 minutes, then hourly) instead of giving up. It reports once that the camera is unreachable, and again when capture recovers.
 - **Camera stuck in the SDK** — PFR Sentinel tries a USB reset (Administrator rights required). If that doesn't clear it, the app can restart itself to load a fresh copy of the SDK. It only does this inside the **Fixed times** capture window (or at any time in **Always capture** mode), only after at least one successful frame this session, and no more than three times an hour.
 
-Details of each attempt are written to the [Logs](Logs) tab.
+Details of each attempt are written to the [Logs](Logs) tab. From the next release, the camera pill in the status strip reads **Reconnecting to camera…** or **Camera lost · retrying** while this happens (see [Live Monitoring](Live-Monitoring)).
+
+If you click **Stop** and then **Start** while the old capture is still letting go of the camera, Start waits briefly, and if it still hasn't finished shows "The previous capture is still shutting down; try Start again in a few seconds". New in the next release.
 
 From the next release, an [Alpaca camera](Alpaca-Camera#when-the-connection-drops) gets the same reconnects and retries, but never a USB reset or an app restart.
 
