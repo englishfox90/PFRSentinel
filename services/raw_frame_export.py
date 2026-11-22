@@ -3,8 +3,8 @@
 Given the main window's cached frame (camera mode: the SDK Bayer bytes plus
 geometry; watch mode: the clean PIL image) this writes:
 
-- ``<stem>_bayer.fits``      the sensor mosaic, unscaled, with BAYERPAT — only
-                             in camera mode
+- ``<stem>_bayer.fits``      the sensor mosaic, unscaled, top-down, with the
+                             physical BAYERPAT — only in camera mode
 - ``<stem>_unprocessed.png`` debayered + white-balanced, before stretch,
                              sharpening, overlays or resize
 - ``<stem>_metadata.json``   the frame's scalar metadata (exposure, gain,
@@ -20,6 +20,7 @@ from datetime import datetime
 
 import numpy as np
 
+from .camera.bayer_naming import physical_bayer_pattern
 from .camera.frame_builder import is_rebuildable, rebuild_frame
 from .fits_writer import write_fits
 from .logger import app_logger
@@ -31,7 +32,6 @@ FITS_HEADER_KEYS = (
     ('GAIN', 'GAIN'),
     ('TEMP', 'CCDTEMP'),
     ('DATETIME', 'DATE-OBS'),
-    ('BAYER_PATTERN', 'BAYERPAT'),
     ('IMAGE_BIT_DEPTH', 'IMGBITS'),
     ('CAMERA_BIT_DEPTH', 'ADCBITS'),
 )
@@ -117,6 +117,7 @@ def _write_bayer_fits(path, mosaic, metadata) -> bool:
         value = metadata.get(meta_key)
         if value is not None:
             header[fits_key] = str(value) if not isinstance(value, (int, float)) else value
+    header.update(_bayer_cards(metadata))
     header['COMMENT'] = 'PFR Sentinel raw sensor mosaic - unscaled, not debayered'
     try:
         write_fits(path, mosaic, header)
@@ -124,3 +125,26 @@ def _write_bayer_fits(path, mosaic, metadata) -> bool:
         app_logger.warning(f"Raw frame export: FITS write failed ({e}); saving .npy instead")
         return False
     return True
+
+
+def _bayer_cards(metadata) -> dict:
+    """BAYERPAT as the physical tile at row 0 of the file, which is the top row.
+
+    The metadata carries the pipeline's OpenCV name (see
+    ``camera.bayer_naming``); writing that unchanged made Siril and PixInsight
+    debayer the export with red and blue swapped.
+    """
+    pipeline_name = metadata.get('BAYER_PATTERN')
+    if pipeline_name is None and metadata.get('RAW_GEOMETRY'):
+        pipeline_name = metadata['RAW_GEOMETRY'][3]
+    try:
+        physical = physical_bayer_pattern(pipeline_name)
+    except ValueError:
+        app_logger.warning(f"Raw frame export: unknown Bayer pattern {pipeline_name!r}; BAYERPAT omitted")
+        return {'ROWORDER': ('TOP-DOWN', 'row 0 is the top of the image')}
+    return {
+        'BAYERPAT': (physical, 'physical top-left 2x2 colour tile'),
+        'XBAYROFF': (0, 'Bayer X offset'),
+        'YBAYROFF': (0, 'Bayer Y offset'),
+        'ROWORDER': ('TOP-DOWN', 'row 0 is the top of the image'),
+    }

@@ -11,6 +11,7 @@ These are real bugs that have shipped in this project. Get them right.
 - **ASI676MC is BGGR**, not RGGB. Use `cv2.cvtColor(data, cv2.COLOR_BayerBG2RGB)`.
 - Wrong pattern = red and blue channels swapped (sky looks orange, not blue).
 - ZWO cameras output RAW8 Bayer data. Always debayer before any RGB processing.
+- **"BGGR" here is the pipeline's OpenCV name, not the physical tile.** OpenCV names a mosaic by the 2nd and 3rd pixels of its second row — the physical top-left tile rotated 180°. Red at pixel (0,0) (physical RGGB) decodes only through `COLOR_BayerBG2RGB`. Any file leaving the app (FITS `BAYERPAT`) must carry the physical name: convert with `services/camera/bayer_naming.py` (`physical_bayer_pattern()` / `pipeline_pattern_name()`), never write the pipeline name.
 
 ## Exposure units
 - **GUI: milliseconds. SDK: seconds.** Convert at the boundary, never anywhere else.

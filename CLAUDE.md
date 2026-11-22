@@ -49,6 +49,7 @@ PFRSentinel/
 │   │                             camera_white_balance.py (ASI_WB_R/B per mode, low-gain warning),
 │   │                             camera_connection.py (SDK init, detection, USB reconnect),
 │   │                             camera_calibration.py, camera_utils.py,
+│   │                             bayer_naming.py (pipeline/OpenCV name ↔ physical FITS BAYERPAT),
 │   │                             linux_usb_preflight.py (udev rule + usbfs_memory_mb warnings)
 │   ├── cleanup.py              # Disk space management (files only, never folders)
 │   ├── gc_scheduler.py         # GUI-thread cyclic GC (automatic GC off, QTimer-driven)
@@ -329,7 +330,8 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_web_control.py` | 33 | `web_control` — control routes, auth matrix, no-CORS regression guard |
 | `test_capture_command_bridge.py` | 11 | `CaptureCommandBridge` + headless handler — GUI-thread marshalling |
 | `test_diagnostics_bundle.py` | 12 | `diagnostics_bundle` — secret/location redaction, log-age filter, ZIP contents + summary, newest calibration buffer dump under `allsky/` (absent one listed as missing) |
-| `test_raw_frame_export.py` | 7 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata |
+| `test_raw_frame_export.py` | 15 | `raw_frame_export` — Bayer FITS round-trip, unprocessed PNG, scalar metadata; `BAYERPAT` is the physical tile (pipeline name reversed) with `XBAYROFF`/`YBAYROFF` 0 and `ROWORDER` TOP-DOWN: a physical RGGB red-top / blue-bottom mosaic exports as RGGB and a header-driven debayer puts red on top, the in-app PNG is unchanged, every name reversed, an unknown name omits `BAYERPAT`, the built-in (frozen-app) writer writes the same cards |
+| `test_bayer_naming.py` | 15 | `camera.bayer_naming` — OpenCV decodes each physical tile only through its reversed name (measured, all four), pipeline BGGR is physical RGGB, round trip, case tolerated, unknown names raise |
 | `test_zwo_camera_capture_now.py` | 2 | `zwo_camera` — one-shot `request_immediate_capture` wake used by the diagnostics export |
 | `test_coordinate_hemisphere.py` | 24 | `coordinate_hemisphere` + `config_migrate` — unsigned DMS is read north/east and the typed text kept under `weather.hemisphere_unconfirmed`, clock-based longitude default, applying an answer signs the decimal and clears the mark, the startup prompt saves on Confirm and keeps the question on Ask me later, the diagnostics bundle redacts the typed text |
 | `test_hemisphere_dialog.py` | 4 | `HemisphereDialog` — one radio pair per pending field, defaults preselected, typed text shown (offscreen Qt) |

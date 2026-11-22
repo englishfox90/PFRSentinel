@@ -148,7 +148,7 @@ Added in version v3.8.0. In 3.7.9 and earlier, **asi_auto** never set the camera
 |---------|-------|---------|-------------|
 | Offset | 0–255 | 20 | Black level offset, which stops shadows clipping to pure black. |
 | Flip | None / Horizontal / Vertical / Both | None | Mirrors the image. |
-| Bayer Pattern | BGGR / RGGB / GRBG / GBRG | BGGR | Colour filter pattern used for debayering. Most ZWO colour cameras, including the ASI676MC, use BGGR. The wrong pattern swaps red and blue (for example, an orange sky). |
+| Bayer Pattern | BGGR / RGGB / GRBG / GBRG | BGGR | Colour filter pattern used for debayering. BGGR gives correct colours on the ASI676MC. The wrong pattern swaps red and blue (for example, an orange sky). The name follows OpenCV's convention, which reads the tile from the bottom-right, so it is the reverse of the pattern most astronomy software and FITS headers use: a sensor that FITS tools call RGGB is BGGR here. Exported raw FITS files carry the FITS-convention name. |
 | Use RAW16 Mode | Toggle | Off | Captures at the sensor's full bit depth (12–14 bit) instead of 8-bit. |
 
 The **Use RAW16 Mode** toggle stays disabled until a camera connects. A caption then reports support, either "✓ Camera supports RAW16 (12-bit ADC)" or "✗ Camera does not support RAW16 (12-bit ADC, RAW8 only)", with your camera's bit depth in place of 12. RAW16 can be switched while capturing. If the camera rejects RAW16 at full resolution when it connects, capture falls back to RAW8. The toggle still shows On in that case; the [Logs](Logs) tab reports the fallback.

@@ -49,7 +49,7 @@ If capture is not running, the most recent frame captured since the app was star
 |------|----------|
 | `logs/` | Application log files changed in the last 3 days (see [Logs](Logs)). |
 | `config.redacted.json` | All of your settings, with sensitive values replaced by `<redacted>` (see below). |
-| `frames/raw_..._bayer.npy` or `frames/raw_..._bayer.fits` | ZWO camera mode only. The raw sensor data exactly as read from the camera: not debayered, stretched, or scaled. |
+| `frames/raw_..._bayer.npy` or `frames/raw_..._bayer.fits` | ZWO camera mode only. The raw sensor data exactly as read from the camera: not debayered, stretched, or scaled. New in the next release (not in version 3.8.0 or earlier): the FITS header's `BAYERPAT` names the sensor's physical top-left colour tile, with `ROWORDER = TOP-DOWN`, so Siril, PixInsight and other FITS tools debayer it with the right colours. Earlier versions wrote the app's own pattern name there, which made those tools swap red and blue. |
 | `frames/raw_..._unprocessed.png` | ZWO camera mode: the full frame after debayering and white balance, but before stretch, resize, cropping, and overlays. Directory watch mode: the last full frame after auto-stretch, but before resize, cropping, and overlays (there is no raw sensor data in watch mode). |
 | `frames/raw_..._metadata.json` | The frame's metadata: exposure, gain, temperature, image statistics, white balance settings, and similar values. |
 | `frames/latest_output.jpg` (or `.png`) | The most recent finished output image, i.e. the image you may be reporting a problem with. If **Output Framing** is on, this is the cropped image. |
