@@ -17,6 +17,8 @@ from .logger import app_logger
 from .config import Config
 from .camera import ZWOCamera
 from .camera.camera_utils import get_selected_camera_name
+from .camera.camera_source import active_camera_profile, alpaca_settings, camera_source, is_alpaca
+from .headless_alpaca import open_alpaca_camera, reconnect_after_error
 from .capture_schedule_window import gate_for_config
 from .output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output_crop
 from .web_image_encode import encode_for_web
@@ -144,11 +146,17 @@ class HeadlessRunner:
         """Load and validate configuration"""
         self.config.load()
 
-        cam_name = get_selected_camera_name(self.config)
         profile = self._active_profile()
 
         # Log key settings
-        self._log(f"  SDK Path: {self.config.get('zwo_sdk_path')}")
+        if is_alpaca(self.config):
+            alpaca = alpaca_settings(self.config)
+            cam_name = alpaca['name']
+            self._log(f"  Alpaca server: {alpaca['host'] or '(not set)'}:{alpaca['port']} "
+                      f"#{alpaca['device_number']}")
+        else:
+            cam_name = get_selected_camera_name(self.config)
+            self._log(f"  SDK Path: {self.config.get('zwo_sdk_path')}")
         self._log(f"  Camera: {cam_name or 'Default'}")
         self._log(f"  Exposure: {profile.get('exposure_ms', 100)}ms")
         self._log(f"  Gain: {profile.get('gain', 100)}")
@@ -159,6 +167,8 @@ class HeadlessRunner:
     def _active_profile(self) -> dict:
         """Return the active camera's profile, or DEFAULT_CAMERA_PROFILE if no camera selected."""
         from services.config import DEFAULT_CAMERA_PROFILE
+        if is_alpaca(self.config):
+            return active_camera_profile(self.config)
         cam_name = get_selected_camera_name(self.config)
         if not cam_name:
             return dict(DEFAULT_CAMERA_PROFILE)
@@ -229,7 +239,14 @@ class HeadlessRunner:
             self.web_server = None
     
     def _init_camera(self) -> bool:
-        """Initialize ZWO camera"""
+        """Open the configured camera: ZWO over USB, or an Alpaca server."""
+        if is_alpaca(self.config):
+            try:
+                self.zwo_camera = open_alpaca_camera(self.config, self._log)
+            except Exception as e:
+                self._log(f"ERROR initializing Alpaca camera: {e}")
+                self.zwo_camera = None
+            return self.zwo_camera is not None
         try:
             sdk_path = resolve_library_path(self.config.get('zwo_sdk_path'))
             if not sdk_path:
@@ -394,6 +411,8 @@ class HeadlessRunner:
                 self._push_capture_status(running=False, state="error")
                 # Wait before retrying
                 self._wait(5)
+                if self.running and not self._shutdown_event.is_set():
+                    reconnect_after_error(self.zwo_camera, self._log)
 
     def _handle_capture_command(self, command: str):
         """Execute a control-API capture command (headless host).
@@ -442,7 +461,8 @@ class HeadlessRunner:
                 effective_interval = interval
 
             snapshot = api_status.build_capture_snapshot(
-                mode="camera", enabled=enabled, running=running, state=state,
+                mode="camera", camera_source=camera_source(self.config),
+                enabled=enabled, running=running, state=state,
                 interval_seconds=interval, effective_interval_seconds=effective_interval,
                 schedule=schedule,
                 last_capture_epoch=getattr(self, '_last_capture_epoch', None),
