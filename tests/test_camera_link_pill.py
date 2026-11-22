@@ -37,6 +37,8 @@ def _tick(b, session, count=7):
 @pytest.mark.parametrize("state, text", [
     ("reconnecting", "Reconnecting to camera…"),
     ("waiting", "Camera lost · retrying"),
+    ("unconfirmed", "Reconnected · waiting for a frame"),
+    ("stalled", "Camera not finishing exposures"),
 ])
 def test_outage_shows_on_the_pill(bar, backend, state, text):
     b, strip = bar

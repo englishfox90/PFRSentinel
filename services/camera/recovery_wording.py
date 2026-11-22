@@ -6,10 +6,18 @@ replace them; ``ZWO_WORDING`` is the default and reproduces the loop's original
 text exactly. ``levelled`` sends the loop's failure lines to the log as
 WARNING (and tracebacks of ``quiet_traceback_types`` to DEBUG) instead of the
 session's INFO callback — a network outage is expected weather, not a crash.
+
+``errors_survive_reconnect`` (network only) keeps the loop's error count until
+a frame arrives instead of zeroing it on every reconnect that answers: an Alpaca
+server can accept every reconnect while the camera behind it never finishes an
+exposure (issue #177), and a count reset each time never reached long-retry.
+With it the loop also reports a reconnect that answered but has not delivered a
+frame yet as ``link_state`` ``'unconfirmed'`` (``'stalled'`` after an exposure
+that never finished), instead of "reconnecting".
 """
 from dataclasses import dataclass
 
-from .errors import CameraDisconnectedError
+from .errors import CameraDisconnectedError, ExposureStalledError
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,7 @@ class RecoveryWording:
     post_reconnect_settle: str = "Waiting 3s for USB bus to stabilise..."
     levelled: bool = False
     quiet_traceback_types: tuple = ()
+    errors_survive_reconnect: bool = False
 
 
 ZWO_WORDING = RecoveryWording()
@@ -31,7 +40,8 @@ NETWORK_WORDING = RecoveryWording(
     pre_reconnect_wait="Waiting {seconds:.0f}s before reconnecting to the Alpaca server...",
     post_reconnect_settle="Waiting 3s before the first frame on the new connection...",
     levelled=True,
-    quiet_traceback_types=(CameraDisconnectedError,),
+    quiet_traceback_types=(CameraDisconnectedError, ExposureStalledError),
+    errors_survive_reconnect=True,
 )
 
 
