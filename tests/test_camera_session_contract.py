@@ -274,3 +274,78 @@ def test_loop_uses_a_sessions_own_troubleshooting_steps(run_loop):
     start = cam.lines.index("Troubleshooting steps:")
     assert cam.lines[start + 1:start + 3] == ["  1. Check the server", "  2. Check the port"]
     assert not cam.lines[start + 3].startswith("  3.")
+
+
+def _alpaca_session():
+    from services.camera.alpaca.alpaca_camera import AlpacaCamera
+    return AlpacaCamera({'host': '192.0.2.10', 'port': 11111, 'device_number': 0})
+
+
+@pytest.mark.parametrize('name', SESSION_ATTRIBUTES)
+def test_alpaca_session_has_attribute(name):
+    assert hasattr(_alpaca_session(), name)
+
+
+@pytest.mark.parametrize('name', SESSION_METHODS)
+def test_alpaca_session_has_method(name):
+    assert callable(getattr(_alpaca_session(), name))
+
+
+def test_alpaca_session_satisfies_the_protocol():
+    from services.camera.capture_session_base import CaptureSessionBase
+    from services.camera.session import CaptureSession, LOOP_OWNED_ATTRIBUTES
+    from services.camera.alpaca.alpaca_camera import AlpacaCamera
+    cam = _alpaca_session()
+    assert isinstance(cam, CaptureSession) and isinstance(cam, CaptureSessionBase)
+    assert AlpacaCamera.backend == 'alpaca'
+    for name in ('__del__', '__enter__', '__exit__'):
+        assert name in vars(AlpacaCamera), f"{name} must be on AlpacaCamera itself"
+    for name in LOOP_OWNED_ATTRIBUTES:
+        assert not hasattr(cam, name)
+
+
+def test_alpaca_device_is_an_exposure_handle_with_zwoasi_constants():
+    from services.camera.alpaca.alpaca_device import AlpacaCameraDevice
+    from services.camera.alpaca.alpaca_protocol import ALPACA_SDK
+    from services.camera.driver import ExposureHandle
+    assert issubclass(AlpacaCameraDevice, ExposureHandle)
+    assert {k: getattr(ALPACA_SDK, k) for k in SDK_CONSTANTS} == SDK_CONSTANTS
+
+
+def test_alpaca_stop_capture_takes_its_own_lock_not_the_zwo_one():
+    from services.camera.sdk_lock import SDK_LOCK
+    cam = _alpaca_session()
+    assert cam._connection.sdk_lock is not SDK_LOCK
+    lock = MagicMock()
+    lock.acquire.return_value = True
+    cam._connection.sdk_lock = lock
+    cam._connection.camera = MagicMock()
+    cam.is_capturing = True
+    cam.exposure_start_time = 1.0
+    cam.stop_capture()
+    lock.acquire.assert_called_once_with(timeout=2.0)
+    cam._connection.camera.stop_exposure.assert_called_once()
+
+
+def test_factory_builds_an_alpaca_session_for_the_alpaca_source():
+    from services.camera.session_factory import build_session
+    params = {k: 2000 for k in ('exposure_ms', 'max_exposure_ms')}
+    params.update(
+        camera_source='alpaca', sdk_path='', camera_name='Sim', clean_camera_name='Sim',
+        camera_serial='alpaca:uid-1', gain=120, wb_r=50, wb_b=60, offset=10, flip=1,
+        bayer_pattern='RGGB', auto_exposure=True, wb_config={'mode': 'asi_auto'},
+        scheduled_capture_mode='gated', scheduled_start_time='18:00',
+        scheduled_end_time='06:00', scheduled_window_interval=7.0, target_brightness=90,
+        capture_interval=12.0, use_raw16=True, auto_recovery=False,
+        alpaca={'host': '192.0.2.10', 'port': 11112, 'device_number': 2, 'unique_id': 'uid-1'})
+    gate, on_error, on_cal = MagicMock(), MagicMock(), MagicMock()
+    cam = build_session(params, gate, 7, on_error, on_cal)
+    assert cam.backend == 'alpaca'
+    assert (cam.camera_name, cam.camera_serial) == ('Sim', 'alpaca:uid-1')
+    assert cam._connection.describe() == '192.0.2.10:11112 #2'
+    assert (cam.exposure_seconds, cam.max_exposure, cam.gain, cam.flip) == (2.0, 2.0, 120, 1)
+    assert cam.schedule_gate is gate and cam.scheduled_capture_mode == 'gated'
+    assert (cam.target_brightness, cam.capture_interval, cam.use_raw16) == (90, 12.0, False)
+    assert cam.auto_recovery_enabled is False
+    assert cam.wb_config['mode'] == 'gray_world'
+    assert cam.on_error_callback is on_error and cam.on_calibration_callback is on_cal
