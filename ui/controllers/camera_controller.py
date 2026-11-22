@@ -161,15 +161,11 @@ class CameraControllerQt(QObject):
         self._cancel_auto_recovery_timer()
         self._user_requested_stop = False
 
-        if self.zwo_camera is not None:
+        # Torn down on the start worker, before it makes any SDK call of its own.
+        stale_camera = self.zwo_camera
+        self.zwo_camera = None
+        if stale_camera is not None:
             app_logger.info("Cleaning up existing camera instance...")
-            try:
-                if self.is_connected:
-                    self.zwo_camera.disconnect()
-                self.zwo_camera = None
-            except Exception as e:
-                app_logger.warning(f"Error cleaning up old camera instance: {e}")
-                self.zwo_camera = None
 
         # Read all config on the main thread — keeps cross-thread Config access
         # out of the blocking SDK calls that run in the worker thread.
@@ -225,9 +221,10 @@ class CameraControllerQt(QObject):
         )
 
         self._capture_starting = True
-        threading.Thread(target=self._start_capture_worker, args=(params,), daemon=True).start()
+        threading.Thread(target=self._start_capture_worker, args=(params, stale_camera),
+                         daemon=True).start()
 
-    def _start_capture_worker(self, params: dict):
+    def _start_capture_worker(self, params: dict, stale_camera=None):
         """Blocking SDK work for start_capture — runs off the Qt main thread.
 
         _resolve_camera_index, ZWOCamera construction, and connect_camera all
@@ -235,6 +232,8 @@ class CameraControllerQt(QObject):
         instability. Running them here keeps the Qt event loop responsive.
         """
         try:
+            if stale_camera is not None:
+                self._stop_and_disconnect(stale_camera)
             # Wait out any wedged prior worker — concurrent SDK access crashes the DLL.
             if self._dying_camera is not None:
                 try:
@@ -315,12 +314,12 @@ class CameraControllerQt(QObject):
         if ok:
             if self._user_requested_stop:
                 app_logger.info("Capture connected but stop was requested — tearing down")
-                if self.zwo_camera:
-                    try:
-                        self.zwo_camera.disconnect()
-                    except Exception:
-                        pass
-                    self.zwo_camera = None
+                # The worker already started the capture loop; dropping the
+                # reference alone would leave it running with the USB handle open.
+                camera = self.zwo_camera
+                self.zwo_camera = None
+                if camera:
+                    self._shutdown_camera_async(camera)
                 self.is_connected = False
                 return
             self.is_capturing = True
@@ -380,29 +379,7 @@ class CameraControllerQt(QObject):
             self.zwo_camera = None
 
             if camera:
-                # Run stop + disconnect in background to avoid blocking UI.
-                # stop_capture() sets is_capturing=False and aborts the exposure,
-                # then join()s the capture thread. disconnect_camera() resets the
-                # hardware. Both can involve SDK calls that may block.
-                import threading
-                def shutdown():
-                    try:
-                        camera.stop_capture()
-                    except Exception as e:
-                        app_logger.debug(f"Error stopping capture: {e}")
-                    # Wedged worker (3s join timed out) still holds the SDK;
-                    # retain it so a later start waits instead of reinitialising
-                    # the SDK concurrently (which crashes the ZWO DLL).
-                    try:
-                        if isinstance(camera.capture_thread, threading.Thread) and camera.capture_thread.is_alive():
-                            self._dying_camera = camera
-                    except Exception:
-                        pass
-                    try:
-                        camera.disconnect_camera()
-                    except Exception as e:
-                        app_logger.debug(f"Error disconnecting camera: {e}")
-                threading.Thread(target=shutdown, daemon=True).start()
+                self._shutdown_camera_async(camera)
 
             self.capture_stopped.emit()
             app_logger.info("Camera capture stopped")
@@ -410,6 +387,30 @@ class CameraControllerQt(QObject):
         except Exception as e:
             app_logger.error(f"Error stopping capture: {e}")
     
+    def _shutdown_camera_async(self, camera):
+        """Stop and disconnect ``camera`` on a daemon thread, keeping the UI responsive."""
+        threading.Thread(target=self._stop_and_disconnect, args=(camera,), daemon=True).start()
+
+    def _stop_and_disconnect(self, camera):
+        """stop_capture() aborts the exposure and joins the capture thread;
+        disconnect_camera() releases the hardware. Both can block in the SDK."""
+        try:
+            camera.stop_capture()
+        except Exception as e:
+            app_logger.debug(f"Error stopping capture: {e}")
+        # Wedged worker (3s join timed out) still holds the SDK;
+        # retain it so a later start waits instead of reinitialising
+        # the SDK concurrently (which crashes the ZWO DLL).
+        try:
+            if isinstance(camera.capture_thread, threading.Thread) and camera.capture_thread.is_alive():
+                self._dying_camera = camera
+        except Exception:
+            pass
+        try:
+            camera.disconnect_camera()
+        except Exception as e:
+            app_logger.debug(f"Error disconnecting camera: {e}")
+
     def _on_frame_captured(self, pil_image, metadata):
         """Callback from ZWOCamera when a frame is captured.
         
