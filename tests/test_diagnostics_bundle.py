@@ -164,3 +164,45 @@ class TestAllskyBufferDump:
                      summary={}, extra_files=allsky_buffer_dump_files(tmp_path / "none"))
         with zipfile.ZipFile(dest) as zf:
             assert json.loads(zf.read("summary.json"))["missing"] == [BUFFER_DUMP_PLACEHOLDER]
+
+
+class TestAlpacaRedaction:
+    """Issue #43: the Alpaca camera's address and UniqueID are masked by path;
+    the web server's bind host is diagnostic and stays visible."""
+
+    CONFIG = {
+        "camera_source": "alpaca",
+        "alpaca_camera": {"host": "10.0.0.5", "port": 11111, "device_number": 0,
+                          "unique_id": "3b2f6a1e-43a1", "name": "ZWO ASI676MC"},
+        "output": {"webserver_host": "0.0.0.0", "webserver_port": 8080},
+        "camera_profiles": {"alpaca:3b2f6a1e-43a1": {"gain": 120},
+                            "alpaca:10.0.0.5:11111:0": {"gain": 100},
+                            "ZWO ASI676MC": {"gain": 180}},
+    }
+
+    def test_host_and_unique_id_are_masked(self):
+        out = redact_config(self.CONFIG)["alpaca_camera"]
+        assert out["host"] == REDACTED and out["unique_id"] == REDACTED
+        assert out["port"] == 11111 and out["name"] == "ZWO ASI676MC"
+
+    def test_webserver_host_stays_visible(self):
+        assert redact_config(self.CONFIG)["output"]["webserver_host"] == "0.0.0.0"
+
+    def test_profile_keys_do_not_leak_the_identity(self):
+        out = redact_config(self.CONFIG)
+        text = json.dumps(out)
+        assert "3b2f6a1e" not in text and "10.0.0.5" not in text
+        assert sorted(v["gain"] for v in out["camera_profiles"].values()) == [100, 120, 180]
+        assert out["camera_profiles"]["ZWO ASI676MC"] == {"gain": 180}
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", ""])
+    def test_loopback_or_empty_host_is_kept(self, host):
+        cfg = {"alpaca_camera": {"host": host, "unique_id": ""}}
+        assert redact_config(cfg)["alpaca_camera"] == {"host": host, "unique_id": ""}
+
+    def test_bundle_file_carries_the_masked_config(self, tmp_path):
+        dest = build_bundle(tmp_path / "b.zip", config_data=self.CONFIG,
+                            log_dir=tmp_path / "logs", summary={})
+        with zipfile.ZipFile(dest) as zf:
+            text = zf.read("config.redacted.json").decode()
+        assert "10.0.0.5" not in text and "3b2f6a1e" not in text and "0.0.0.0" in text

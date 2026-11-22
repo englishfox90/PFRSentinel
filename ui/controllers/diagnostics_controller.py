@@ -17,6 +17,7 @@ import time
 from PySide6.QtCore import QObject, Signal
 
 from services import app_config
+from services.camera.camera_source import ALPACA, alpaca_settings, camera_source, is_alpaca
 from services.diagnostics_bundle import (
     allsky_buffer_dump_files, allsky_calibration_history_files, build_bundle,
     default_bundle_path, environment_info)
@@ -182,7 +183,9 @@ class DiagnosticsController(QObject):
                                              'is_capturing', False)),
             'watch_active': bool(getattr(getattr(self._mw, 'watch_controller', None),
                                          'is_watching', False)),
-            'selected_camera': cfg.get('zwo_selected_camera_name', ''),
+            'camera_source': camera_source(cfg),
+            'selected_camera': (alpaca_settings(cfg)['name'] if is_alpaca(cfg)
+                                else cfg.get('zwo_selected_camera_name', '')),
             'live_camera': self._live_camera_settings(),
             'resources': self._resource_snapshot(),
             'notes': notes,
@@ -202,7 +205,7 @@ class DiagnosticsController(QObject):
         if zwo is None:
             return None
         try:
-            return {
+            settings = {
                 'exposure_s': round(float(zwo.exposure_seconds), 3),
                 'gain': zwo.gain,
                 'offset': zwo.offset,
@@ -214,6 +217,10 @@ class DiagnosticsController(QObject):
                 'bayer_pattern': zwo.bayer_pattern,
                 'wb_config': dict(zwo.wb_config or {}),
             }
+            if getattr(zwo, 'backend', None) == ALPACA:
+                from services.camera.alpaca.alpaca_diagnostics import session_diagnostics
+                settings['alpaca'] = session_diagnostics(zwo)
+            return settings
         except Exception as e:
             return {'error': str(e)}
 
