@@ -399,6 +399,9 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin):
     def _on_raw16_mode_done(self, enabled: bool, ok: bool):
         # Revert the toggle if the SDK rejected or failed the mode change.
         if not ok and hasattr(self, 'capture_panel'):
-            self.capture_panel._loading_config = True
-            self.capture_panel.raw16_switch.set_checked(not enabled)
-            self.capture_panel._loading_config = False
+            widget = self.capture_panel.camera_widget
+            widget._loading_config = True
+            try:
+                widget.raw16_switch.set_checked(not enabled)
+            finally:
+                widget._loading_config = False
