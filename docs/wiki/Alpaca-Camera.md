@@ -90,7 +90,7 @@ A network camera recovers the same way a USB one does, minus the USB steps:
 - **Capture won't start** — with **Automatic camera recovery** on (see [Settings](Settings#system)), a start that fails before the first frame is retried, so a rig whose camera server comes up after PFR Sentinel still starts capturing on its own. With it off, a failed start stays stopped until you click **Start Capture** again.
 - With **Automatic camera recovery** off, a capture error gets one plain reconnect, then capture stops, as described in [Turning recovery off](Capture-Settings#turning-recovery-off). A failed start logs "Capture failed and automatic recovery is off — not retrying. Click Start when the camera is ready."
 
-The USB reset and the app restart are never used for an Alpaca camera.
+The USB reset is never used for an Alpaca camera. An app restart is a last resort only if PFR Sentinel's own capture thread stops responding and won't let go after several attempts, under the same limits as for a ZWO camera (see [Camera Recovery](Capture-Settings#camera-recovery)).
 
 While it recovers, the camera pill at the right of the status strip reads **Reconnecting to camera…** during a reconnect, and **Camera lost · retrying** while it waits for the next attempt. ZWO cameras show the same two states. Outage lines are logged as warnings, in network terms ("Waiting 8s before reconnecting to the Alpaca server..."), without a traceback for an expected disconnect.
 

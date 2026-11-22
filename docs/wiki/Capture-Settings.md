@@ -187,7 +187,7 @@ Details of each attempt are written to the [Logs](Logs) tab. From the next relea
 
 If you click **Stop** and then **Start** while the old capture is still letting go of the camera, Start waits briefly, and if it still hasn't finished shows "The previous capture is still shutting down; try Start again in a few seconds". New in the next release.
 
-From the next release, an [Alpaca camera](Alpaca-Camera#when-the-connection-drops) gets the same reconnects and retries, but never a USB reset or an app restart.
+From the next release, an [Alpaca camera](Alpaca-Camera#when-the-connection-drops) gets the same reconnects and retries, but never a USB reset. The app restart is used only if the capture thread itself stops responding.
 
 ### Turning recovery off
 

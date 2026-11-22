@@ -87,7 +87,7 @@ The navigation rail groups the pages:
 - **[Meteor tracker](Meteor-Detection)**: Detects meteor trails across a stack of frames, rejects planes and persistent artefacts, and keeps thumbnails for review
 - **[Image Library](Image-Library)**: A per-night archive with a scrubber, roof and cloud condition band, and live updates while capturing
 - **[NINA integration](NINA-Integration)**: Install the NINA plugin from the Output tab; capture follows your sequence
-- **Camera recovery**: Reconnects a dropped camera, resets the USB device (ZWO), and restarts the app if needed (ZWO)
+- **Camera recovery**: Reconnects a dropped camera, resets the USB device (ZWO cameras), and restarts the app if needed
 - **Per-camera profiles**: Exposure, gain, white balance, and other settings stored independently for each camera
 - **[Diagnostics Export](Diagnostics-Export)**: One ZIP with logs, redacted settings and a fresh raw frame to attach to a bug report (new in the next release)
 - **[Output Framing](Image-Processing#output-framing)**: Crop saved and published images to a box you draw, while detection and calibration keep the full frame (new in the next release)
