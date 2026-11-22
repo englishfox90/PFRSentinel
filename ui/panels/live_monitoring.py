@@ -492,7 +492,7 @@ class LiveMonitoringPanel(QScrollArea):
         elif not camera_ready:
             self.preview.show_overlay(
                 'camera-off-outline', "No camera connected",
-                "Connect a ZWO ASI camera, or choose a directory to watch for incoming frames.",
+                "Connect a camera, or choose a directory to watch for incoming frames.",
             )
         elif self._has_frame:
             sub = f"Showing last frame · {self._last_frame_time}" if self._last_frame_time \
@@ -501,7 +501,7 @@ class LiveMonitoringPanel(QScrollArea):
         else:
             self.preview.show_overlay(
                 'camera-off-outline', "No camera connected",
-                "Connect a ZWO ASI camera, or choose a directory to watch for incoming frames.",
+                "Connect a camera, or choose a directory to watch for incoming frames.",
             )
 
     def update_from_camera(self, camera_controller):

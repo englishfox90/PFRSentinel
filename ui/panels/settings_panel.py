@@ -98,9 +98,9 @@ class SettingsPanel(QScrollArea):
 
         recovery_row = SwitchRow(
             "Automatic camera recovery",
-            "On: a camera fault is retried indefinitely, with USB resets and an app "
-            "restart if needed. Off: one plain reconnect, then capture stops until "
-            "you start it again. No USB resets."
+            "On: a camera fault is retried indefinitely, with USB resets (ZWO only) "
+            "and an app restart if needed. Off: one plain reconnect, then capture "
+            "stops until you start it again. No USB resets."
         )
         self.camera_recovery_switch = recovery_row.switch
         self.camera_recovery_switch.checkedChanged.connect(self._on_camera_recovery_changed)
