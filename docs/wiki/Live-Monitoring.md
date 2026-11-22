@@ -82,6 +82,7 @@ At the right-hand end, the capture/camera pill shows:
 |-------|---------|
 | Capturing | Green **CAPTURE** pill with "Capturing · frame N", counting frames captured since the app started. The count goes up when a frame is captured, before it has been processed. |
 | Idle | **CAMERA** "Connected · idle" |
+| Idle, Alpaca camera not yet reached | **CAMERA** "Alpaca · not connected": in [Alpaca Camera](Alpaca-Camera) mode, shown until a **Test Connection** passes or capture runs against the current host, port and device. **Start Capture** is still available. New in the next release. |
 | No camera | Red **CAMERA** "Disconnected" (or "Camera error" after a camera failure) |
 
 ---

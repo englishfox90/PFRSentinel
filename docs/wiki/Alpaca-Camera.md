@@ -35,6 +35,8 @@ On a Windows PC, **ASCOM Remote** can serve any camera that has an ASCOM driver 
 
 The app bar's main button reads **Connect Camera** while no host is set. In Alpaca Camera mode it runs **Discover**.
 
+Once a host is set, the camera pill at the right of the status strip reads **Alpaca · not connected** until a **Test Connection** passes or capture runs against that host, port and device; after that it reads "Connected · idle" as usual. Changing the host, port or device, or a failed Test Connection on them, puts it back to **Alpaca · not connected**. **Start Capture** works either way.
+
 While capture is running, the Camera Connection card is disabled ("Stop capture to change cameras"). To change cameras, stop capture first.
 
 ---
@@ -84,7 +86,7 @@ A network camera recovers the same way a USB one does, minus the USB steps:
 - **Capture errors** — PFR Sentinel reconnects to the server, finds the camera again by its ID even if the server has given it a different device number, and carries on. This is tried up to five times.
 - **Still unreachable** — it keeps retrying at growing intervals (5 minutes, 15 minutes, then hourly) and reports once that the camera is unreachable. The log lists troubleshooting steps for a network camera: the server is running and reachable, the camera is connected in the server, no firewall is blocking the port, and the device number matches.
 - **Capture won't start** — with **Automatic camera recovery** on (see [Settings](Settings#system)), a start that fails before the first frame is retried, so a rig whose camera server comes up after PFR Sentinel still starts capturing on its own. With it off, a failed start stays stopped until you click **Start Capture** again.
-- With **Automatic camera recovery** off, a capture error gets one plain reconnect, then capture stops, as described in [Turning recovery off](Capture-Settings#turning-recovery-off).
+- With **Automatic camera recovery** off, a capture error gets one plain reconnect, then capture stops, as described in [Turning recovery off](Capture-Settings#turning-recovery-off). A failed start logs "Capture failed and automatic recovery is off — not retrying. Click Start when the camera is ready."
 
 The USB reset and the app restart are never used for an Alpaca camera.
 
