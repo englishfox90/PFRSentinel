@@ -7,6 +7,7 @@ All auto-exposure, calibration, scheduled windows, etc. are handled by ZWOCamera
 """
 from PySide6.QtCore import QObject, QTimer, Signal
 from datetime import datetime
+import collections
 import threading
 import time
 
@@ -89,6 +90,7 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
 
         self._capture_starting = False
         self._starting_source = None
+        self._logged_errors = collections.deque(maxlen=16)
         self._teardown_thread = None
         self._usb_reset_done.connect(self._on_usb_reset_done)
         self._capture_start_done.connect(self._on_capture_start_done)
@@ -434,7 +436,14 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
                 is_capturing flag and emit capture_stopped so the UI (AppBar,
                 tray menu) doesn't keep pretending capture is running.
         """
-        app_logger.error(f"Camera error: {error_msg}")
+        # The one log line for this error (the main window's handler skips it,
+        # see consume_logged_error). An Alpaca loop still retrying is a network
+        # outage, logged at WARNING like the capture loop's own lines.
+        if not is_fatal and is_alpaca_session(self.zwo_camera):
+            app_logger.warning(f"Camera error: {error_msg}")
+        else:
+            app_logger.error(f"Camera error: {error_msg}")
+        self._logged_errors.append(error_msg)
         self.error.emit(error_msg)
 
         if is_fatal:
@@ -449,6 +458,15 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
             self.capture_stopped.emit()
             if not self._user_requested_stop:
                 self._schedule_auto_recovery()
+
+    def consume_logged_error(self, error_msg) -> bool:
+        """True (once) when ``error_msg`` reached the log from the capture loop's
+        callback, so the main window's error handler doesn't log it again."""
+        try:
+            self._logged_errors.remove(error_msg)
+            return True
+        except ValueError:
+            return False
 
     def _auto_recovery_enabled(self) -> bool:
         # Only an explicit False opts out — a damaged value must not silently

@@ -323,7 +323,9 @@ class _MainWindowCaptureMixin(_CameraDetectMixin, _CaptureWatchdogMixin, _Alpaca
             app_logger.info(f"Watch mode started: {watch_dir}")
 
     def _on_camera_error(self, error_msg: str):
-        app_logger.error(f"Camera error received: {error_msg}")
+        controller = self.camera_controller
+        if controller is None or not controller.consume_logged_error(error_msg):
+            app_logger.error(f"Camera error received: {error_msg}")
         self._set_capture_error(error_msg)
         self.push_capture_status()
         self._notify(f"Camera error: {error_msg}", "error")
