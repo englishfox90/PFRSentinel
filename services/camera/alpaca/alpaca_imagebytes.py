@@ -68,6 +68,13 @@ class ImageBytesHeader:
     dimension3: int
 
 
+def error_text(data) -> str:
+    """A device error message as printable text (never raw bytes in a log line)."""
+    text = bytes(data).decode("utf-8", errors="replace")
+    return "".join(ch if ch.isprintable() and ch != "\ufffd" else "?"
+                   for ch in text).strip()[:200]
+
+
 def parse_header(payload: bytes) -> ImageBytesHeader:
     if len(payload) < HEADER_SIZE:
         raise AlpacaProtocolError(
@@ -111,11 +118,14 @@ def parse_imagebytes(payload: bytes) -> np.ndarray:
     if header.metadata_version != METADATA_VERSION:
         raise AlpacaProtocolError(
             f"Unsupported ImageBytes MetadataVersion {header.metadata_version}")
-    if header.data_start < HEADER_SIZE or header.data_start > len(payload):
-        raise AlpacaProtocolError(f"Invalid ImageBytes DataStart {header.data_start}")
+    start_ok = HEADER_SIZE <= header.data_start <= len(payload)
     if header.error_number != 0:
-        message = bytes(payload[header.data_start:]).decode("utf-8", errors="replace")
-        raise error_for(header.error_number, message)
+        # A device error wins over a malformed DataStart: report what the
+        # driver said, read from the header's end when DataStart is unusable.
+        start = header.data_start if start_ok else HEADER_SIZE
+        raise error_for(header.error_number, error_text(payload[start:start + 1024]))
+    if not start_ok:
+        raise AlpacaProtocolError(f"Invalid ImageBytes DataStart {header.data_start}")
 
     try:
         dtype = TRANSMISSION_DTYPES[ImageElementType(header.transmission_element_type)]

@@ -1,5 +1,6 @@
 """alpaca_http — ids on every request, canonical PUT casing, error mapping, bounded timeouts, downloads."""
 import threading
+import time
 
 import numpy as np
 import pytest
@@ -149,7 +150,8 @@ def test_every_call_is_time_bounded(rig):
     timeouts = [r.timeout for r in net.requests]
     assert all(isinstance(t, tuple) and None not in t for t in timeouts)
     assert timeouts[0] == (2.5, 7.0) and timeouts[1] == (2.5, 1.25)
-    assert net.member_requests("imagearray")[0].timeout == (2.5, 42.0)
+    # The image read timeout is the per-recv stall bound; 42 s bounds the total.
+    assert net.member_requests("imagearray")[0].timeout == (2.5, 7.0)
 
 
 def test_image_download_imagebytes_and_json_agree(rig):
@@ -215,14 +217,14 @@ def test_stalled_download_is_a_timeout(rig):
     assert client.get_image(timeout=5).shape == (6, 10)
 
 
-def test_wall_clock_deadline_bounds_a_trickling_download(rig, monkeypatch):
+def test_wall_clock_deadline_bounds_a_trickling_download(rig):
     net, cam, client = rig
     _expose(client, cam)
-    import services.camera.alpaca.alpaca_http as mod
-    ticks = iter([0.0, 100.0, 100.0, 100.0])
-    monkeypatch.setattr(mod.time, "monotonic", lambda: next(ticks))
+    net.faults.trickle_downloads = 1
+    started = time.monotonic()
     with pytest.raises(AlpacaTimeoutError, match="exceeded"):
-        client.get_image(timeout=5)
+        client.get_image(timeout=0.4)
+    assert time.monotonic() - started < 2.0
 
 
 def test_management_configured_devices_and_description(rig):
@@ -237,9 +239,98 @@ def test_management_configured_devices_and_description(rig):
 def test_format_param_invariant_text():
     assert format_param(True) == "True" and format_param(False) == "False"
     assert format_param(0.001) == "0.001" and format_param(7) == "7"
+    # repr() gives exponents below 1e-4: drivers parse "1e-05" as 1 or fail.
+    assert format_param(0.00001) == "0.00001" and format_param(3.2e-05) == "0.000032"
+    assert format_param(1e-12) == "0.000000000001" and format_param(1e20) == "100000000000000000000.0"
 
 
 def test_ipv6_host_is_bracketed():
     client = AlpacaHttpClient("fe80::1", 11111, 2, session_factory=requests.Session)
     assert client.member_url("Name") == "http://[fe80::1]:11111/api/v1/camera/2/name"
     client.close()
+
+
+def test_ipv6_zone_id_is_escaped_in_the_url():
+    client = AlpacaHttpClient("fe80::1%eth0", 11111, 0, session_factory=requests.Session)
+    assert client.server_url == "http://[fe80::1%25eth0]:11111"
+    client.close()
+
+
+@pytest.mark.parametrize("text, port, expected", [
+    ("obs-pc", 11111, ("obs-pc", 11111)),
+    ("obs-pc:32323", 11111, ("obs-pc", 32323)),
+    ("10.0.0.5:4567", 11111, ("10.0.0.5", 4567)),
+    ("[fe80::1]:11112", 11111, ("fe80::1", 11112)),
+    ("[fe80::1]", 11111, ("fe80::1", 11111)),
+    ("fe80::1", 11111, ("fe80::1", 11111)),
+    ("  obs-pc  ", 1, ("obs-pc", 1)),
+])
+def test_split_host_port(text, port, expected):
+    from services.camera.alpaca.alpaca_http import split_host_port
+    assert split_host_port(text, port) == expected
+
+
+@pytest.mark.parametrize("text", ["obs-pc:abc", "obs-pc:99999", "[fe80::1"])
+def test_split_host_port_rejects_garbage_with_a_reason(text):
+    from services.camera.alpaca.alpaca_http import split_host_port
+    with pytest.raises(ValueError, match="Host"):
+        split_host_port(text, 11111)
+
+
+def test_host_with_a_port_reaches_that_port_and_a_bad_port_fails_connect():
+    from services.camera.alpaca.alpaca_connection import AlpacaConnection
+    net, cam, _ = make_fake()
+    conn = AlpacaConnection({"host": f"{net.host}:{net.port}", "port": 1},
+                            session_factory=net.session)
+    assert conn.connect() and conn.port == net.port and conn.host == net.host
+    conn.disconnect()
+    bad = AlpacaConnection({"host": f"{net.host}:port"}, session_factory=net.session)
+    assert bad.connect() is False and "not a port number" in bad.last_error
+
+
+def test_dns_lookup_is_bounded_and_cached(monkeypatch):
+    from services.camera.alpaca import alpaca_http as mod
+    monkeypatch.setattr(mod, "_dns_ok", {})
+    release = threading.Event()
+    calls = []
+
+    def slow(host, *a):
+        calls.append(host)
+        release.wait(5)
+    started = time.monotonic()
+    with pytest.raises(AlpacaTimeoutError, match="Looking up the address of obs-pc"):
+        mod.bound_dns("obs-pc", 11111, 0.2, resolver=slow)
+    assert time.monotonic() - started < 1.0
+    release.set()
+    mod.bound_dns("10.0.0.5", 11111, 0.2, resolver=slow)   # a literal is never looked up
+    mod.bound_dns("fe80::1%eth0", 11111, 0.2, resolver=slow)
+    mod.bound_dns("quick", 11111, 0.2, resolver=lambda *a: [])
+    mod.bound_dns("quick", 11111, 0.2, resolver=slow)       # cached
+    assert calls == ["obs-pc"]
+
+
+def test_put_control_never_waits_behind_the_ordinary_session(rig):
+    net, cam, client = rig
+    client.put("connected", Connected=True)
+    done = threading.Event()
+    with client._lock:
+        threading.Thread(target=lambda: (client.put_control("offset", Offset=12), done.set()),
+                         daemon=True).start()
+        assert done.wait(2.0)
+    assert cam.offset == 12
+    assert len(net.sessions) == 2   # ordinary + control
+
+
+def test_connect_closes_a_client_a_skipped_disconnect_left_open(monkeypatch):
+    from services.camera.alpaca import alpaca_connection
+    from services.camera.alpaca.alpaca_connection import AlpacaConnection
+    monkeypatch.setattr(alpaca_connection, "CLEANUP_LOCK_TIMEOUT_S", 0.05)
+    net, _cam, _ = make_fake()
+    conn = AlpacaConnection({"host": net.host, "port": net.port}, session_factory=net.session)
+    assert conn.connect()
+    old = conn.client
+    with conn._cleanup_lock:      # a teardown still running elsewhere
+        conn.disconnect()         # times out on the lock and skips
+    assert conn.client is old and not old._session.closed
+    assert conn.connect()
+    assert conn.client is not old and old._session.closed

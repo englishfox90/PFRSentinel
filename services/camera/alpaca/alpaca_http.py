@@ -7,16 +7,21 @@ in canonical casing (``Connected``, ``Duration``, ``Light`` …), which is how t
 official ``alpyca`` client sends them too.
 
 Every call is time-bounded: ``(connect_timeout, read timeout)`` on the socket,
-plus a wall-clock deadline on image downloads, which stream in 1 MiB chunks on a
-second session (no lock) so ``abort_event`` can cut a long download short while
-short calls keep flowing. Errors map to ``alpaca_protocol``: a non-zero
+and the first name lookup of a host by ``connect_timeout`` too (the OS resolver
+has no timeout of its own). Three sessions, so a slow call never holds up a
+fast one: ordinary calls share one (serialised); ``put_control`` — abort, stop,
+live settings — has its own, so AbortExposure never queues behind the capture
+thread's poll; and image downloads have a third (``alpaca_download``: hard
+total deadline and abort). Errors map to ``alpaca_protocol``: a non-zero
 ErrorNumber to its Alpaca class, HTTP 400 to InvalidValue, 404 to
 NotImplemented, and anything that means "unreachable or unusable" (socket error,
 timeout, 5xx, bad JSON) to ``AlpacaTransportError``.
 """
+import ipaddress
 import itertools
 import json
 import random
+import socket
 import threading
 import time
 from typing import Callable, Optional
@@ -26,6 +31,16 @@ import requests
 
 from services.logger import app_logger
 
+from .alpaca_download import (
+    DOWNLOAD_CHUNK,  # noqa: F401 — re-exported
+    MAX_IMAGE_BYTES,  # noqa: F401 — re-exported
+    MAX_JSON_BYTES,
+    TransferGuard,
+    guarded_session,
+    printable,
+    read_body,
+    read_error_text,
+)
 from .alpaca_transport_text import describe_transport_failure
 from .alpaca_imagebytes import IMAGEBYTES_MIME, parse_imagearray_json, parse_imagebytes
 from .alpaca_protocol import (
@@ -33,8 +48,6 @@ from .alpaca_protocol import (
     DEFAULT_PORT,
     INVALID_VALUE,
     NOT_IMPLEMENTED,
-    OPERATION_CANCELLED,
-    AlpacaCancelledError,
     AlpacaError,
     AlpacaInvalidValueError,
     AlpacaNotImplementedError,
@@ -44,13 +57,14 @@ from .alpaca_protocol import (
     raise_for_error,
 )
 
-DOWNLOAD_CHUNK = 1 << 20
-MAX_IMAGE_BYTES = 1 << 30
 _ERROR_TEXT_LIMIT = 200
+DNS_CACHE_S = 300.0
 
 CLIENT_ID = random.SystemRandom().randint(1, 2 ** 31 - 1)
 _transaction_ids = itertools.count(1)
 _transaction_lock = threading.Lock()
+_dns_ok = {}
+_dns_lock = threading.Lock()
 
 
 def lan_session() -> requests.Session:
@@ -67,11 +81,15 @@ def next_transaction_id() -> int:
 
 
 def format_param(value) -> str:
-    """Alpaca wire text for a parameter value (invariant culture)."""
+    """Alpaca wire text for a parameter value (invariant culture, never ``1e-05``)."""
     if isinstance(value, bool):
         return "True" if value else "False"
     if isinstance(value, float):
-        return repr(value)
+        text = repr(value)
+        if "e" in text or "E" in text:
+            text = f"{value:.12f}".rstrip("0")
+            text = text + "0" if text.endswith(".") else text
+        return text
     return str(value)
 
 
@@ -86,16 +104,58 @@ def ci_get(obj: dict, key: str, default=None):
     return default
 
 
+def split_host_port(host: str, port=None):
+    """``(host, port)`` from a host field that may carry a port.
+
+    ``"obs-pc:11111"`` / ``"10.0.0.5:32323"`` / ``"[fe80::1]:11111"`` → host and
+    that port; a bare IPv6 literal (``"fe80::1%eth0"``) keeps ``port``. Raises
+    ``ValueError`` with a plain message for a port that is not a number.
+    """
+    text = (host or "").strip()
+    if text.startswith("["):
+        close = text.find("]")
+        if close < 0:
+            raise ValueError(f"Host {text!r} has an unclosed '['")
+        inner, rest = text[1:close], text[close + 1:]
+        if rest.startswith(":") and rest[1:]:
+            return inner, _port_number(rest[1:], text)
+        return inner, port
+    if text.count(":") == 1:
+        name, _, tail = text.partition(":")
+        return name.strip(), _port_number(tail, text) if tail.strip() else port
+    return text, port
+
+
+def _port_number(text: str, field: str) -> int:
+    try:
+        value = int(text.strip())
+    except ValueError:
+        raise ValueError(f"Host {field!r}: '{text}' is not a port number") from None
+    if not 0 < value < 65536:
+        raise ValueError(f"Host {field!r}: port {value} is out of range")
+    return value
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host.split("%", 1)[0])
+        return True
+    except ValueError:
+        return False
+
+
 def _url_host(host: str) -> str:
     host = (host or "").strip()
     if ":" in host and not host.startswith("["):
-        return f"[{host}]"
+        return "[" + host.replace("%", "%25") + "]"
     return host
 
 
-def _http_error(response, what: str) -> Exception:
+def _http_error(response, what: str, text: Optional[str] = None) -> Exception:
     status = response.status_code
-    text = (getattr(response, "text", "") or "").strip()[:_ERROR_TEXT_LIMIT]
+    if text is None:
+        text = getattr(response, "text", "") or ""
+    text = printable(text, _ERROR_TEXT_LIMIT)
     detail = f"HTTP {status} for {what}" + (f": {text}" if text else "")
     if status == 400:
         error = AlpacaInvalidValueError(INVALID_VALUE, detail)
@@ -107,6 +167,42 @@ def _http_error(response, what: str) -> Exception:
         error = AlpacaError(None, detail)
     error.http_status = status
     return error
+
+
+def bound_dns(host: str, port: int, timeout: float,
+              resolver: Callable = socket.getaddrinfo) -> None:
+    """Resolve ``host`` once on a worker thread, waiting at most ``timeout``.
+
+    The OS resolver has no timeout, so a dead DNS server on a VPN would hold
+    the first request of every reconnect for 20-40 s. A literal IP skips this;
+    a name that resolved is trusted for ``DNS_CACHE_S``. A lookup that fails
+    outright is left for the request to report in its own words.
+    """
+    if not host or _is_ip_literal(host):
+        return
+    now = time.monotonic()
+    with _dns_lock:
+        if _dns_ok.get(host, 0.0) > now:
+            return
+    box = {}
+
+    def lookup():
+        try:
+            resolver(host, port, 0, socket.SOCK_STREAM)
+            box["ok"] = True
+        except OSError:
+            box["ok"] = False
+
+    worker = threading.Thread(target=lookup, name="alpaca-dns", daemon=True)
+    worker.start()
+    worker.join(max(0.1, float(timeout)))
+    if worker.is_alive():
+        raise AlpacaTimeoutError(
+            f"Looking up the address of {host} took longer than {timeout:.0f} s. "
+            f"Check the network's DNS (or VPN), or enter the server's IP address.")
+    if box.get("ok"):
+        with _dns_lock:
+            _dns_ok[host] = now + DNS_CACHE_S
 
 
 class AlpacaHttpClient:
@@ -125,8 +221,10 @@ class AlpacaHttpClient:
         self._session_factory = session_factory
         self._session = session_factory()
         self._image_session = None
+        self._control_session = None
         self._lock = threading.Lock()
         self._image_lock = threading.Lock()
+        self._control_lock = threading.Lock()
         self.last_image_format = None
         self.last_image_bytes = 0
         self.last_download_s = None
@@ -160,6 +258,10 @@ class AlpacaHttpClient:
         read = self.request_timeout if timeout is None else float(timeout)
         return (self.connect_timeout, read)
 
+    def _bound_dns(self) -> None:
+        if isinstance(self._session, requests.Session):
+            bound_dns(self.host, self.port, self.connect_timeout)
+
     def _transport_error(self, exc, what: str, read_timeout: float):
         """The Alpaca exception for a failed request: plain words, raw text at DEBUG."""
         app_logger.debug(f"Alpaca {what} to {self.describe()} failed: {exc!r}")
@@ -169,12 +271,17 @@ class AlpacaHttpClient:
             return AlpacaTimeoutError(message)
         return AlpacaTransportError(message)
 
-    def _send(self, method: str, url: str, what: str, timeout, **kwargs):
+    def _send(self, method: str, url: str, what: str, timeout, session=None, **kwargs):
         timeouts = self._timeout(timeout)
+        self._bound_dns()
         try:
-            return self._session.request(method, url, timeout=timeouts, **kwargs)
+            response = (session or self._session).request(method, url, timeout=timeouts,
+                                                          **kwargs)
         except requests.RequestException as exc:
             raise self._transport_error(exc, what, timeouts[1]) from exc
+        if not hasattr(response, "status_code"):
+            raise AlpacaProtocolError(f"No usable reply to {what} from {self.describe()}")
+        return response
 
     @staticmethod
     def _decode_envelope(response, what: str):
@@ -208,6 +315,21 @@ class AlpacaHttpClient:
                                   timeout, data=form)
         return self._decode_envelope(response, f"PUT {member}")
 
+    def put_control(self, member: str, timeout: Optional[float] = None, **params):
+        """``put`` on the control session: never waits behind ``get`` / ``put``.
+
+        For AbortExposure / StopExposure and live settings, which must not queue
+        behind the capture thread's in-flight poll or a blocking StartExposure.
+        """
+        form = {k: format_param(v) for k, v in params.items()}
+        form.update(self._ids())
+        with self._control_lock:
+            if self._control_session is None:
+                self._control_session = self._session_factory()
+            response = self._send("PUT", self.member_url(member), f"PUT {member}", timeout,
+                                  session=self._control_session, data=form)
+        return self._decode_envelope(response, f"PUT {member}")
+
     def _management(self, path: str, timeout: Optional[float]):
         url = f"{self.server_url}/management/{path}"
         with self._lock:
@@ -233,40 +355,51 @@ class AlpacaHttpClient:
     # -- image download ---------------------------------------------------
     def _image_session_get(self):
         if self._image_session is None:
-            self._image_session = self._session_factory()
+            self._image_session = guarded_session(self._session_factory())
         return self._image_session
 
     def get_image(self, timeout: float = 60.0, use_imagebytes: bool = True,
                   abort_event: Optional[threading.Event] = None) -> np.ndarray:
         """Download ``imagearray`` as ``(H, W)`` / ``(H, W, P)``.
 
-        ``timeout`` bounds the whole download (and each socket read). Sends
-        ``Accept: application/imagebytes`` when ``use_imagebytes``; the reply's
-        Content-Type picks the decoder, so a server that ignores the header and
-        answers JSON still works. ``abort_event`` set mid-download raises
-        ``AlpacaCancelledError`` within one chunk.
+        ``timeout`` bounds the whole download, headers included; each socket
+        read is bounded by the request timeout (a stall), and ``abort_event``
+        set at any moment raises ``AlpacaCancelledError`` within
+        ``alpaca_download.WATCH_EVERY_S`` — the watchdog shuts the socket down,
+        so neither a dripped header nor a dripped body can hold the call.
+        Sends ``Accept: application/imagebytes`` when ``use_imagebytes``; the
+        reply's Content-Type picks the decoder, so a server that ignores the
+        header and answers JSON still works (up to ``MAX_JSON_BYTES``).
         """
-        timeout = float(timeout)
+        timeout = max(0.1, float(timeout))
+        stall = min(self.request_timeout, timeout)
         headers = {"Accept": f"{IMAGEBYTES_MIME}, application/json"} if use_imagebytes \
             else {"Accept": "application/json"}
         started = time.monotonic()
-        deadline = started + timeout
+        where = f"{self.host}:{self.port}"
         with self._image_lock:
             session = self._image_session_get()
-            try:
-                response = session.get(self.member_url("imagearray"), params=self._ids(),
-                                       headers=headers, stream=True,
-                                       timeout=(self.connect_timeout, timeout))
-            except requests.RequestException as exc:
-                raise self._transport_error(exc, "image download", timeout) from exc
-            try:
-                payload, content_type = self._read_body(response, deadline, abort_event,
-                                                        timeout)
-            finally:
+            self._bound_dns()
+            breaker = getattr(session, "break_transfer", None)
+            with TransferGuard(started + timeout, abort_event, breaker, self.describe(),
+                               timeout) as guard:
+                response = None
                 try:
-                    response.close()
-                except Exception:
-                    pass
+                    try:
+                        response = session.get(self.member_url("imagearray"),
+                                               params=self._ids(), headers=headers,
+                                               stream=True, timeout=(self.connect_timeout, stall))
+                    except requests.RequestException as exc:
+                        guard.check()
+                        raise self._transport_error(exc, "image download", stall) from exc
+                    guard.check()
+                    payload, content_type = self._read_image_body(response, guard, where)
+                finally:
+                    if response is not None:
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
 
         if IMAGEBYTES_MIME in content_type:
             image = parse_imagebytes(payload)
@@ -283,43 +416,17 @@ class AlpacaHttpClient:
         self.last_download_s = time.monotonic() - started
         return image
 
-    def _read_body(self, response, deadline, abort_event, timeout):
+    def _read_image_body(self, response, guard, where):
+        if not hasattr(response, "status_code"):
+            raise AlpacaProtocolError(f"No usable reply to GET imagearray from {where}")
         if response.status_code != 200:
-            raise _http_error(response, "GET imagearray")
+            raise _http_error(response, "GET imagearray", read_error_text(response, guard))
         content_type = (response.headers.get("Content-Type") or "").lower()
-        length = response.headers.get("Content-Length")
-        if length is not None:
-            try:
-                if int(length) > MAX_IMAGE_BYTES:
-                    raise AlpacaProtocolError(f"Image of {length} bytes is implausibly large")
-            except ValueError:
-                pass
-        buf = bytearray()
-        try:
-            for chunk in response.iter_content(DOWNLOAD_CHUNK):
-                if abort_event is not None and abort_event.is_set():
-                    raise AlpacaCancelledError(OPERATION_CANCELLED, "Image download aborted")
-                if time.monotonic() > deadline:
-                    raise AlpacaTimeoutError(
-                        f"Image download exceeded {timeout:.0f} s ({self.describe()})")
-                if chunk:
-                    buf += chunk
-                    if len(buf) > MAX_IMAGE_BYTES:
-                        raise AlpacaProtocolError("Image download is implausibly large")
-        except requests.Timeout as exc:
-            app_logger.debug(f"Alpaca image download stalled after {len(buf)} bytes: {exc!r}")
-            raise AlpacaTimeoutError(
-                f"Image download from {self.host}:{self.port} stalled") from exc
-        except requests.RequestException as exc:
-            app_logger.debug(f"Alpaca image download failed after {len(buf)} bytes: {exc!r}")
-            raise AlpacaTransportError(
-                f"Image download from {self.host}:{self.port} was interrupted") from exc
-        if abort_event is not None and abort_event.is_set():
-            raise AlpacaCancelledError(OPERATION_CANCELLED, "Image download aborted")
-        return buf, content_type
+        json_limit = None if IMAGEBYTES_MIME in content_type else MAX_JSON_BYTES
+        return read_body(response, guard, json_limit=json_limit, where=where), content_type
 
     def close(self) -> None:
-        for session in (self._session, self._image_session):
+        for session in (self._session, self._image_session, self._control_session):
             if session is not None:
                 try:
                     session.close()

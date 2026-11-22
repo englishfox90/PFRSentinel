@@ -13,7 +13,11 @@ faults, plus a fake UDP socket for discovery.
 Transport faults (``net.faults``): ``connection_errors`` / ``timeouts`` (next N
 requests raise ``requests.ConnectionError`` / ``ReadTimeout``),
 ``download_timeouts`` (next N image downloads stall mid-body),
-``refused_hosts``. Device faults are on the camera: ``cam.faults``
+``trickle_downloads`` (next N bodies drip one byte per ``trickle_s`` of real
+time until the transfer is broken), ``hang_downloads`` (next N image requests
+never send headers until broken), ``refused_hosts``. ``FakeSession.break_transfer``
+is what the download watchdog calls; it unblocks a trickle or hang the way a
+socket shutdown does. Device faults are on the camera: ``cam.faults``
 (0x407 for N requests, Idle-after-start blip, failed exposure, ImageArray
 error), ``cam.drop_connection()``, ``cam.renumber(n)``. Every request is
 recorded in ``net.requests``; a request without a timeout fails the test.
@@ -22,6 +26,7 @@ import importlib.util
 import json
 import socket
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -69,17 +74,52 @@ class FakeClock:
         self.advance(max(0.0, seconds))
 
 
+class FakeRaw:
+    """``urllib3`` response stand-in: ``read1`` returns what one ``recv`` would."""
+
+    def __init__(self, body: bytes, stall_after=None, on_chunk=None, trickle_s=None,
+                 broken: threading.Event = None):
+        self._body = body if stall_after is None else body[:stall_after]
+        self._stalls = stall_after is not None
+        self._on_chunk = on_chunk
+        self._trickle_s = trickle_s
+        self._broken = broken or threading.Event()
+        self._pos = 0
+        self.reads = 0
+
+    def read1(self, amt: int = -1):
+        self.reads += 1
+        if self._broken.is_set():
+            return b""
+        if self._trickle_s is not None:
+            if self._broken.wait(self._trickle_s):
+                return b""
+            size = 1
+        else:
+            size = len(self._body) if amt is None or amt < 0 else amt
+        chunk = self._body[self._pos:self._pos + size]
+        if not chunk:
+            if self._stalls:
+                raise requests.exceptions.ReadTimeout("fake: download stalled")
+            return b""
+        self._pos += len(chunk)
+        if self._on_chunk is not None:
+            self._on_chunk(self._pos)
+        return chunk
+
+
 class FakeResponse:
     def __init__(self, status: int, content_type: str, body: bytes, url: str,
-                 stall_after: Optional[int] = None, on_chunk=None):
+                 stall_after: Optional[int] = None, on_chunk=None, trickle_s=None,
+                 broken: threading.Event = None, content_length: Optional[int] = None):
         self.status_code = status
         self.headers = CaseInsensitiveDict({"Content-Type": content_type,
-                                            "Content-Length": str(len(body))})
+                                            "Content-Length": str(len(body) if content_length
+                                                                  is None else content_length)})
         self.content = body
         self.url = url
         self.reason = "OK" if status == 200 else "Error"
-        self._stall_after = stall_after
-        self._on_chunk = on_chunk
+        self.raw = FakeRaw(body, stall_after, on_chunk, trickle_s, broken)
         self.closed = False
 
     @property
@@ -90,18 +130,11 @@ class FakeResponse:
         return json.loads(self.content)
 
     def iter_content(self, chunk_size: int = 1):
-        body = self.content
-        if self._stall_after is not None:
-            body = body[:self._stall_after]
-        sent = 0
-        for i in range(0, len(body), chunk_size):
-            chunk = body[i:i + chunk_size]
-            sent += len(chunk)
-            if self._on_chunk is not None:
-                self._on_chunk(sent)
+        while True:
+            chunk = self.raw.read1(chunk_size)
+            if not chunk:
+                return
             yield chunk
-        if self._stall_after is not None:
-            raise requests.exceptions.ReadTimeout("fake: download stalled")
 
     def close(self) -> None:
         self.closed = True
@@ -112,6 +145,9 @@ class TransportFaults:
     connection_errors: int = 0
     timeouts: int = 0
     download_timeouts: int = 0
+    trickle_downloads: int = 0
+    trickle_s: float = 0.05
+    hang_downloads: int = 0
     refused_hosts: set = field(default_factory=set)
 
 
@@ -138,6 +174,9 @@ class FakeAlpacaNetwork:
         self.chunk_size_seen = None
         self.sessions: List["FakeSession"] = []
         self.host, self.port = "192.0.2.10", 11111
+        self.broken = threading.Event()   # set by FakeSession.break_transfer
+        self.breaks = 0
+        self.request_hook = None          # callable(RecordedRequest) before answering
 
     def add_camera(self, camera: FakeAlpacaCamera, host: str = None, port: int = None):
         self.servers[(host or self.host, int(port or self.port))] = camera
@@ -165,6 +204,8 @@ class FakeAlpacaNetwork:
         self.requests.append(RecordedRequest(method.upper(), url, member,
                                              form if method.upper() == "PUT" else query,
                                              dict(headers or {}), timeout, stream))
+        if self.request_hook is not None:
+            self.request_hook(self.requests[-1])
         self.clock.advance(self.clock.auto_advance)
         if host in self.faults.refused_hosts:
             raise requests.exceptions.ConnectionError(f"fake: {host} refused")
@@ -178,13 +219,24 @@ class FakeAlpacaNetwork:
         if camera is None:
             raise requests.exceptions.ConnectionError(f"fake: nothing listens on {host}:{port}")
         full_url = url + ("?" + urlencode(query) if query else "")
+        if member == "imagearray" and self.faults.hang_downloads > 0:
+            self.faults.hang_downloads -= 1
+            self.broken.clear()
+            if not self.broken.wait(30.0):
+                raise AssertionError("fake: a hung download was never broken")
+            raise requests.exceptions.ConnectionError("fake: connection shut down")
         resp = camera.handle(method, parts.path, query, form, dict(headers or {}))
-        stall = None
+        stall = trickle = None
         if member == "imagearray" and self.faults.download_timeouts > 0:
             self.faults.download_timeouts -= 1
             stall = max(1, len(resp.body) // 2)
+        if member == "imagearray" and self.faults.trickle_downloads > 0:
+            self.faults.trickle_downloads -= 1
+            trickle = self.faults.trickle_s
+            self.broken.clear()
         return FakeResponse(resp.status, resp.content_type, resp.body, full_url,
-                            stall_after=stall, on_chunk=self.on_chunk if stream else None)
+                            stall_after=stall, on_chunk=self.on_chunk if stream else None,
+                            trickle_s=trickle, broken=self.broken if trickle else None)
 
 
 class FakeSession:
@@ -202,6 +254,11 @@ class FakeSession:
 
     def put(self, url, **kwargs):
         return self._net.respond("PUT", url, **kwargs)
+
+    def break_transfer(self):
+        """What the download watchdog calls: like shutting the socket down."""
+        self._net.breaks += 1
+        self._net.broken.set()
 
     def close(self):
         self.closed = True

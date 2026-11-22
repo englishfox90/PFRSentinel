@@ -1,7 +1,9 @@
 """alpaca_probe — Test Connection summary, failure reasons, no configuration, bounded time."""
+import threading
 import time
 
 import pytest
+import requests
 
 from services.camera.alpaca.alpaca_probe import ProbeResult, probe_alpaca_camera
 from tests.alpaca_fake import make_fake
@@ -66,15 +68,46 @@ def test_probe_never_raises(settings):
 
 
 def test_probe_is_bounded_when_the_server_stalls():
+    # The stalled request is released (as a refused connection) before the test
+    # ends: a worker left asleep used to wake 10 s later, in some other test, and
+    # log "'NoneType' object has no attribute 'status_code'".
+    release = threading.Event()
+    calls = []
+
     class Stalled:
         def request(self, *a, **k):
-            time.sleep(10)
+            calls.append(1)
+            release.wait(10)
+            raise requests.ConnectionError("stalled server released")
 
         def close(self):
             pass
 
     started = time.monotonic()
-    result = probe_alpaca_camera({"host": "192.0.2.1", "port": 11111},
-                                 session_factory=Stalled, deadline_s=0.3)
-    assert time.monotonic() - started < 2.0
-    assert result.ok is False and "No answer" in result.message
+    try:
+        result = probe_alpaca_camera({"host": "192.0.2.1", "port": 11111},
+                                     session_factory=Stalled, deadline_s=0.3)
+        assert time.monotonic() - started < 2.0
+        assert result.ok is False and "No answer" in result.message
+    finally:
+        release.set()
+    for worker in [t for t in threading.enumerate() if t.name == "alpaca-probe"]:
+        worker.join(5.0)
+        assert not worker.is_alive()
+    assert calls
+
+
+def test_a_session_that_returns_no_response_is_a_protocol_error_not_a_crash():
+    from services.camera.alpaca.alpaca_http import AlpacaHttpClient
+    from services.camera.alpaca.alpaca_protocol import AlpacaProtocolError
+
+    class Empty:
+        def request(self, *a, **k):
+            return None
+
+        def close(self):
+            pass
+
+    client = AlpacaHttpClient("192.0.2.1", 11111, 0, session_factory=Empty)
+    with pytest.raises(AlpacaProtocolError, match="No usable reply"):
+        client.get("name")
