@@ -10,9 +10,9 @@ Use it when:
 - the camera is not a ZWO camera but has an ASCOM driver
 - you run PFR Sentinel on macOS or Linux and the camera's driver only exists for Windows
 
-On a Windows PC, **ASCOM Remote** can serve any camera that has an ASCOM driver (ZWO's ASCOM driver included) as an Alpaca device. Some cameras and other programs have an Alpaca server built in.
+On a Windows PC, **ASCOM Remote** can serve any camera that has an ASCOM driver ([ZWO's ASCOM driver](https://www.zwoastro.com/software/ascom-driver/) included) as an Alpaca device. ASCOM Remote and ZWO's ASCOM driver are Windows-only, so a camera plugged into a Mac or a Linux machine needs an Alpaca server made for that system. Some cameras and other programs have an Alpaca server built in.
 
-**What has been tested so far:** PFR Sentinel's Alpaca support has been checked against a simulated camera that follows the ASCOM Alpaca specification, and that same simulator against ASCOM's official Python client (alpyca). It has **not yet been tested with real camera drivers**. If you try it with your camera, please report how it went on the [issues page](https://github.com/englishfox90/PFRSentinel/issues), with a [Diagnostics Export](Diagnostics-Export) if something is wrong.
+**What has been tested so far:** PFR Sentinel's Alpaca support has been checked against a simulated camera that follows the ASCOM Alpaca specification, that same simulator against ASCOM's official Python client (alpyca), and a ZWO ASI676MC served by an Alpaca server on a Mac and reached over a VPN. It has **not yet been tested with ZWO's ASCOM driver through ASCOM Remote**. If you try it with your camera, please report how it went on the [issues page](https://github.com/englishfox90/PFRSentinel/issues), with a [Diagnostics Export](Diagnostics-Export) if something is wrong.
 
 ---
 
@@ -27,7 +27,7 @@ On a Windows PC, **ASCOM Remote** can serve any camera that has an ASCOM driver 
    | Setting | Default | Description |
    |---------|---------|-------------|
    | Host | Empty | Address of the computer running the Alpaca server, for example `192.168.1.20` or `observatory-pc`. You can also type the port with it, as `observatory-pc:11112` (or `[fe80::1]:11112` for an IPv6 address); a port typed here is used instead of the Port box. |
-   | Port | 11111 | The server's port. 11111 is the ASCOM default. |
+   | Port | 11111 | The server's port. 11111 is the ASCOM default, but some servers use their own port: use the one your server shows. |
    | Device | 0 | The camera's number on that server, usually 0. |
 
 4. Click **Test Connection**. It connects, reads what the camera is, and lets go, without changing any camera setting and without starting capture. A pass reads, for example, `✓ ASI676MC: 3552 × 3552, 12-bit, colour`. A failure shows the reason in red; hover it for the full text, which is also in the [Logs](Logs).
@@ -66,7 +66,7 @@ Elsewhere in this wiki, "ZWO Camera mode" in the sense of "capturing from a came
 |---------|-----------------------|
 | SDK Path, Camera drop-down, Detect | Hidden. The camera is addressed by host, port and device number instead. |
 | **Revive (USB Reset)** and the missing-camera notice | Hidden. There is no USB device to reset over a network. |
-| **Use RAW16 Mode** | Hidden. The bit depth comes from the camera: one whose largest value (its MaxADU) is 255 or less gives 8-bit frames, anything above gives 16-bit frames. A driver that reports a power of two, such as 4096 or 65536, is read as one less (4095, 65535), the top value of that many bits. The caption under the setting says which, for example "16-bit frames (12-bit sensor)". |
+| **Use RAW16 Mode** | Hidden. The bit depth comes from the camera: one whose largest value (its MaxADU) is 255 or less gives 8-bit frames, anything above gives 16-bit frames. A driver that reports a power of two, such as 4096 or 65536, is read as one less (4095, 65535), the top value of that many bits. The caption under the setting says which, for example "16-bit frames (12-bit sensor)". If the camera offers readout modes named by bit depth (for example "RAW 8" and "RAW 16"), capture switches an 8-bit mode to the 16-bit one of the same size; **Test Connection** never changes it. |
 | White balance **asi_auto** | Not offered. There is no hardware white balance. If **asi_auto** is saved from ZWO Camera mode, the drop-down shows **gray_world** and frames are balanced with gray world. Your saved choice is not changed, so switching back to ZWO Camera mode brings **asi_auto** back. |
 | White balance **manual** | The camera's hardware **Red**/**Blue** sliders are replaced by software **Red** and **Blue** gains, applied to the image. 1.00 leaves a colour as it is. |
 | **Bayer Pattern** | Greyed out. The pattern is read from the camera (its sensor type and Bayer offset), never guessed, and follows the **Flip** setting. A mono camera shows "Mono (no debayer)". A camera that sends finished colour images shows "RGB from the camera". |
@@ -74,6 +74,8 @@ Elsewhere in this wiki, "ZWO Camera mode" in the sense of "capturing from a came
 | Region and binning | Always the full sensor, unbinned. |
 
 Sensors with CMYG or LRGB filters are not supported for colour: their frames are treated as mono, and the log says so once.
+
+If a camera sends brighter pixel values than its MaxADU says it can, PFR Sentinel uses the full 16-bit range for the rest of that capture session instead of cutting the bright parts off, and the log says so once.
 
 ### Profiles carried over from a ZWO camera
 
@@ -112,7 +114,7 @@ If they do share one, PFR Sentinel protects the other program's work rather than
 
 When capture stops, PFR Sentinel stops its own exposure but leaves the camera connected on the server. On ASCOM Remote the connection can be shared between programs, so disconnecting it could disconnect the camera from NINA as well. **Test Connection** follows the same rule.
 
-If PFR Sentinel is the only program using the camera and you want it to disconnect the camera when capture stops, close PFR Sentinel and set `release_on_disconnect` to `true` under `alpaca_camera` in `config.json` (in the PFR Sentinel data folder). The other Alpaca settings there — `connect_timeout_s` (3), `request_timeout_s` (10) and `use_imagebytes` (on: download images in the compact ImageBytes format, falling back to JSON when the server can't) — rarely need changing.
+If PFR Sentinel is the only program using the camera and you want it to disconnect the camera when capture stops, close PFR Sentinel and set `release_on_disconnect` to `true` under `alpaca_camera` in `config.json` (in the PFR Sentinel data folder). The other Alpaca settings there — `connect_timeout_s` (3), `request_timeout_s` (10) and `use_imagebytes` (on: download images in the compact ImageBytes format, falling back to JSON when the server doesn't offer it or sends an image that can't be read) — rarely need changing.
 
 ---
 
@@ -131,6 +133,8 @@ If the camera server runs on the same computer as PFR Sentinel with the safety m
 ## Network and Firewall
 
 - **Discover** sends a broadcast on **UDP port 32227** through every network connection this computer has, including a second network card or a ZeroTier network, and waits 2 seconds for replies. Broadcasts don't cross routers, so a server on a network this computer isn't on won't be found: type its address instead.
+- Over a VPN such as ZeroTier or Tailscale, if **Discover** doesn't find the server, enter the server computer's VPN address as the Host. Each full-size frame is downloaded across the link (25–50 MB for a 3552 × 3552 camera in the compact ImageBytes format, depending on the server), so a slow uplink lengthens every frame.
+- On Windows, a VPN adapter is often classed as a **Public** network, so the server computer's firewall may block the port there even though it works on the local network.
 - Discovery also needs the server to answer it. Some servers have discovery turned off.
 - The camera itself is reached over HTTP on the server's port (11111 unless you changed it). On the server computer, allow incoming connections on that port, and on UDP 32227 for discovery, in its firewall.
 - PFR Sentinel connects to the server directly and ignores any proxy configured on this computer.
@@ -164,6 +168,10 @@ The messages below appear on the Camera Connection card after **Test Connection*
 | `Alpaca camera not reachable yet — retrying under auto-recovery` | Capture was started but the camera couldn't be opened. With **Automatic camera recovery** on, the start is retried; see [When the Connection Drops](#when-the-connection-drops). |
 | `Alpaca server host:port has no Management API; using device #n without an identity check` | A warning, not an error. The server can't list its devices, so PFR Sentinel uses the device number as given and can't notice if a different camera takes that number. |
 | `Exposure failed (camera reported CameraState Error)` | The driver reported a failed exposure. Recovery reconnects and tries again. |
+| `Exposure error: camera returned to IDLE without an image` | The server started the exposure but never produced an image. Most often another program on the server computer (a second copy of PFR Sentinel, the camera maker's capture app, another astronomy program) has the camera open. Close it, reconnect the camera in the server, and try again. |
+| `Alpaca camera reads out in '...' (8-bit) but reports MaxADU ...` | The camera is in an 8-bit readout mode with no 16-bit mode to switch to, so frames look darker than they should. Pick a 16-bit readout mode in the Alpaca server if it has one. |
+| `Alpaca camera delivered pixels above its MaxADU ...` | The driver's MaxADU is wrong. PFR Sentinel uses the full 16-bit range for the session; see [What Is Different](#what-is-different). |
+| `Alpaca server sent an ImageBytes image that cannot be decoded ...; downloading as JSON for this session` | The server's compact image format was unreadable, so images are downloaded in the larger JSON format instead. Frames still arrive, just more slowly. |
 | `Exposure timeout: camera did not complete ...` | The exposure took more than 30 seconds longer than it should have. |
 | `⚠ Exposure ...s is outside the camera's range ... — using ...s` | The exposure was moved into the range the camera accepts. |
 | `Alpaca camera reports SensorType ...; colour reconstruction for it is not supported, so frames are treated as monochrome` | A CMYG or LRGB sensor; see [What Is Different](#what-is-different). |
