@@ -96,6 +96,22 @@ The USB reset is never used for an Alpaca camera. An app restart is a last resor
 
 While it recovers, the camera pill at the right of the status strip reads **Reconnecting to camera…** during a reconnect, and **Camera lost · retrying** while it waits for the next attempt. ZWO cameras show the same two states. Outage lines are logged as warnings, in network terms ("Waiting 8s before reconnecting to the Alpaca server..."), without a traceback for an expected disconnect.
 
+### When the camera answers but exposures never finish
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+Sometimes the server keeps answering and says the camera is connected, but no exposure ever finishes. It has been seen with ZWO's ASCOM driver in ASCOM Remote when NINA, on the same PC, connected a different ZWO camera. Until now the log then repeated `Exposure timeout: camera did not complete 30.0s exposure within 60.0s` after every reconnect, the pill stayed on **Reconnecting to camera…**, and only **Stop** and **Start** got frames again.
+
+PFR Sentinel now recovers from this by itself:
+
+- The timeout line says what the camera reported, for example `(camera still reports Exposing, 0% complete; after abort it reads Idle)`. While an exposure is overdue, the debug log notes what the camera reports about every 10 seconds.
+- After an exposure that never finished, a reconnect is only counted as working once the camera finishes a 1-second test exposure (`✓ Alpaca camera finished a 1s test exposure; resuming capture`). Then capture goes back to the normal exposure.
+- After two exposures in a row never finish, the reconnect has the driver let go of the camera and open it again (`Connected` false, then true). The log warns first: `Alpaca camera answers but has not finished an exposure (2 in a row): reopening it in the driver ...`. This is the only time PFR Sentinel disconnects the camera in the server while `release_on_disconnect` is off. Another program connected to **the same camera** through the server may see it drop for a moment. Programs using other cameras are not affected. It happens at most once every 10 minutes.
+- Failures are now counted until a frame arrives, not reset by each reconnect. If nothing helps, capture moves to the slower retry schedule (5 minutes, 15 minutes, then hourly) instead of reconnecting every minute, and the error alert is sent once rather than on every cycle.
+- The pill reads **Camera not finishing exposures** during all this, and **Reconnected · waiting for a frame** after any other reconnect, until a frame arrives. It no longer stays on **Reconnecting to camera…** after the reconnect has succeeded.
+
+If this keeps happening, connect the other ZWO camera in NINA before you start PFR Sentinel's capture, or serve both cameras through ASCOM Remote and ZWO's ASCOM driver rather than mixing ZWO's own driver and its ASCOM driver on one PC.
+
 Each image download has a deadline. Before anything has been measured it allows for a slow link (about 250 kB/s); after the first frames it is three times the time the last download took plus the request timeout, never less than 30 seconds. A download that stops arriving altogether fails after the request timeout (10 seconds by default). The check that notices a stuck capture waits for the exposure plus that download time, so a long exposure over a slow link is not mistaken for a stuck camera.
 
 In headless mode with **Automatic camera recovery** off, a frame that fails again after its one reconnect pauses capture ("Alpaca camera failed again after its single reconnect; automatic recovery is off — not reconnecting").
@@ -172,7 +188,8 @@ The messages below appear on the Camera Connection card after **Test Connection*
 | `Alpaca camera reads out in '...' (8-bit) but reports MaxADU ...` | The camera is in an 8-bit readout mode with no 16-bit mode to switch to, so frames look darker than they should. Pick a 16-bit readout mode in the Alpaca server if it has one. |
 | `Alpaca camera delivered pixels above its MaxADU ...` | The driver's MaxADU is wrong. PFR Sentinel uses the full 16-bit range for the session; see [What Is Different](#what-is-different). |
 | `Alpaca server sent an ImageBytes image that cannot be decoded ...; downloading as JSON for this session` | The server's compact image format was unreadable, so images are downloaded in the larger JSON format instead. Frames still arrive, just more slowly. |
-| `Exposure timeout: camera did not complete ...` | The exposure took more than 30 seconds longer than it should have. |
+| `Exposure timeout: camera did not complete ... (camera still reports ...)` | The exposure took more than 30 seconds longer than it should have. The part in brackets says what the camera reported. If it keeps happening while the camera reads Exposing, see [When the camera answers but exposures never finish](#when-the-camera-answers-but-exposures-never-finish). |
+| `Alpaca camera reconnected but did not finish a 1s test exposure: ...` | After a reconnect, the camera still didn't finish a short exposure. PFR Sentinel tries again, and has the driver reopen the camera if needed (same section). |
 | `⚠ Exposure ...s is outside the camera's range ... — using ...s` | The exposure was moved into the range the camera accepts. |
 | `Alpaca camera reports SensorType ...; colour reconstruction for it is not supported, so frames are treated as monochrome` | A CMYG or LRGB sensor; see [What Is Different](#what-is-different). |
 
