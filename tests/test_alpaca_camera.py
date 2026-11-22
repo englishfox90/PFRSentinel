@@ -291,3 +291,38 @@ def test_stop_capture_returns_within_three_seconds_during_a_long_download(monkey
     assert session.capture_thread is None
     session.disconnect_camera()
     assert session.camera is None and cam.connected is True
+
+
+def test_manual_software_red_gain_scales_the_red_channel(monkeypatch):
+    def frame(red_gain):
+        stored = {"mode": "manual", "manual_red_gain": red_gain, "manual_blue_gain": 1.0}
+        rig = _connected(monkeypatch, scene="red_top_blue_bottom", width=32, height=24,
+                         session_kwargs={"wb_config": stored})
+        img, meta = rig.session.capture_single_frame()
+        assert stored == {"mode": "manual", "manual_red_gain": red_gain, "manual_blue_gain": 1.0}
+        assert meta["WB_CONFIG"]["apply_software_gains"] is True
+        return _halves(img)[0]
+    plain, boosted = frame(1.0), frame(1.5)
+    assert boosted[0] == pytest.approx(plain[0] * 1.5, rel=0.05)
+    assert boosted[2] == pytest.approx(plain[2], abs=1.0)
+
+
+def test_zwo_session_wb_config_is_left_as_given():
+    from unittest.mock import MagicMock, patch
+    from services.camera.zwo_camera import ZWOCamera
+    with patch('services.camera.zwo_camera.CameraConnection') as conn_cls:
+        conn_cls.return_value = MagicMock(asi=None, camera=None, sdk_lock=MagicMock())
+        cam = ZWOCamera(sdk_path=None, wb_config={"mode": "manual", "manual_red_gain": 1.5})
+    assert cam.wb_config == {"mode": "manual", "manual_red_gain": 1.5}
+
+
+def test_alpaca_params_read_the_shared_zwo_mirror_keys(tmp_path):
+    from services.camera.session_params import read_capture_params
+    from services.config import Config
+    config = Config(str(tmp_path / "config.json"))
+    config.set("camera_source", "alpaca")
+    config.set("alpaca_camera", {"host": "192.0.2.10", "port": 11111, "device_number": 0})
+    config.set("zwo_auto_exposure", True)
+    config.set("zwo_interval", 42.0)
+    params = read_capture_params(config, auto_recovery=True)
+    assert params["auto_exposure"] is True and params["capture_interval"] == 42.0
