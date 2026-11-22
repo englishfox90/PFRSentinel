@@ -64,6 +64,7 @@ def patch_time(monkeypatch, fake_time, *module_names):
 ALPACA_TIME_MODULES = (
     "services.camera.alpaca.alpaca_capture_frame",
     "services.camera.alpaca.alpaca_device",
+    "services.camera.alpaca.alpaca_stall_recovery",
 )
 
 

@@ -147,6 +147,30 @@ class AlpacaCameraDevice:
             raise AlpacaNotConnectedError(None, "Device did not report Connected after Connect")
         return True
 
+    def reopen(self, timeout: float = 30.0) -> None:
+        """Make the driver let go of the camera and open it again.
+
+        V4 ``Disconnect`` + ``Connect``, else V3 ``Connected=false`` then
+        ``true``, whatever ``release_on_disconnect`` says. Only for a camera
+        that answers but no longer finishes exposures (``alpaca_stall_recovery``):
+        another client of the same camera on the server may see it drop.
+        """
+        if (self.interface_version or 0) >= 4:
+            try:
+                self.client.put("disconnect", timeout=max(self.client.request_timeout,
+                                                          float(timeout)))
+            except AlpacaNotImplementedError:
+                pass
+            else:
+                if self._connect_v4(timeout):
+                    return
+        self.client.put("connected", timeout=max(self.client.request_timeout, float(timeout)),
+                        Connected=False)
+        self.client.put("connected", timeout=max(self.client.request_timeout, float(timeout)),
+                        Connected=True)
+        if not self.is_connected():
+            raise AlpacaNotConnectedError(None, "Device did not report Connected after reopening")
+
     def disconnect(self) -> bool:
         """Release the device when ``release_on_disconnect``; True if a PUT was sent."""
         if not self.release_on_disconnect:
@@ -381,6 +405,14 @@ class AlpacaCameraDevice:
             self.warnings.debug_once("temperature-read", f"Alpaca CCDTemperature read failed: {exc}")
             return None
         except (TypeError, ValueError):
+            return None
+
+    def percent_completed(self) -> Optional[int]:
+        """PercentCompleted, or None when the driver does not offer it (never raises)."""
+        try:
+            value = self._optional("percentcompleted")
+            return None if value is None else int(value)
+        except Exception:
             return None
 
     def last_exposure_duration(self) -> Optional[float]:

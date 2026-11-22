@@ -19,6 +19,15 @@ class CameraTimeoutError(CameraError):
     """A camera operation did not finish within its time bound."""
 
 
+class ExposureStalledError(CameraTimeoutError):
+    """The camera accepted an exposure and kept answering, but never finished it.
+
+    Issue #177: ZWO's ASCOM driver, after NINA opened another ZWO camera, kept
+    reporting Connected and Exposing while no exposure ever completed. A plain
+    reconnect does not help there; the Alpaca session escalates (``alpaca_stall_recovery``).
+    """
+
+
 class CameraConfigurationError(CameraError):
     """The device rejected a setting or reported an unusable configuration."""
 
@@ -37,5 +46,6 @@ __all__ = [
     "CameraError",
     "CameraDisconnectedError",
     "CameraTimeoutError",
+    "ExposureStalledError",
     "CameraConfigurationError",
 ]

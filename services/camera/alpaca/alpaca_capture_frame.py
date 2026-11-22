@@ -28,7 +28,7 @@ import numpy as np
 
 from services.logger import app_logger
 
-from ..errors import CameraError, CameraTimeoutError, FrameSkipped
+from ..errors import CameraError, ExposureStalledError, FrameSkipped
 from ..frame_builder import build_frame
 from ..frame_metadata import build_frame_metadata, temperature_fields
 from .alpaca_frame_budget import EXPOSURE_GRACE_S, session_download_timeout
@@ -50,6 +50,7 @@ LIVENESS_EVERY_S = 2.0
 IDLE_LOST_AFTER_S = 2.0
 MAX_TRANSIENT_FAILURES = 3
 TRANSIENT_RETRY_S = 1.0
+OVERDUE_LOG_EVERY_S = 10.0
 
 
 class _SessionAbort:
@@ -119,35 +120,69 @@ def _check_state(state, now, started, duration, device=None, tolerant=None) -> b
     return False
 
 
+def _state_name(state) -> str:
+    try:
+        return CameraState(int(state)).name.title()
+    except (TypeError, ValueError):
+        return "unknown" if state is None else f"state {state}"
+
+
+def _stall_error(session, device, duration, grace, last_state) -> ExposureStalledError:
+    """Abort our exposure, read the camera back, and say what it reported."""
+    percent = device.percent_completed()
+    device.abort()
+    try:
+        after = device.camera_state()
+    except Exception as exc:
+        app_logger.debug(f"Alpaca CameraState read after abort failed: {exc}")
+        after = None
+    seen = f"camera still reports {_state_name(last_state)}"
+    if percent is not None:
+        seen += f", {percent}% complete"
+    seen += f"; after abort it reads {_state_name(after)}"
+    return ExposureStalledError(
+        f"Exposure timeout: camera did not complete {duration}s exposure "
+        f"within {duration + grace}s ({seen})")
+
+
 def wait_for_image(session, device, duration: float, started: float, interrupt=None,
-                   fast_poll: bool = True) -> None:
+                   fast_poll: bool = True, grace_s=None) -> None:
     """Block until ImageReady, raising on Stop, recovery, error or timeout.
 
     ``interrupt()`` replaces the capture checks (Stop / recovery) — the
     calibration exposure passes its own abort, and ``fast_poll=False`` (never
-    faster than ``POLL_SLOW_S``).
+    faster than ``POLL_SLOW_S``). A camera that keeps answering but never
+    finishes raises ``ExposureStalledError`` after ``duration + grace_s``
+    (``EXPOSURE_GRACE_S`` by default),
+    naming the CameraState it last reported (logged at DEBUG while overdue).
     """
     check = interrupt or (lambda: _check_interrupt(session, device))
+    grace_s = EXPOSURE_GRACE_S if grace_s is None else float(grace_s)
     sleep_until = started + duration - SLEEP_SLICE_S
     fast_until = started + duration + FAST_POLL_WINDOW_S
-    deadline = started + duration + EXPOSURE_GRACE_S
+    deadline = started + duration + grace_s
     tolerant = _Tolerant(session)
     last_liveness = started
+    last_state = None
+    last_overdue_log = started + duration
     while True:
         check()
         now = time.monotonic()
         session.exposure_remaining = max(0.0, duration - (now - started))
         if now >= deadline:
-            device.abort()
-            raise CameraTimeoutError(
-                f"Exposure timeout: camera did not complete {duration}s exposure "
-                f"within {duration + EXPOSURE_GRACE_S}s")
+            raise _stall_error(session, device, duration, grace_s, last_state)
         if now >= sleep_until:
             if tolerant(device.image_ready):
                 return
         if now - last_liveness >= LIVENESS_EVERY_S:
             last_liveness = now
             state = tolerant(device.camera_state)
+            if state is not None:
+                last_state = state
+            if now - last_overdue_log >= OVERDUE_LOG_EVERY_S:
+                last_overdue_log = now
+                app_logger.debug(f"Alpaca {duration:g}s exposure {now - started - duration:.0f}s "
+                                 f"overdue: CameraState {_state_name(state)}, ImageReady false")
             if state is not None and _check_state(state, now, started, duration, device,
                                                   tolerant):
                 return
@@ -220,7 +255,12 @@ def capture_single_frame(session):
         started = time.monotonic()
         session.exposure_start_time = start_wall
 
-        wait_for_image(session, device, duration, started)
+        try:
+            wait_for_image(session, device, duration, started)
+        except ExposureStalledError:
+            session.stalled_exposures = getattr(session, 'stalled_exposures', 0) + 1
+            raise
+        session.stalled_exposures = 0
         session.exposure_remaining = 0.0
         session.exposure_start_time = None
 

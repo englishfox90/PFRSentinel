@@ -176,8 +176,13 @@ class AlpacaConnection:
             self.unique_id = str(ci_get(match, "UniqueID", "") or "")
         client.device_number = self.device_number
 
-    def connect(self, camera_settings: Optional[dict] = None, *, configure: bool = True) -> bool:
-        """Open the camera; False (with ``last_error``) when it cannot be."""
+    def connect(self, camera_settings: Optional[dict] = None, *, configure: bool = True,
+                reopen: bool = False) -> bool:
+        """Open the camera; False (with ``last_error``) when it cannot be.
+
+        ``reopen`` also makes the driver close and reopen the camera even when
+        it already reads Connected (``AlpacaCameraDevice.reopen``).
+        """
         self.last_error = ""
         self._management_missing = False
         if not self.host:
@@ -199,6 +204,8 @@ class AlpacaConnection:
                 warnings=self.warnings)
             self.log(f"Connecting to Alpaca camera at {self.describe()}...")
             device.connect(timeout=self._connect_timeout_s)
+            if reopen:
+                device.reopen(timeout=self._connect_timeout_s)
             info = device.read_static()
             self.static_info = info
             self.camera_name = info.name
@@ -271,10 +278,11 @@ class AlpacaConnection:
         if self.camera is not None:
             self._configure(self.camera, settings)
 
-    def reconnect_safe(self, settings: Optional[dict] = None, **_ignored) -> bool:
+    def reconnect_safe(self, settings: Optional[dict] = None, *, reopen: bool = False,
+                       **_ignored) -> bool:
         """One re-handshake: drop the old handle, resolve by UniqueID, configure."""
         self.disconnect()
-        return self.connect(settings)
+        return self.connect(settings, reopen=reopen)
 
     def verify_identity(self) -> bool:
         """True unless the server now lists a different camera at our number."""
