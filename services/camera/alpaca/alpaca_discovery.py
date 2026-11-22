@@ -52,9 +52,13 @@ class AlpacaDeviceInfo:
 
 
 def _default_socket():
+    # No explicit bind: the first sendto binds an ephemeral port, which is all
+    # a discovery client needs, and an all-interfaces bind would be a listening
+    # socket in CodeQL's eyes (py/bind-socket-all-network-interfaces). If every
+    # send fails, recvfrom on the never-bound socket raises and the receive
+    # loop ends with nothing found, which is the right answer.
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.bind(("", 0))
     return sock
 
 

@@ -97,7 +97,7 @@ class SimServer:
             # from every interface while HTTP is on 127.0.0.1 sends clients to
             # addresses that refuse them.
             if discovery_bind is None:
-                discovery_bind = "" if host in ("", "0.0.0.0") else host
+                discovery_bind = host
             self._udp = self._open_discovery(discovery_bind, discovery_port)
 
     @property
