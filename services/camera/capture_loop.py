@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .capabilities import ZWO_TROUBLESHOOTING_HINTS
+from .errors import FrameSkipped
+from .recovery_wording import wording_for
+from ..logger import app_logger
 from ..posthog_service import capture_error
 
 if TYPE_CHECKING:
@@ -29,8 +32,49 @@ def troubleshooting_hints(camera) -> tuple[str, ...]:
     return ZWO_TROUBLESHOOTING_HINTS
 
 
+def _log_failure(camera, wording, message):
+    """A failure line: the session's log (ZWO), or WARNING when ``levelled``."""
+    if wording.levelled:
+        app_logger.warning(message)
+    else:
+        camera.log(message)
+
+
+def _log_trace(camera, wording, error):
+    """The traceback of ``error``: at DEBUG for an expected (network) failure."""
+    text = f"Stack trace: {traceback.format_exc()}"
+    # The loop's own plain Exception("Camera disconnected") etc. is as expected
+    # as a transport error; a TypeError or KeyError is a bug and keeps its trace.
+    expected = (error is None or type(error) is Exception
+                or isinstance(error, wording.quiet_traceback_types))
+    if wording.levelled and expected:
+        app_logger.debug(text)
+    else:
+        camera.log(text)
+
+
+SKIP_LOG_EVERY_S = 300.0
+
+
+def _wait_skipped_frame(camera, skip, last_skip_log):
+    """Log a skipped frame (rate-limited) and wait out one capture interval."""
+    now = time.time()
+    message = f"⏭ Frame skipped: {skip}"
+    if last_skip_log[0] != message or now - last_skip_log[1] >= SKIP_LOG_EVERY_S:
+        camera.log(message)
+        last_skip_log[:] = [message, now]
+    # The camera answered: a skipped frame is not a wedge.
+    camera._last_frame_time = now
+    wait_end = time.time() + camera.effective_capture_interval
+    while camera.is_capturing and time.time() < wait_end:
+        if camera.consume_immediate_capture():
+            break
+        time.sleep(0.2)
+
+
 def capture_loop(camera: "CaptureSession"):
     """Background capture loop with automatic recovery and scheduled capture support."""
+    wording = wording_for(camera)
     camera.log("=== Capture Loop Started ===")
     mode = getattr(camera, 'scheduled_capture_mode', 'always')
     if mode == "gated":
@@ -99,6 +143,9 @@ def capture_loop(camera: "CaptureSession"):
     # "wedged" alerts while we're intentionally sleeping between retries.
     camera._last_frame_time = time.time()
     camera.long_retry_mode_public = False
+    # Read by the UI (camera chip): 'ok' | 'reconnecting' | 'waiting'.
+    camera.link_state = 'ok'
+    last_skip_log = [None, 0.0]
 
     # Recalibration rate limiting to prevent infinite loops
     # (e.g., someone turning lights on/off repeatedly)
@@ -125,6 +172,7 @@ def capture_loop(camera: "CaptureSession"):
                 within_window = camera.is_within_scheduled_window()
 
                 if not within_window:
+                    camera.link_state = 'waiting'
                     current_status = "outside_window"
                     if last_schedule_log != current_status:
                         camera.log(
@@ -185,11 +233,14 @@ def capture_loop(camera: "CaptureSession"):
                         )
                         camera.log("Transitioning to active capture mode: reconnecting camera...")
                         last_schedule_log = "inside_window"
+                        if camera.camera:
+                            camera.link_state = 'ok'
 
                         if camera.status_callback:
                             camera.status_callback("Reconnecting for scheduled window...")
 
                         if not camera.camera:
+                            camera.link_state = 'reconnecting'
                             camera.log("Attempting to reconnect camera (re-detecting cameras)...")
                             if not camera.reconnect_camera_safe():
                                 camera.log("✗ ERROR: Failed to reconnect camera for scheduled window")
@@ -222,6 +273,7 @@ def capture_loop(camera: "CaptureSession"):
                 consecutive_errors = 0
                 warmup_pending = reconnect_spent = False
                 camera._last_frame_time = time.time()
+                camera.link_state = 'ok'
                 if long_retry_mode:
                     long_retry_mode = False
                     camera.long_retry_mode_public = False
@@ -320,6 +372,12 @@ def capture_loop(camera: "CaptureSession"):
                             break
                         time.sleep(0.2)
 
+            except FrameSkipped as skip:
+                if not camera.is_capturing:
+                    break
+                _wait_skipped_frame(camera, skip, last_skip_log)
+                continue
+
             except Exception as e:
                 if not camera.is_capturing:
                     break
@@ -341,10 +399,8 @@ def capture_loop(camera: "CaptureSession"):
                 if warmup_pending:
                     warmup_pending = False
                     reconnect_spent = True
-                    camera.log(
-                        f"First frame after reconnect failed ({e}) — reopening "
-                        "silently (known ZWO cold-open quirk, no fault raised)"
-                    )
+                    camera.link_state = 'reconnecting'
+                    camera.log(wording.cold_open_absorb.format(error=e))
                     try:
                         if camera.calibration_manager:
                             camera.calibration_manager.abort()
@@ -369,14 +425,15 @@ def capture_loop(camera: "CaptureSession"):
 
                 consecutive_errors += 1
                 error_msg = str(e)
-                camera.log(f"✗ ERROR in capture loop: {error_msg}")
+                _log_failure(camera, wording, f"✗ ERROR in capture loop: {error_msg}")
                 camera.log(f"Consecutive errors: {consecutive_errors}/{max_reconnect_attempts}")
-                camera.log(f"Stack trace: {traceback.format_exc()}")
+                _log_trace(camera, wording, e)
 
                 capture_error(e, context='camera_capture_loop')
 
                 if (
                     consecutive_errors == 1
+                    and not (wording.levelled and long_retry_mode)
                     and hasattr(camera, 'on_error_callback')
                     and camera.on_error_callback
                 ):
@@ -390,6 +447,7 @@ def capture_loop(camera: "CaptureSession"):
                         f"{consecutive_errors}/{max_reconnect_attempts}..."
                     )
                     reconnect_spent = True
+                    camera.link_state = 'reconnecting'
                     try:
                         # Abort any running calibration before disconnecting so it
                         # doesn't keep calling SDK methods on a dying camera handle.
@@ -406,10 +464,7 @@ def capture_loop(camera: "CaptureSession"):
                         # recovery attempts. 8s interruptible keeps Stop
                         # responsive.
                         pre_reconnect_wait = 8.0
-                        camera.log(
-                            f"Waiting {pre_reconnect_wait:.0f}s before reconnection attempt "
-                            "(USB bus settle)..."
-                        )
+                        camera.log(wording.pre_reconnect_wait.format(seconds=pre_reconnect_wait))
                         wait_end = time.time() + pre_reconnect_wait
                         while camera.is_capturing and time.time() < wait_end:
                             time.sleep(0.2)
@@ -423,7 +478,7 @@ def capture_loop(camera: "CaptureSession"):
                             # as a fresh fault and triggered another full
                             # reconnect — the churn that wedged the DLL.
                             warmup_pending = True
-                            camera.log("Waiting 3s for USB bus to stabilise...")
+                            camera.log(wording.post_reconnect_settle)
                             wait_end = time.time() + 3.0
                             while camera.is_capturing and time.time() < wait_end:
                                 time.sleep(0.2)
@@ -437,8 +492,9 @@ def capture_loop(camera: "CaptureSession"):
                         else:
                             raise Exception("Failed to reconnect camera")
                     except Exception as reconnect_error:
-                        camera.log(f"✗ Reconnection attempt failed: {reconnect_error}")
-                        camera.log(f"Stack trace: {traceback.format_exc()}")
+                        _log_failure(camera, wording,
+                                     f"✗ Reconnection attempt failed: {reconnect_error}")
+                        _log_trace(camera, wording, None)
                         if not auto_recovery:
                             fatal_reason = ("Camera reconnect failed; automatic "
                                             "recovery is off — capture stopped")
@@ -460,6 +516,7 @@ def capture_loop(camera: "CaptureSession"):
                     interval = long_retry_schedule[
                         min(long_retry_cycle, len(long_retry_schedule) - 1)
                     ]
+                    camera.link_state = 'waiting'
                     if not long_retry_mode:
                         long_retry_mode = True
                         camera.long_retry_mode_public = True
@@ -492,6 +549,7 @@ def capture_loop(camera: "CaptureSession"):
 
                     long_retry_cycle += 1
                     consecutive_errors = 0
+                    camera.link_state = 'reconnecting'
     finally:
         camera.log("Capture loop exiting - cleaning up...")
         # Snapshot mode, not video: nothing to stop here, and stop_capture() owns

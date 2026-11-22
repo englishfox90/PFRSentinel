@@ -23,7 +23,17 @@ class CameraConfigurationError(CameraError):
     """The device rejected a setting or reported an unusable configuration."""
 
 
+class FrameSkipped(CameraError):
+    """This frame could not be taken or kept, but the camera is fine.
+
+    The shared capture loop skips to the next frame without counting an error
+    or reconnecting: e.g. another client (NINA) is exposing on a shared Alpaca
+    camera, or the delivered image is not the frame this session asked for.
+    """
+
+
 __all__ = [
+    "FrameSkipped",
     "CameraError",
     "CameraDisconnectedError",
     "CameraTimeoutError",

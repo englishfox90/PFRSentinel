@@ -45,6 +45,9 @@ class CaptureSessionBase:
         # on the connection) because the capture worker reads it directly.
         self._recovery_requested = False
         self.status_callback = status_callback  # Callback for schedule status updates
+        # The capture loop's view of the camera link, read by the UI's camera
+        # chip: 'ok' | 'reconnecting' | 'waiting' (long retry / off-window).
+        self.link_state = 'ok'
 
         # Capture settings
         self.exposure_seconds = exposure_sec
