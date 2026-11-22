@@ -90,3 +90,42 @@ def test_capture_locks_the_source_selector(panel_and_config):
     assert not p.panel.mode_selector.isEnabled()
     p.panel.set_capture_active(False)
     assert p.panel.mode_selector.isEnabled()
+
+
+@pytest.mark.parametrize("path", [
+    ('alpaca', 'zwo', 'watch', 'alpaca', 'watch', 'zwo'),
+])
+def test_mouse_clicks_on_each_segment_switch_mode(panel_and_config, path):
+    """The item's clicked(bool) used to override the lambda's key default (KeyError: True)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    p = panel_and_config
+    p.panel.load_from_config(p.config)
+    p.panel.resize(900, 700)
+    p.panel.show()
+    expected = {'watch': ('watch', 0), 'zwo': ('camera', 1), 'alpaca': ('camera', 1)}
+    for key in path:
+        item = p.panel.mode_selector.items[key]
+        QTest.mouseClick(item, Qt.LeftButton, Qt.NoModifier, item.rect().center())
+        p.app.processEvents()
+        mode, page = expected[key]
+        assert p.config.get('capture_mode') == mode
+        assert p.panel.settings_stack.currentIndex() == page
+        if key != 'watch':
+            assert p.config.get('camera_source') == key
+    p.panel.hide()
+
+
+@pytest.mark.parametrize("start, key", [
+    (('camera', 'zwo'), 'watch'), (('camera', 'alpaca'), 'zwo'), (('watch', 'zwo'), 'alpaca'),
+])
+def test_item_clicked_signal_with_its_bool_reaches_the_right_segment(panel_and_config, start, key):
+    p = panel_and_config
+    p.config.set('capture_mode', start[0])
+    p.config.set('camera_source', start[1])
+    p.panel.load_from_config(p.config)
+    p.panel.mode_selector.items[key].itemClicked.emit(True)
+    assert p.config.get('capture_mode') == ('watch' if key == 'watch' else 'camera')
+    if key != 'watch':
+        assert p.config.get('camera_source') == key
+    assert p.panel.settings_stack.currentIndex() == (0 if key == 'watch' else 1)

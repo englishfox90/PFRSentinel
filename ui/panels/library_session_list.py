@@ -135,7 +135,7 @@ class SessionListView(QScrollArea):
 
         for session in sessions:
             card = _SessionCard(session)
-            card.clicked.connect(lambda s=session: self.session_clicked.emit(s))
+            card.clicked.connect(lambda *_, s=session: self.session_clicked.emit(s))
             self.cards_layout.addWidget(card)
 
 

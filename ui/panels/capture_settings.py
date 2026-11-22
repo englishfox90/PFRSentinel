@@ -73,7 +73,7 @@ class CaptureSettingsPanel(QScrollArea):
 
         self.mode_selector = SegmentedWidget()
         for key, text in (('watch', 'Directory Watch'), (ZWO, 'ZWO Camera'), (ALPACA, 'Alpaca Camera')):
-            self.mode_selector.addItem(key, text, onClick=lambda k=key: self._on_mode_changed(k))
+            self.mode_selector.addItem(key, text, onClick=lambda *_, k=key: self._on_mode_changed(k))
         self.mode_selector.setCurrentItem(ZWO)
         mode_layout.addWidget(self.mode_selector)
 

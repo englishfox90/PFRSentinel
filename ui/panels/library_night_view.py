@@ -512,7 +512,7 @@ class NightView(QWidget):
             text, color = self._event_label(event)
             label = _LinkLabel(f"{fmt_clock(event['at'])}  ·  {text}")
             label.setStyleSheet(f"color: {color};")
-            label.clicked.connect(lambda e=event: self._seek_to_id(e.get("image_id")))
+            label.clicked.connect(lambda *_, e=event: self._seek_to_id(e.get("image_id")))
             self.events_box.addWidget(label)
 
     @staticmethod
