@@ -22,6 +22,8 @@ from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
 from ..theme.styles import paint_border_lines
 
+CONNECTED_IDLE_LABEL = "Connected · idle"
+
 
 class AppBar(QFrame):
     """Slim application bar: brand · sprite · bell · primary action."""
@@ -34,6 +36,7 @@ class AppBar(QFrame):
         super().__init__(parent)
         self._is_capturing = False
         self._camera_connected = False
+        self._idle_label = CONNECTED_IDLE_LABEL
         self._action_mode = 'start'   # 'start' | 'stop' | 'connect'
         self._action_key = None       # skips redundant button rebuilds on the 1 Hz refresh
         self._start_enabled = True
@@ -223,7 +226,7 @@ class AppBar(QFrame):
         if self._is_capturing:
             self._status_strip.set_capture_state('capturing')
         elif self._camera_connected:
-            self._status_strip.set_capture_state('idle', "Connected · idle")
+            self._status_strip.set_capture_state('idle', self._idle_label)
         else:
             self._status_strip.set_capture_state('disconnected', "Disconnected")
 
@@ -243,9 +246,15 @@ class AppBar(QFrame):
         if self._status_strip:
             self._status_strip.set_frame_count(count)
 
-    def set_camera_connected(self, connected: bool):
-        """Window-supplied readiness flag (covers camera-available + watch mode)."""
+    def set_camera_connected(self, connected: bool, idle_label: str = None):
+        """Window-supplied readiness flag (covers camera-available + watch mode).
+
+        ``idle_label`` replaces "Connected · idle" on the pill when the camera
+        is ready to start but nothing has answered yet (an Alpaca server that
+        was configured but never reached).
+        """
         self._camera_connected = connected
+        self._idle_label = idle_label or CONNECTED_IDLE_LABEL
 
     def update_status(self, is_capturing: bool, image_count: int,
                       camera_controller=None, live_panel=None):

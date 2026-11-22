@@ -618,7 +618,7 @@ class MainWindow(
 
     def _update_status(self):
         try:
-            self.app_bar.set_camera_connected(self._camera_ready())
+            self.app_bar.set_camera_connected(self._camera_ready(), self._camera_idle_label())
             self.app_bar.update_status(
                 is_capturing=self.is_capturing,
                 image_count=self.image_count,
