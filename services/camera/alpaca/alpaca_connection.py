@@ -15,6 +15,10 @@ this class gives them those without any ZWO knowledge:
   ``release_on_disconnect`` is set. ``release_sdk`` is accepted and ignored.
 - It never writes config: the learned UniqueID / Name are on ``unique_id`` /
   ``camera_name`` for the caller to persist on the main thread.
+- ``warnings`` (``SessionWarnings``) outlives every device object, so a
+  warn-once stays once across reconnects.
+- A host field typed as ``host:port`` (``obs-pc:11111``, ``[fe80::1]:11111``)
+  is split; a port that is not a number fails the connect with that reason.
 """
 import threading
 from typing import Callable, Optional
@@ -24,9 +28,10 @@ from services.logger import app_logger
 from ..camera_source import alpaca_profile_key
 from ..errors import CameraConfigurationError, CameraError
 from .alpaca_device import AlpacaCameraDevice
-from .alpaca_http import AlpacaHttpClient, ci_get, lan_session  # noqa: F401 — re-exported
-from .alpaca_protocol import ALPACA_SDK, AlpacaNotImplementedError
+from .alpaca_http import AlpacaHttpClient, ci_get, lan_session, split_host_port  # noqa: F401
+from .alpaca_protocol import ALPACA_SDK, AlpacaInvalidOperationError, AlpacaNotImplementedError
 from .alpaca_transport_text import not_alpaca_server_text
+from .alpaca_warnings import SessionWarnings
 
 CLEANUP_LOCK_TIMEOUT_S = 5.0
 
@@ -67,15 +72,31 @@ class AlpacaConnection:
         self.last_error = ""
         self._management_missing = False
         self.renumbered_from = None
+        self.warnings = SessionWarnings()
 
     # -- identity ---------------------------------------------------------
+    def _address(self):
+        raw_port = self.settings.get("port") or 11111
+        try:
+            return split_host_port(str(self.settings.get("host") or ""), int(raw_port))
+        except ValueError:
+            return str(self.settings.get("host") or "").strip(), int(raw_port)
+
     @property
     def host(self) -> str:
-        return str(self.settings.get("host") or "").strip()
+        return self._address()[0]
 
     @property
     def port(self) -> int:
-        return int(self.settings.get("port") or 11111)
+        return int(self._address()[1] or 11111)
+
+    def address_error(self) -> str:
+        """Why the host field cannot be used ('' when it can)."""
+        try:
+            split_host_port(str(self.settings.get("host") or ""), 11111)
+        except ValueError as exc:
+            return str(exc)
+        return ""
 
     @property
     def camera_serial(self) -> str:
@@ -162,13 +183,19 @@ class AlpacaConnection:
             self.last_error = "No Alpaca server host is configured"
             self.log(f"✗ {self.last_error}")
             return False
+        if self.address_error():
+            self.last_error = self.address_error()
+            self.log(f"✗ {self.last_error}")
+            return False
+        self._drop_stale()
         client = self._new_client()
         device = None
         try:
             self.resolve_device_number(client)
             device = AlpacaCameraDevice(
                 client, use_imagebytes=self.settings.get("use_imagebytes", True),
-                release_on_disconnect=self.settings.get("release_on_disconnect", False))
+                release_on_disconnect=self.settings.get("release_on_disconnect", False),
+                warnings=self.warnings)
             self.log(f"Connecting to Alpaca camera at {self.describe()}...")
             device.connect(timeout=self._connect_timeout_s)
             info = device.read_static()
@@ -194,6 +221,16 @@ class AlpacaConnection:
                  f"{info.sensor_bit_depth}-bit (MaxADU {info.max_adu})")
         return True
 
+    def _drop_stale(self) -> None:
+        """Close a client a skipped disconnect (cleanup-lock timeout) left open."""
+        stale, self.client = self.client, None
+        self.camera = None
+        if stale is not None:
+            try:
+                stale.close()
+            except Exception as exc:
+                app_logger.debug(f"Alpaca: closing the previous client failed: {exc}")
+
     def _failure_text(self, exc) -> str:
         """What a failed connect tells the user: a 404 from both the Management
         API and the device means the port is some other web server."""
@@ -203,10 +240,15 @@ class AlpacaConnection:
 
     def _configure(self, device: AlpacaCameraDevice, settings: dict) -> None:
         device.set_full_frame_roi()
-        if "gain" in settings:
-            device.set_gain(settings["gain"])
-        if "offset" in settings:
-            device.set_offset(settings["offset"])
+        for kind in ("gain", "offset"):
+            if kind not in settings:
+                continue
+            try:
+                getattr(device, f"set_{kind}")(settings[kind])
+            except AlpacaInvalidOperationError as exc:
+                # Another client is exposing: the frame path re-asserts it.
+                self.warnings.limited(f"configure-{kind}",
+                                      f"Alpaca camera refused {kind} for now: {exc}")
         if "exposure_sec" in settings:
             device.set_pending_exposure(settings["exposure_sec"])
         if "flip" in settings:

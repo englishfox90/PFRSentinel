@@ -146,5 +146,42 @@ def test_bit_depth_helpers():
     assert sensor.sensor_bit_depth(4095) == 12
     assert sensor.sensor_bit_depth(65535) == 16
     assert sensor.transfer_bit_depth(255) == 8
-    assert sensor.transfer_bit_depth(256) == 16
+    assert sensor.transfer_bit_depth(257) == 16
     assert sensor.sensor_bit_depth(0) == 16
+
+
+def test_max_adu_reported_as_a_power_of_two_is_the_level_count():
+    # 65536 must not read as 17-bit (that would halve every pixel on the way to 16).
+    assert sensor.sensor_bit_depth(65536) == 16 and sensor.transfer_bit_depth(65536) == 16
+    assert sensor.sensor_bit_depth(4096) == 12 and sensor.sensor_bit_depth(256) == 8
+    raw, depth = sensor.to_raw_array(np.array([[0, 1000, 65535]]), 65536)
+    assert depth == 16 and raw.tolist() == [[0, 1000, 65535]]
+    raw, _ = sensor.to_raw_array(np.array([[4095]]), 4096)
+    assert raw.tolist() == [[4095 << 4]]
+
+
+@pytest.mark.parametrize("dtype", [np.uint16, np.int32, np.int64, np.float64, np.uint8])
+def test_to_raw_array_matches_with_and_without_inplace(dtype):
+    data = np.array([[-5, 0, 100, 4095, 5000], [7, 8, 9, 10, 11]]).clip(
+        0 if np.dtype(dtype).kind == "u" else -5, 255 if dtype is np.uint8 else None).astype(dtype)
+    expected, depth = sensor.to_raw_array(data.copy(), 4095)
+    work = data.copy()
+    got, depth2 = sensor.to_raw_array(work, 4095, inplace=True)
+    assert depth == depth2 == 16 and got.dtype == np.uint16
+    np.testing.assert_array_equal(got, expected)
+    np.testing.assert_array_equal(expected, (np.clip(data.astype(np.int64), 0, 4095) << 4))
+
+
+def test_to_raw_array_without_inplace_never_touches_the_input():
+    data = np.array([[5000, 1]], dtype=np.uint16)
+    sensor.to_raw_array(data, 4095)
+    assert data.tolist() == [[5000, 1]]
+    data.flags.writeable = False
+    raw, _ = sensor.to_raw_array(data, 4095, inplace=True)
+    assert raw.tolist() == [[4095 << 4, 16]] and data.tolist() == [[5000, 1]]
+
+
+def test_uint16_inplace_needs_no_new_frame():
+    data = np.arange(12, dtype=np.uint16).reshape(3, 4)
+    raw, _ = sensor.to_raw_array(data, 4095, inplace=True)
+    assert np.shares_memory(raw, data)

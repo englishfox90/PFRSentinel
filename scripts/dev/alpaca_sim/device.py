@@ -87,6 +87,7 @@ class SimCameraSpec:
     unique_id: str = "3b2f6a1e-43a1-4f5e-9c1d-5e1a7c0a0043"
     connect_delay_s: float = 0.0        # InterfaceVersion 4 Connect() completion
     strict_param_case: bool = True      # reject PUT names not in canonical casing
+    roi_locked_while_exposing: bool = False   # Bin/Start/Num PUT mid-exposure → 0x40B
     extra_devices: List[dict] = field(default_factory=list)
 
 
@@ -97,6 +98,8 @@ class SimFaults:
     idle_blip_polls: int = 0            # first N CameraState/ImageReady reads after a start: Idle
     fail_next_exposure: bool = False    # the next exposure ends in CameraState Error
     imagearray_errors: int = 0          # next N ImageArray reads fail with 0x500
+    driver_error_members: set = field(default_factory=set)   # GET → 0x500 (old V2 drivers)
+    invalid_operation_reads: Dict[str, int] = field(default_factory=dict)  # next N GETs → 0x40B
 
 
 @dataclass
@@ -229,6 +232,11 @@ class FakeAlpacaCamera:
                     raise SimError(NOT_CONNECTED, "Camera is not connected (injected)")
                 if not self.connected:
                     raise SimError(NOT_CONNECTED, "Camera is not connected")
+            if method == "GET" and member in self.faults.driver_error_members:
+                raise SimError(0x500, f"Driver threw reading {member} (injected)")
+            if method == "GET" and self.faults.invalid_operation_reads.get(member, 0) > 0:
+                self.faults.invalid_operation_reads[member] -= 1
+                raise SimError(INVALID_OPERATION, f"{member} is not available right now")
             if member == "imagearray":
                 return self._imagearray(headers, client_tx, server_tx)
             if method == "PUT":

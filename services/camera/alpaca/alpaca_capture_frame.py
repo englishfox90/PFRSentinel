@@ -1,17 +1,24 @@
 """One Alpaca frame: expose, wait, download, decode, and build the shared metadata.
 
 The exposure is sent to StartExposure in seconds; the GUI's milliseconds became
-seconds once, in ``session_params``. The wait sleeps in short slices until just
+seconds once, in ``session_factory``. The wait sleeps in short slices until just
 before the exposure ends — checking Stop and the watchdog's recovery request
 and aborting on either — then polls ImageReady, with a CameraState liveness
 check every couple of seconds. Every wait is bounded: the exposure by its
-duration plus ``EXPOSURE_GRACE_S``, the download by a size-scaled timeout, and
-a download can be cut short by Stop within one chunk.
+duration plus ``EXPOSURE_GRACE_S``, the download by ``alpaca_frame_budget``'s
+deadline (enforced by a watchdog that shuts the socket down), and a download
+can be cut short by Stop at any moment.
 
-The frame is normalised to ZWO's raw layout (``to_raw_array``), flipped in
-software with the Bayer pattern following the flip, and handed to the same
-``build_frame`` / ``build_frame_metadata`` a ZWO frame goes through, so the
-metadata keys are identical by construction.
+The camera may be shared with another client (NINA through ASCOM Remote), so
+before every exposure gain, offset and the full-frame ROI are read back and
+re-asserted (``alpaca_shared_camera``), and a delivered image whose shape or
+duration is not this frame's is dropped (``FrameSkipped``) rather than
+published or treated as a disconnect.
+
+The frame is normalised to ZWO's raw layout (``to_raw_array``, in place),
+flipped in software with the Bayer pattern following the flip, and handed to
+the same ``build_frame`` / ``build_frame_metadata`` a ZWO frame goes through, so
+the metadata keys are identical by construction.
 """
 from __future__ import annotations
 
@@ -19,22 +26,29 @@ import time
 
 import numpy as np
 
-from ..errors import CameraConfigurationError, CameraError, CameraTimeoutError
+from services.logger import app_logger
+
+from ..errors import CameraError, CameraTimeoutError, FrameSkipped
 from ..frame_builder import build_frame
 from ..frame_metadata import build_frame_metadata, temperature_fields
-from .alpaca_protocol import AlpacaNotConnectedError, AlpacaTransportError, CameraState
-from .alpaca_sensor import RGB, apply_flip, flip_bayer_pattern, to_raw_array
+from .alpaca_frame_budget import EXPOSURE_GRACE_S, session_download_timeout
+from .alpaca_protocol import (
+    AlpacaCancelledError,
+    AlpacaNotConnectedError,
+    AlpacaTransportError,
+    CameraState,
+)
+from .alpaca_sensor import apply_flip, flip_bayer_pattern, to_raw_array
+from .alpaca_shared_camera import check_delivered, prepare_frame
 
 SLEEP_SLICE_S = 0.2
 POLL_FAST_S = 0.1
 POLL_SLOW_S = 0.25
+FAST_POLL_WINDOW_S = 1.0
 LIVENESS_EVERY_S = 2.0
-EXPOSURE_GRACE_S = 30.0
 IDLE_LOST_AFTER_S = 2.0
 MAX_TRANSIENT_FAILURES = 3
 TRANSIENT_RETRY_S = 1.0
-MIN_DOWNLOAD_TIMEOUT_S = 30.0
-ASSUMED_LINK_BYTES_PER_S = 1_000_000
 
 
 class _SessionAbort:
@@ -85,22 +99,41 @@ class _Tolerant:
         return value
 
 
-def _check_state(state, now, started, duration) -> None:
+def _check_state(state, now, started, duration, device=None, tolerant=None) -> bool:
+    """Raise when CameraState says the exposure is lost; True if the image is in.
+
+    A driver may flip CameraState to Idle a moment before it sets ImageReady,
+    so Idle past the grace re-reads ImageReady once before giving up.
+    """
     if state == CameraState.ERROR:
+        if device is not None:
+            device.mark_finished()
         raise CameraError("Exposure failed (camera reported CameraState Error)")
     if state == CameraState.IDLE and now - started > duration + IDLE_LOST_AFTER_S:
+        if device is not None and tolerant is not None and tolerant(device.image_ready):
+            return True
+        if device is not None:
+            device.mark_finished()
         raise CameraError("Exposure error: camera returned to IDLE without an image")
+    return False
 
 
-def wait_for_image(session, device, duration: float, started: float) -> None:
-    """Block until ImageReady, raising on Stop, recovery, error or timeout."""
+def wait_for_image(session, device, duration: float, started: float, interrupt=None,
+                   fast_poll: bool = True) -> None:
+    """Block until ImageReady, raising on Stop, recovery, error or timeout.
+
+    ``interrupt()`` replaces the capture checks (Stop / recovery) — the
+    calibration exposure passes its own abort, and ``fast_poll=False`` (never
+    faster than ``POLL_SLOW_S``).
+    """
+    check = interrupt or (lambda: _check_interrupt(session, device))
     sleep_until = started + duration - SLEEP_SLICE_S
+    fast_until = started + duration + FAST_POLL_WINDOW_S
     deadline = started + duration + EXPOSURE_GRACE_S
-    poll_every = POLL_SLOW_S if duration > 1.0 else POLL_FAST_S
     tolerant = _Tolerant(session)
     last_liveness = started
     while True:
-        _check_interrupt(session, device)
+        check()
         now = time.monotonic()
         session.exposure_remaining = max(0.0, duration - (now - started))
         if now >= deadline:
@@ -114,19 +147,14 @@ def wait_for_image(session, device, duration: float, started: float) -> None:
         if now - last_liveness >= LIVENESS_EVERY_S:
             last_liveness = now
             state = tolerant(device.camera_state)
-            if state is not None:
-                _check_state(state, now, started, duration)
+            if state is not None and _check_state(state, now, started, duration, device,
+                                                  tolerant):
+                return
         if now < sleep_until:
             time.sleep(min(SLEEP_SLICE_S, max(0.0, sleep_until - now)))
         else:
-            time.sleep(poll_every)
-
-
-def download_timeout_s(info, use_imagebytes: bool) -> float:
-    planes = 3 if info.bayer_pattern == RGB else 1
-    per_pixel = 4 if use_imagebytes else 12
-    size = info.width * info.height * planes * per_pixel
-    return max(MIN_DOWNLOAD_TIMEOUT_S, size / ASSUMED_LINK_BYTES_PER_S)
+            fast = fast_poll and duration <= 1.0 and now < fast_until
+            time.sleep(POLL_FAST_S if fast else POLL_SLOW_S)
 
 
 def _exposure_for(session, info) -> float:
@@ -145,13 +173,24 @@ def _exposure_for(session, info) -> float:
     return duration
 
 
-def _checked_shape(raw: np.ndarray, info) -> None:
-    want_rgb = info.bayer_pattern == RGB
-    ok = (raw.ndim == 3 and raw.shape[2] == 3) if want_rgb else raw.ndim == 2
-    if not ok:
-        raise CameraConfigurationError(
-            f"Alpaca camera delivered an image of shape {raw.shape} for SensorType "
-            f"{info.sensor_type}")
+def download_frame(session, device, info, abort):
+    """Download the image; a watchdog-requested cancel consumes the request."""
+    try:
+        return device.download(abort_event=abort,
+                               timeout=session_download_timeout(session, info, device))
+    except AlpacaCancelledError:
+        if session.is_capturing and getattr(session, '_recovery_requested', False):
+            session._recovery_requested = False
+            raise Exception("Recovery requested by watchdog mid-download") from None
+        raise
+
+
+def _record_transfer(session, connection) -> None:
+    client = connection.client
+    if client is not None:
+        session.last_download_s = client.last_download_s
+        session.last_download_bytes = client.last_image_bytes
+        session.last_image_format = client.last_image_format
 
 
 def capture_single_frame(session):
@@ -165,13 +204,17 @@ def capture_single_frame(session):
 
     connection = session._connection
     info = connection.static_info
+    warnings = connection.warnings
     try:
         duration = _exposure_for(session, info)
         with connection.sdk_lock:
             if not session.camera:
                 raise Exception("Camera disconnected before exposure")
-            device.set_gain(session.gain)
-            duration = device.start(duration)
+            prepare_frame(device, session, warnings)
+        # Not under sdk_lock: a legacy driver may hold StartExposure for the
+        # whole exposure, and Stop must still reach AbortExposure meanwhile.
+        session.exposure_start_time = time.time()
+        duration = device.start(duration)
         start_wall = time.time()
         started = time.monotonic()
         session.exposure_start_time = start_wall
@@ -180,23 +223,20 @@ def capture_single_frame(session):
         session.exposure_remaining = 0.0
         session.exposure_start_time = None
 
-        image = device.download(abort_event=_SessionAbort(session),
-                                timeout=download_timeout_s(info, device.use_imagebytes))
-        client = connection.client
-        if client is not None:
-            session.last_download_s = client.last_download_s
-            session.last_download_bytes = client.last_image_bytes
-            session.last_image_format = client.last_image_format
+        image = download_frame(session, device, info, _SessionAbort(session))
+        _record_transfer(session, connection)
+        check_delivered(device, info, image, duration, warnings)
 
-        raw, bit_depth = to_raw_array(image, info.max_adu)
-        _checked_shape(raw, info)
+        raw, bit_depth = to_raw_array(image, info.max_adu, inplace=True)
+        del image
         flip = int(session.flip or 0)
         raw = apply_flip(raw, flip)
         height, width = raw.shape[:2]
         pattern = flip_bayer_pattern(info.bayer_pattern, flip, width, height)
-        if bit_depth == 16:
-            raw = raw.astype('<u2', copy=False)
-        raw_bytes = raw.tobytes()
+        if bit_depth == 16 and raw.dtype.byteorder == '>':
+            raw = raw.astype('<u2')
+        # A byte view, not tobytes(): the frame keeps one copy of its pixels.
+        raw_bytes = memoryview(np.ascontiguousarray(raw)).cast('B')
 
         try:
             temp = temperature_fields(device.ccd_temperature())
@@ -226,5 +266,64 @@ def capture_single_frame(session):
     except Exception as e:
         session.exposure_start_time = None
         session.exposure_remaining = 0.0
-        session.log(f"ERROR capturing frame: {e}")
+        # The capture loop logs the failure once, at the right level.
+        app_logger.debug(f"Alpaca frame failed: {e}")
         raise
+
+
+CALIBRATION_BUSY_WAIT_S = 5.0
+
+
+class _CalibrationAbort:
+    """Abort predicate for a calibration exposure: Stop, recovery, or the
+    calibration manager's own abort (stop_capture sets it)."""
+
+    def __init__(self, session, abort_event):
+        self._session = session
+        self._abort = abort_event
+
+    def is_set(self) -> bool:
+        return (self._abort.is_set() or self._session.camera is None
+                or bool(getattr(self._session, '_recovery_requested', False)))
+
+
+def calibration_exposure(session, seconds: float, abort_event):
+    """``CameraCalibration.exposure_hook`` for an Alpaca session.
+
+    One exposure through the same start / wait / bounded download a frame
+    uses: polls at the Alpaca rate, waits out the readout, aborts our own
+    exposure on timeout or abort, and returns ``get_data_after_exposure``'s
+    layout (row-major pixels at the transfer depth). A busy shared camera
+    waits a few seconds (interruptibly) before the attempt is reported failed.
+    """
+    device = session.camera
+    if not device:
+        raise Exception("Camera not connected")
+    connection = session._connection
+    info = connection.static_info
+    abort = _CalibrationAbort(session, abort_event)
+
+    def interrupt():
+        if abort.is_set():
+            device.abort()
+            raise Exception("Calibration aborted during exposure wait")
+
+    try:
+        duration = device.start(seconds)
+    except FrameSkipped:
+        abort_event.wait(CALIBRATION_BUSY_WAIT_S)
+        raise
+    wait_for_image(session, device, duration, time.monotonic(), interrupt=interrupt,
+                   fast_poll=False)
+    session.exposure_remaining = 0.0
+    image = device.download(abort_event=abort,
+                            timeout=session_download_timeout(session, info, device))
+    _record_transfer(session, connection)
+    if image.ndim == 3:
+        image = image.mean(axis=2)
+    if image.shape != (info.height, info.width):
+        device.set_full_frame_roi()
+        raise FrameSkipped(f"calibration image is {image.shape[1]}x{image.shape[0]}, "
+                           f"not full frame")
+    raw, _depth = to_raw_array(image, info.max_adu, inplace=True)
+    return np.ascontiguousarray(raw).tobytes()

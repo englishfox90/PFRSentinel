@@ -14,6 +14,17 @@ from services.logger import app_logger
 _WATCHDOG_UI_FATAL_GRACE_SEC = 120
 
 
+def _frame_budget(cam):
+    """The session's own per-frame budget in seconds (Alpaca), or None (ZWO)."""
+    if getattr(cam, 'backend', None) != 'alpaca':
+        return None
+    try:
+        budget = float(getattr(cam, 'frame_budget_s', None))
+    except (TypeError, ValueError):
+        return None
+    return budget if budget > 0 else None
+
+
 class _CaptureWatchdogMixin:
     """Two-stage detector for a capture thread stuck inside the camera backend."""
 
@@ -45,6 +56,11 @@ class _CaptureWatchdogMixin:
         interval = getattr(cam, 'capture_interval', 5.0) or 5.0
         exposure_sec = getattr(cam, 'exposure_seconds', 0.0) or 0.0
         threshold = max(3 * interval, 180.0, exposure_sec + 60.0)
+        # A network camera's frame also includes its download, which over a
+        # slow link can take minutes: the session says how long a frame may take.
+        budget = _frame_budget(cam)
+        if budget is not None:
+            threshold = max(threshold, budget)
         stale_for = time.time() - last_frame
 
         if stale_for < threshold:

@@ -201,3 +201,27 @@ def test_request_log_records_put_parameters():
     client.put("startexposure", Duration=0.25, Light=True)
     assert cam.puts("startexposure")[0]["Duration"] == "0.25"
     assert cam.puts("connected")[0]["Connected"] == "True"
+
+
+def test_fault_driver_error_and_invalid_operation_reads():
+    net, cam, _clock, client = _rig()
+    client.put("connected", Connected=True)
+    cam.faults.driver_error_members = {"sensorname"}
+    with pytest.raises(CameraError, match="0x500"):
+        client.get("sensorname")
+    cam.faults.invalid_operation_reads = {"ccdtemperature": 1}
+    with pytest.raises(CameraError, match="0x40B"):
+        client.get("ccdtemperature")
+    assert client.get("ccdtemperature") == 21.5
+
+
+def test_roi_locked_while_exposing_when_the_spec_says_so():
+    net, cam, _clock, client = _rig(roi_locked_while_exposing=True)
+    client.put("connected", Connected=True)
+    client.put("numx", NumX=8)
+    client.put("startexposure", Duration=10.0, Light=True)
+    with pytest.raises(CameraError, match="0x40B"):
+        client.put("numx", NumX=16)
+    client.put("abortexposure")
+    client.put("numx", NumX=16)
+    assert cam.num_x == 16

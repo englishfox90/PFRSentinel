@@ -7,25 +7,32 @@ loop and ``CaptureSessionBase.stop_capture`` drive this device exactly as they
 drive a ``zwoasi.Camera``. The one unit conversion between the two lives here:
 ``set_control_value(ASI_EXPOSURE, µs)`` / ``get_control_value(ASI_EXPOSURE)``.
 
-Optional ICamera members a driver does not implement read as ``None`` and
-switch the matching capability off. Interface V4's ``Connect`` / ``Connecting``
+Optional ICamera members a driver does not implement — or that throw any device
+error, as an uncooled camera or an old V2 driver behind ASCOM Remote does for
+CCDTemperature / Offset* / SensorName — read as ``None`` and switch the
+matching capability off; only a transport failure (or NotConnected) fails the
+connect. Interface V4's ``Connect`` / ``Connecting``
 is used when the device reports InterfaceVersion >= 4, otherwise the V3
 ``Connected`` PUT. ``disconnect`` / ``close`` release the device only when
 ``release_on_disconnect`` is set: on ASCOM Remote another client (NINA) may
 share the connection, and ``Connected=false`` would drop it for them too.
+
+The camera may be shared with another client (NINA through ASCOM Remote), so
+``abort`` only ever aborts an exposure this device started and has not yet
+seen finish, and it goes through the client's control session so it never
+waits behind the capture thread's poll.
 """
 import threading
 import time
-from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 
 from services.logger import app_logger
 
+from ..errors import FrameSkipped
 from .alpaca_protocol import (
     ALPACA_SDK,
-    VALUE_NOT_SET,
     AlpacaError,
     AlpacaInvalidOperationError,
     AlpacaInvalidValueError,
@@ -34,97 +41,17 @@ from .alpaca_protocol import (
     CameraState,
     SensorType,
 )
-from .alpaca_sensor import (
-    bayer_pattern_for,
-    physical_bayer_pattern,
-    sensor_bit_depth,
-    to_raw_bytes,
-    transfer_bit_depth,
-)
+from .alpaca_warnings import SessionWarnings
+from .alpaca_sensor import to_raw_bytes
+from .alpaca_static_info import AlpacaStaticInfo
 
 ABORT_TIMEOUT_S = 2.0
 CONNECT_POLL_S = 0.25
 IDLE_GRACE_S = 2.0
+START_GRACE_S = 10.0
 
 _ABSENT = (AlpacaNotImplementedError, AlpacaInvalidOperationError)
-
-
-@dataclass(frozen=True)
-class AlpacaStaticInfo:
-    """What a connected camera reports about itself; ``None`` = not implemented."""
-    name: str
-    description: Optional[str]
-    driver_info: Optional[str]
-    driver_version: Optional[str]
-    interface_version: int
-    sensor_name: Optional[str]
-    sensor_type: int
-    bayer_offset_x: int
-    bayer_offset_y: int
-    width: int
-    height: int
-    pixel_size_x: Optional[float]
-    electrons_per_adu: Optional[float]
-    max_adu: int
-    exposure_min: Optional[float]
-    exposure_max: Optional[float]
-    can_abort: bool
-    can_stop: bool
-    gain_mode: Optional[str]            # 'range' | 'list' | None
-    gain_min: Optional[int]
-    gain_max: Optional[int]
-    gains: tuple
-    offset_mode: Optional[str]
-    offset_min: Optional[int]
-    offset_max: Optional[int]
-    offsets: tuple
-    has_temperature: bool
-    max_bin_x: Optional[int]
-
-    @property
-    def physical_bayer_pattern(self) -> str:
-        return physical_bayer_pattern(self.sensor_type, self.bayer_offset_x, self.bayer_offset_y)
-
-    @property
-    def bayer_pattern(self) -> str:
-        """The pipeline name (``debayer_raw_image`` / ``BAYER_PATTERN``)."""
-        return bayer_pattern_for(self.sensor_type, self.bayer_offset_x, self.bayer_offset_y)
-
-    @property
-    def sensor_bit_depth(self) -> int:
-        return sensor_bit_depth(self.max_adu)
-
-    @property
-    def transfer_bit_depth(self) -> int:
-        return transfer_bit_depth(self.max_adu)
-
-    @property
-    def gain_range(self):
-        if self.gain_mode == 'range' and self.gain_max is not None:
-            return (self.gain_min, self.gain_max)
-        if self.gain_mode == 'list':
-            return (0, max(0, len(self.gains) - 1))
-        return None
-
-    @property
-    def offset_range(self):
-        if self.offset_mode == 'range' and self.offset_max is not None:
-            return (self.offset_min, self.offset_max)
-        if self.offset_mode == 'list':
-            return (0, max(0, len(self.offsets) - 1))
-        return None
-
-    @property
-    def exposure_range_s(self):
-        if self.exposure_min is None and self.exposure_max is None:
-            return None
-        return (self.exposure_min if self.exposure_min is not None else 0.0,
-                self.exposure_max if self.exposure_max is not None else 3600.0)
-
-    def clamp_exposure(self, seconds: float) -> float:
-        low, high = self.exposure_range_s or (0.0, None)
-        seconds = max(float(seconds), low or 0.0)
-        return min(seconds, high) if high is not None else seconds
+_STARTING = "starting"
 
 
 def _clamp(value, bounds):
@@ -136,7 +63,8 @@ class AlpacaCameraDevice:
     """A camera behind an ``AlpacaHttpClient``; also an ``ExposureHandle``."""
 
     def __init__(self, client, *, use_imagebytes: bool = True,
-                 release_on_disconnect: bool = False):
+                 release_on_disconnect: bool = False,
+                 warnings: Optional[SessionWarnings] = None):
         self.client = client
         self.use_imagebytes = bool(use_imagebytes)
         self.release_on_disconnect = bool(release_on_disconnect)
@@ -151,23 +79,28 @@ class AlpacaCameraDevice:
         self._gain = None
         self._offset = None
         self._temperature_ok = True
-        self._warned = set()
+        self.warnings = warnings if warnings is not None else SessionWarnings()
 
     # -- helpers ----------------------------------------------------------
     def _optional(self, member, default=None):
+        """An optional member's value, or ``default`` on any device error.
+
+        NotImplemented, InvalidOperation, ValueNotSet, a driver error
+        (0x500-0xFFF) or an HTTP 400 all mean "this camera does not offer it".
+        A transport failure — and NotConnected — still raise.
+        """
         try:
             return self.client.get(member)
-        except _ABSENT:
-            return default
-        except AlpacaError as exc:
-            if exc.number == VALUE_NOT_SET:
-                return default
+        except AlpacaNotConnectedError:
             raise
+        except AlpacaError as exc:
+            if not isinstance(exc, _ABSENT):
+                self.warnings.debug_once(f"optional-{member}",
+                                         f"Alpaca camera: optional {member} unavailable ({exc})")
+            return default
 
     def _warn_once(self, key, message):
-        if key not in self._warned:
-            self._warned.add(key)
-            app_logger.warning(message)
+        self.warnings.once(key, message)
 
     # -- connection -------------------------------------------------------
     def is_connected(self) -> bool:
@@ -184,7 +117,9 @@ class AlpacaCameraDevice:
             return
         if self.interface_version >= 4 and self._connect_v4(timeout):
             return
-        self.client.put("connected", Connected=True)
+        # A V3 driver opens the camera inside this PUT: 10-20 s is normal.
+        self.client.put("connected", timeout=max(self.client.request_timeout, float(timeout)),
+                        Connected=True)
         if not self.is_connected():
             raise AlpacaNotConnectedError(None, "Device did not report Connected after connect")
 
@@ -299,21 +234,57 @@ class AlpacaCameraDevice:
         return value
 
     def start(self, duration_s: float, light: bool = True) -> float:
+        """StartExposure; ``FrameSkipped`` when another client is exposing.
+
+        Some legacy drivers block the PUT for the whole exposure, so it gets
+        the exposure plus a grace. The exposure counts as ours from the moment
+        the PUT is sent (so Stop can abort a blocking one) until ImageReady is
+        seen or the start fails.
+        """
         duration = self.set_pending_exposure(duration_s)
-        self.client.put("startexposure", Duration=float(duration), Light=bool(light))
+        with self._state_lock:
+            self._exposing = _STARTING
+        try:
+            self.client.put("startexposure",
+                            timeout=max(self.client.request_timeout, duration + START_GRACE_S),
+                            Duration=float(duration), Light=bool(light))
+        except AlpacaInvalidOperationError as exc:
+            self._finished()
+            raise FrameSkipped(f"camera busy — another client is exposing ({exc})") from exc
+        except BaseException:
+            self._finished()
+            raise
         with self._state_lock:
             self._started_at = time.monotonic()
-            self._exposing = True
+            if self._exposing == _STARTING:
+                self._exposing = True
         return duration
 
+    def _finished(self) -> None:
+        with self._state_lock:
+            self._exposing = False
+
+    @property
+    def exposure_in_flight(self) -> bool:
+        """True while an exposure this device started has not been seen to end."""
+        with self._state_lock:
+            return bool(self._exposing)
+
     def image_ready(self) -> bool:
-        return bool(self.client.get("imageready"))
+        ready = bool(self.client.get("imageready"))
+        if ready:
+            self._finished()
+        return ready
 
     def camera_state(self) -> int:
         return int(self.client.get("camerastate"))
 
     def abort(self) -> None:
-        """Abort (or stop) an exposure this client started; never raises."""
+        """Abort (or stop) an exposure this client started; never raises.
+
+        Never sent once ImageReady has been seen, nor after a failed start: on
+        a shared camera the exposure running then may be another client's.
+        """
         with self._state_lock:
             exposing, self._exposing = self._exposing, False
         if not exposing:
@@ -325,25 +296,54 @@ class AlpacaCameraDevice:
         if member is None:
             return
         try:
-            self.client.put(member, timeout=ABORT_TIMEOUT_S)
+            self.client.put_control(member, timeout=ABORT_TIMEOUT_S)
         except Exception as exc:
             app_logger.debug(f"Alpaca {member} failed: {exc}")
 
+    def mark_finished(self) -> None:
+        """The exposure is known to have ended (Idle / Error): nothing to abort."""
+        self._finished()
+
     def download(self, abort_event=None, timeout: float = 60.0) -> np.ndarray:
-        image = self.client.get_image(timeout=timeout, use_imagebytes=self.use_imagebytes,
-                                      abort_event=abort_event)
-        with self._state_lock:
-            self._exposing = False
-        self.imagebytes_used = self.client.last_image_format == "imagebytes"
+        try:
+            image = self.client.get_image(timeout=timeout, use_imagebytes=self.use_imagebytes,
+                                          abort_event=abort_event)
+        finally:
+            self._finished()
+        fmt = self.client.last_image_format
+        self.imagebytes_used = fmt == "imagebytes"
+        if self.use_imagebytes and fmt == "json":
+            self.warnings.once("imagebytes-ignored",
+                               "Alpaca server ignored the ImageBytes request and sent JSON: "
+                               "downloads are several times larger and slower. ASCOM Remote "
+                               "6.6+ and most current drivers support ImageBytes.")
         return image
 
     def ccd_temperature(self) -> Optional[float]:
+        """The sensor temperature, or None. Only NotImplemented switches it off:
+        an InvalidOperation during readout (or a passing driver error) is one
+        missing reading, not a camera without a sensor."""
         if not self._temperature_ok:
             return None
         try:
             return float(self.client.get("ccdtemperature"))
-        except _ABSENT:
+        except AlpacaNotImplementedError:
             self._temperature_ok = False
+            return None
+        except AlpacaNotConnectedError:
+            raise
+        except AlpacaError as exc:
+            self.warnings.debug_once("temperature-read", f"Alpaca CCDTemperature read failed: {exc}")
+            return None
+        except (TypeError, ValueError):
+            return None
+
+    def last_exposure_duration(self) -> Optional[float]:
+        """LastExposureDuration (s), or None when the driver does not offer it."""
+        value = self._optional("lastexposureduration")
+        try:
+            return None if value is None else float(value)
+        except (TypeError, ValueError):
             return None
 
     def _control_bounds(self, kind):
@@ -357,7 +357,7 @@ class AlpacaCameraDevice:
             return getattr(info, f"{kind}_range")
         return (getattr(info, f"{kind}_min") or 0, getattr(info, f"{kind}_max"))
 
-    def _set_control(self, kind, value) -> Optional[bool]:
+    def _set_control(self, kind, value, live: bool = False) -> Optional[bool]:
         bounds = self._control_bounds(kind)
         if bounds is None:
             return None
@@ -369,8 +369,9 @@ class AlpacaCameraDevice:
                                              f"[{low}, {high}]; using {clamped}")
         if clamped == getattr(self, f"_{kind}"):
             return True
+        put = self.client.put_control if live else self.client.put
         try:
-            self.client.put(kind, **{kind.title(): clamped})
+            put(kind, **{kind.title(): clamped})
         except AlpacaInvalidValueError as exc:
             self._warn_once(f"{kind}-invalid", f"Alpaca camera rejected {kind} {clamped}: {exc}")
             return False
@@ -379,22 +380,68 @@ class AlpacaCameraDevice:
         setattr(self, f"_{kind}", clamped)
         return True
 
-    def set_gain(self, value) -> Optional[bool]:
+    def set_gain(self, value, live: bool = False) -> Optional[bool]:
         """PUT Gain (clamped; only when it changed). None when unsupported."""
-        return self._set_control("gain", value)
+        return self._set_control("gain", value, live)
 
-    def set_offset(self, value) -> Optional[bool]:
+    def set_offset(self, value, live: bool = False) -> Optional[bool]:
         """PUT Offset (clamped; only when it changed). None when unsupported."""
-        return self._set_control("offset", value)
+        return self._set_control("offset", value, live)
 
-    def set_full_frame_roi(self) -> None:
+    def reassert_control(self, kind, value) -> Optional[bool]:
+        """Make the camera's ``kind`` equal ``value`` now: another client may
+        have changed it since our last PUT, so read it back and re-send."""
+        if self._control_bounds(kind) is None or value is None:
+            return None
+        try:
+            current = int(self.client.get(kind))
+        except AlpacaNotConnectedError:
+            raise
+        except (AlpacaError, TypeError, ValueError):
+            return self._set_control(kind, value)
+        setattr(self, f"_{kind}", current)
+        return self._set_control(kind, value)
+
+    def full_frame_roi(self) -> tuple:
         info = self.info
-        for member, value in (("binx", 1), ("biny", 1), ("startx", 0), ("starty", 0),
-                              ("numx", info.width), ("numy", info.height)):
+        return (("binx", 1), ("biny", 1), ("startx", 0), ("starty", 0),
+                ("numx", info.width), ("numy", info.height))
+
+    def set_full_frame_roi(self, members=None) -> bool:
+        """Bin 1x1 full frame; True when every write was accepted.
+
+        InvalidOperation (another client is exposing) is not a failure of the
+        connect: the frame path re-checks the ROI before each exposure.
+        """
+        ok = True
+        for member, value in (members or self.full_frame_roi()):
             try:
                 self.client.put(member, **{member[:-1].title() + member[-1].upper(): value})
-            except (AlpacaNotImplementedError, AlpacaInvalidValueError) as exc:
+            except AlpacaNotConnectedError:
+                raise
+            except AlpacaInvalidOperationError as exc:
+                ok = False
+                self.warnings.limited(f"roi-busy-{member}",
+                                      f"Alpaca camera refused {member}={value} for now "
+                                      f"(another client exposing?): {exc}")
+            except AlpacaError as exc:
+                ok = False
                 self._warn_once(f"roi-{member}", f"Alpaca camera refused {member}={value}: {exc}")
+        return ok
+
+    def roi_mismatches(self) -> list:
+        """``[(member, wanted, actual), …]`` where the camera is not full frame."""
+        wrong = []
+        for member, value in self.full_frame_roi():
+            try:
+                actual = int(self.client.get(member))
+            except AlpacaNotConnectedError:
+                raise
+            except (AlpacaError, TypeError, ValueError):
+                continue
+            if actual != value:
+                wrong.append((member, value, actual))
+        return wrong
 
     # -- zwoasi facade (ExposureHandle) -----------------------------------
     def set_control_value(self, control_type, value, auto=False) -> None:
@@ -434,11 +481,14 @@ class AlpacaCameraDevice:
 
         Some drivers read Idle for a moment after StartExposure, so Idle with
         no image counts as WORKING until the exposure plus a grace has passed.
+        A driver may also flip CameraState to Idle a moment before ImageReady,
+        so Idle past the grace re-reads ImageReady once before giving up.
         """
         if self.image_ready():
             return ALPACA_SDK.ASI_EXP_SUCCESS
         state = self.camera_state()
         if state == CameraState.ERROR:
+            self._finished()
             return ALPACA_SDK.ASI_EXP_FAILED
         if state != CameraState.IDLE:
             return ALPACA_SDK.ASI_EXP_WORKING
@@ -447,6 +497,9 @@ class AlpacaCameraDevice:
             pending = self._pending_s
         if started is not None and time.monotonic() - started <= pending + IDLE_GRACE_S:
             return ALPACA_SDK.ASI_EXP_WORKING
+        if self.image_ready():
+            return ALPACA_SDK.ASI_EXP_SUCCESS
+        self._finished()
         return ALPACA_SDK.ASI_EXP_IDLE
 
     def get_data_after_exposure(self, buffer_=None):

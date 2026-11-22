@@ -51,7 +51,7 @@ def test_outage_reconnect_resume(loop_rig):
     assert [p["Connected"] for p in rig.cam.puts("connected")] == ["True", "True"]
 
 
-def test_transport_outage_that_outlasts_one_reconnect_still_recovers(loop_rig):
+def test_transport_outage_that_outlasts_one_reconnect_still_recovers(loop_rig, caplog):
     rig = loop_rig()
 
     def outage(n):
@@ -68,7 +68,10 @@ def test_transport_outage_that_outlasts_one_reconnect_still_recovers(loop_rig):
     rig.time.sleep = sleep
     _run(rig, stop_after_frames=2, on_frame=outage)
     assert len(rig.frames) == 2
-    assert any(line.startswith("✗ Reconnection attempt failed") for line in rig.lines)
+    # A network outage is a WARNING in the log, not an INFO line plus a traceback.
+    assert any(r.levelname == "WARNING" and r.getMessage().startswith(
+        "✗ Reconnection attempt failed") for r in caplog.records)
+    assert not any(line.startswith("Stack trace") for line in rig.lines)
     assert "✓ Camera reconnected successfully" in rig.lines
 
 

@@ -200,8 +200,14 @@ def _put_disconnect(cam, p):
     cam.stop_exposure(abort=True)
 
 
+def _roi_unlocked(cam):
+    if cam.spec.roi_locked_while_exposing and cam.state in (EXPOSING, READING):
+        raise SimError(INVALID_OPERATION, "The subframe cannot change during an exposure")
+
+
 def _put_bin(cam, p, axis):
     value = p.int(f"Bin{axis.upper()}")
+    _roi_unlocked(cam)
     if not 1 <= value <= cam.spec.max_bin:
         raise SimError(INVALID_VALUE, f"Bin{axis.upper()} {value} outside [1, {cam.spec.max_bin}]")
     setattr(cam, f"bin_{axis}", value)
@@ -209,6 +215,7 @@ def _put_bin(cam, p, axis):
 
 def _put_nonneg(cam, p, name, attr, minimum):
     value = p.int(name)
+    _roi_unlocked(cam)
     if value < minimum:
         raise SimError(INVALID_VALUE, f"{name} {value} must be at least {minimum}")
     setattr(cam, attr, value)

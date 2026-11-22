@@ -139,11 +139,23 @@ def apply_flip(arr: np.ndarray, flip: int) -> np.ndarray:
 
 
 def _valid_max_adu(max_adu) -> int:
+    """MaxADU as the largest pixel value. A driver reporting 2**n (65536, 4096)
+    means n bits — the count of levels, not the top one — so it reads as
+    2**n - 1; taken literally 65536 would be 17-bit and halve every value."""
     try:
         value = int(max_adu)
     except (TypeError, ValueError):
         return 65535
-    return value if value > 0 else 65535
+    if value <= 0:
+        return 65535
+    if value >= 256 and value & (value - 1) == 0:
+        return value - 1
+    return value
+
+
+def effective_max_adu(max_adu) -> int:
+    """The largest pixel value MaxADU really allows (see ``_valid_max_adu``)."""
+    return _valid_max_adu(max_adu)
 
 
 def sensor_bit_depth(max_adu) -> int:
@@ -156,7 +168,7 @@ def transfer_bit_depth(max_adu) -> int:
     return 8 if _valid_max_adu(max_adu) <= 255 else 16
 
 
-def to_raw_array(arr: np.ndarray, max_adu) -> tuple:
+def to_raw_array(arr: np.ndarray, max_adu, *, inplace: bool = False) -> tuple:
     """Normalise device pixels to ZWO's raw layout: ``(array, bit_depth)``.
 
     MaxADU <= 255 → uint8, values clipped. Otherwise uint16, clipped to
@@ -164,20 +176,35 @@ def to_raw_array(arr: np.ndarray, max_adu) -> tuple:
     ZWO delivers RAW16, so ``debayer_raw_image``'s ``>> 8`` and the 16-bit
     histogram stay correct. A MaxADU above 16 bits is shifted right instead.
     An unknown/invalid MaxADU reads as 65535 (no shift).
+
+    Clipping happens in the input's own dtype and the shift in the output's,
+    so the only allocation is the output (none for a uint16 input with
+    ``inplace``). ``inplace=True`` lets it overwrite ``arr`` — for a frame
+    nobody else holds, as the capture path's freshly decoded one.
     """
     max_adu = _valid_max_adu(max_adu)
     data = np.asarray(arr)
+    owned = inplace and data.flags.writeable
     if data.dtype.kind == "f":
-        data = np.rint(data)
+        data = np.rint(data, out=data if owned else None)
+        owned = True
     if max_adu <= 255:
-        return np.clip(data, 0, 255).astype(np.uint8), 8
-    clipped = np.clip(data, 0, max_adu).astype(np.int64 if max_adu > 65535 else np.uint32)
-    shift = 16 - max_adu.bit_length()
+        out_dtype, depth, high, shift = np.uint8, 8, 255, 0
+    else:
+        out_dtype, depth, high = np.uint16, 16, max_adu
+        shift = 16 - max_adu.bit_length()
+    if data.dtype.kind in "iu":
+        high = min(high, int(np.iinfo(data.dtype).max))
+    data = np.clip(data, 0, high, out=data if owned else None)
+    if shift < 0:
+        if data.dtype.kind == "f":
+            data = data.astype(np.int64)
+        np.right_shift(data, -shift, out=data)
+        shift = 0
+    out = data.astype(out_dtype, copy=False)
     if shift > 0:
-        clipped = clipped << shift
-    elif shift < 0:
-        clipped = clipped >> (-shift)
-    return clipped.astype(np.uint16), 16
+        np.left_shift(out, shift, out=out)
+    return out, depth
 
 
 def to_raw_bytes(arr: np.ndarray, max_adu) -> tuple:

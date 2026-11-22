@@ -2,8 +2,9 @@
 
 ``params`` is what ``session_params.read_capture_params`` returned. The
 post-construction writes keep the order the controller always used. Runs on
-the start worker thread; it reads no config of its own (``gate`` is built on
-the main thread).
+the start worker thread, and so does the caller's ``gate_for_config`` that
+builds ``gate``; this module reads no config of its own. The GUI's exposure
+milliseconds become ``exposure_sec`` seconds here, once.
 """
 from .zwo_camera import ZWOCamera
 

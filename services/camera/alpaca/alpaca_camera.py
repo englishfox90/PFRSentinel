@@ -15,9 +15,11 @@ import dataclasses
 
 from ..capabilities import ALPACA_STATIC, CameraCapabilities
 from ..capture_session_base import CaptureSessionBase
+from ..recovery_wording import NETWORK_WORDING
 from . import alpaca_capture_frame
 from .alpaca_connection import AlpacaConnection, lan_session
 from .alpaca_discovery import cameras_on_server
+from .alpaca_frame_budget import frame_budget_s
 from .alpaca_http import AlpacaHttpClient
 from .alpaca_sensor import flip_bayer_pattern
 
@@ -40,6 +42,7 @@ class AlpacaCamera(CaptureSessionBase):
     """A capture session on an ASCOM Alpaca camera."""
 
     backend = 'alpaca'
+    recovery_wording = NETWORK_WORDING
 
     def __init__(self, alpaca_settings=None, exposure_sec=1.0, gain=100, offset=20, flip=0,
                  auto_exposure=False, max_exposure_sec=30.0, wb_mode='asi_auto',
@@ -172,6 +175,12 @@ class AlpacaCamera(CaptureSessionBase):
         """Why the last connect failed, in words fit for the user ('' after success)."""
         return self._connection.last_error
 
+    @property
+    def frame_budget_s(self) -> float:
+        """Seconds one frame may take (exposure + readout grace + download), for
+        the capture watchdog: a slow link must not read as a wedged capture."""
+        return frame_budget_s(self)
+
     def learned_identity(self) -> tuple:
         """``(unique_id, name)`` learned on connect, for the main thread to persist."""
         return self._connection.unique_id, self._connection.camera_name or ''
@@ -213,6 +222,13 @@ class AlpacaCamera(CaptureSessionBase):
     def _settings(self) -> dict:
         return {'gain': self.gain, 'offset': self.offset, 'flip': self.flip,
                 'exposure_sec': self.exposure_seconds}
+
+    def _init_calibration_manager(self):
+        super()._init_calibration_manager()
+        if self.calibration_manager is not None:
+            self.calibration_manager.exposure_hook = (
+                lambda seconds, abort: alpaca_capture_frame.calibration_exposure(
+                    self, seconds, abort))
 
     def _after_connect(self):
         conn = self._connection
@@ -276,7 +292,7 @@ class AlpacaCamera(CaptureSessionBase):
 
     def set_offset_live(self, offset):
         self.offset = offset
-        self._run_live(lambda device: device.set_offset(offset))
+        self._run_live(lambda device: device.set_offset(offset, live=True))
 
     def set_flip_live(self, flip):
         """Software flip: the next frame is flipped and its Bayer pattern follows."""
