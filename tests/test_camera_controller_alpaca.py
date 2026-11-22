@@ -207,3 +207,42 @@ def test_unrecoverable_text_names_no_zwo_sdk_for_alpaca(qt_app, tmp_path):
     assert "ZWO" not in messages["alpaca"] and "restart" in messages["alpaca"]
     assert messages["zwo"] == ("Camera unrecoverable — ZWO SDK state is corrupted. "
                                "Please restart the application. (last error: boom)")
+
+
+def test_a_wedged_zwo_session_is_reset_even_after_switching_to_alpaca(qt_app, tmp_path):
+    """Recovery follows the stuck session's backend; config was switched since."""
+    ctrl = _controller(_config(tmp_path, source="alpaca"))
+    ctrl._dying_camera = _wedged("zwo")
+    ctrl.start_capture = MagicMock()
+    ctrl._on_auto_recovery_fire()
+    ctrl._usb_reset.run_async.assert_called_once()
+    ctrl.start_capture.assert_not_called()
+
+
+def test_a_skipped_usb_reset_keeps_recovery_alive(qt_app, tmp_path):
+    ctrl = _controller(_config(tmp_path, source="zwo"))
+    ctrl._start_usb_reset_worker(alpaca=True)
+    ctrl._usb_reset.run_async.assert_not_called()
+    assert ctrl._auto_recovery_timer is not None, "skipping must reschedule"
+    ctrl._cancel_auto_recovery_timer()
+
+
+def test_start_failure_follows_the_backend_that_started(qt_app, tmp_path):
+    from services.camera.session_params import read_capture_params
+    config = _config(tmp_path, source="zwo")
+    ctrl = _controller(config)
+    ctrl._starting_source = read_capture_params(config, True).get('camera_source')
+    config.set("camera_source", "alpaca")
+    ctrl._start_usb_reset_worker = MagicMock()
+    ctrl._on_capture_start_done(False, ACCESS_VIOLATION)
+    ctrl._start_usb_reset_worker.assert_called_once_with(alpaca=False)
+
+
+def test_unrecoverable_text_follows_the_stuck_session(qt_app, tmp_path):
+    ctrl = _controller(_config(tmp_path, source="alpaca"))
+    ctrl._dying_camera = _wedged("zwo")
+    seen = []
+    ctrl.error.connect(seen.append)
+    ctrl._enter_unrecoverable_mode("boom")
+    assert seen[0] == ("Camera unrecoverable — ZWO SDK state is corrupted. "
+                       "Please restart the application. (last error: boom)")

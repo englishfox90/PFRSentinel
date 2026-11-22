@@ -33,9 +33,13 @@ class CameraRecoveryMixin:
     """Recovery helpers mixed into ``CameraControllerQt``."""
 
     def _alpaca_source(self, session=None) -> bool:
-        """True when recovery concerns an Alpaca camera (the session, else config)."""
+        """True when recovery concerns an Alpaca camera: the stuck session, else
+        the source the last start ran on, else config."""
         if session is not None:
             return is_alpaca_session(session)
+        started = getattr(self, '_starting_source', None)
+        if started is not None:
+            return started == ALPACA
         try:
             return camera_source(self.config) == ALPACA
         except Exception:
@@ -80,7 +84,7 @@ class CameraRecoveryMixin:
                 "Capture thread wedged in the ZWO SDK — attempting USB "
                 "disable/enable to free it before escalating."
             )
-            self._start_usb_reset_worker()
+            self._start_usb_reset_worker(alpaca=False)
             return False
         if self._wedged_skip_count >= _MAX_WEDGED_SKIPS:
             app_logger.error(
@@ -89,7 +93,8 @@ class CameraRecoveryMixin:
             )
             self._escalate_to_restart_or_alert(
                 "Alpaca capture thread did not exit; process restart required" if alpaca
-                else "capture thread stuck inside ZWO SDK; process restart required"
+                else "capture thread stuck inside ZWO SDK; process restart required",
+                alpaca=alpaca,
             )
             return False
         app_logger.warning(
@@ -107,9 +112,19 @@ class CameraRecoveryMixin:
         lowered = message.lower()
         return any(pat in lowered for pat in _UNRECOVERABLE_ERROR_PATTERNS)
 
-    def _start_usb_reset_worker(self):
-        if self._alpaca_source():
+    def _start_usb_reset_worker(self, alpaca=None):
+        """USB-reset the ZWO camera, then recovery continues from _on_usb_reset_done.
+
+        ``alpaca`` is the stuck camera's backend, decided by the caller from the
+        session (or the start that failed). The config is only a fallback: the
+        user may have switched source since that camera stopped, and a skipped
+        reset that schedules nothing would end recovery for good.
+        """
+        if alpaca is None:
+            alpaca = self._alpaca_source()
+        if alpaca:
             app_logger.info("USB reset skipped: the camera is on an Alpaca server")
+            self._schedule_auto_recovery()
             return
         app_logger.warning(
             "Attempting USB device disable/enable to recover the camera..."
@@ -141,14 +156,14 @@ class CameraRecoveryMixin:
             "disable/enable the camera device"
         )
 
-    def _escalate_to_restart_or_alert(self, last_error: str):
+    def _escalate_to_restart_or_alert(self, last_error: str, alpaca=None):
         """Last resort once in-process recovery is exhausted: restart the app if
         the policy allows (inside the capture window, not boot-looping), else
         give up and alert for a manual restart. See camera_restart_policy."""
         from .camera_restart_policy import attempt_restart
         if attempt_restart(self, last_error):
             return
-        self._enter_unrecoverable_mode(last_error)
+        self._enter_unrecoverable_mode(last_error, alpaca=alpaca)
 
     def revive_missing_camera(self, camera_name: str):
         """Best-effort user-triggered USB reset. Emits camera_revive_done."""
@@ -162,11 +177,13 @@ class CameraRecoveryMixin:
             lambda ok, name: self.camera_revive_done.emit(ok, name),
         )
 
-    def _enter_unrecoverable_mode(self, last_error: str):
+    def _enter_unrecoverable_mode(self, last_error: str, alpaca=None):
         self._unrecoverable_mode = True
         self._cancel_auto_recovery_timer()
         self.capture_stopped.emit()
-        cause = ("the capture thread is stuck" if self._alpaca_source()
+        if alpaca is None:
+            alpaca = self._alpaca_source(self._dying_camera)
+        cause = ("the capture thread is stuck" if alpaca
                  else "ZWO SDK state is corrupted")
         self.error.emit(
             f"Camera unrecoverable — {cause}. "

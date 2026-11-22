@@ -25,6 +25,8 @@ from .camera_wedge_recovery import (  # noqa: F401 — re-exported for existing 
 
 _DISCORD_ERROR_SUPPRESS_AFTER_ATTEMPTS = 3
 _SUSTAINED_CAPTURE_RESET_SEC = 300
+# Stop's teardown joins the capture thread for 3 s, then disconnects.
+_TEARDOWN_JOIN_TIMEOUT_SEC = 10.0
 
 
 class CameraControllerQt(QObject, CameraRecoveryMixin):
@@ -86,6 +88,8 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
         self._restart_times = load_restart_history(self.config)
 
         self._capture_starting = False
+        self._starting_source = None
+        self._teardown_thread = None
         self._usb_reset_done.connect(self._on_usb_reset_done)
         self._capture_start_done.connect(self._on_capture_start_done)
 
@@ -173,6 +177,9 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
         # Read all config on the main thread — keeps cross-thread Config access
         # out of the blocking SDK calls that run in the worker thread.
         params = read_capture_params(self.config, self._auto_recovery_enabled())
+        # Recovery decisions about this start follow its backend, not whatever
+        # the config says by the time it fails.
+        self._starting_source = params.get('camera_source')
 
         app_logger.info(
             f"Camera config: exposure_ms={params['exposure_ms']}, gain={params['gain']}, "
@@ -193,14 +200,7 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
         try:
             if stale_camera is not None:
                 self._stop_and_disconnect(stale_camera)
-            # Wait out any wedged prior worker — concurrent SDK access crashes the DLL.
-            if self._dying_camera is not None:
-                try:
-                    self._dying_camera.wait_for_capture_thread_exit(
-                        timeout=_WEDGED_THREAD_JOIN_TIMEOUT_SEC)
-                except Exception:
-                    pass
-                self._dying_camera = None
+            self._wait_for_previous_capture()
 
             if params.get('camera_source') == ALPACA:
                 camera_index = 0
@@ -236,6 +236,30 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
             app_logger.debug(f"Stack trace: {traceback.format_exc()}")
             self._capture_start_done.emit(False, str(e))
 
+    def _wait_for_previous_capture(self):
+        """Wait out the last session's teardown and capture thread; raise if it lives on.
+
+        Concurrent SDK access from a still-running capture thread crashes the
+        ZWO DLL, and two Alpaca loops would drive one camera. Stop marks the
+        session dying at once (not after its asynchronous join), so a quick
+        Stop → Start lands here rather than skipping the wait.
+        """
+        teardown = self._teardown_thread
+        if teardown is not None and teardown is not threading.current_thread():
+            teardown.join(_TEARDOWN_JOIN_TIMEOUT_SEC)
+        dying = self._dying_camera
+        if dying is None:
+            return
+        try:
+            exited = dying.wait_for_capture_thread_exit(timeout=_WEDGED_THREAD_JOIN_TIMEOUT_SEC)
+        except Exception:
+            exited = False
+        if not exited:
+            raise Exception("The previous capture is still shutting down; "
+                            "try Start again in a few seconds")
+        if self._dying_camera is dying:
+            self._dying_camera = None
+
     def _persist_learned_serial(self):
         """Persist the camera's hardware serial learned during connect.
 
@@ -265,6 +289,7 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
                 camera = self.zwo_camera
                 self.zwo_camera = None
                 if camera:
+                    self._dying_camera = camera
                     self._shutdown_camera_async(camera)
                 self.is_connected = False
                 return
@@ -290,9 +315,9 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
             if not alpaca and self._is_unrecoverable_error(err):
                 if not self._usb_reset_attempted:
                     self._usb_reset_attempted = True
-                    self._start_usb_reset_worker()
+                    self._start_usb_reset_worker(alpaca=False)
                     return
-                self._enter_unrecoverable_mode(err)
+                self._enter_unrecoverable_mode(err, alpaca=False)
                 return
             if self._last_successful_frame_ts > 0:
                 self._schedule_auto_recovery()
@@ -317,7 +342,6 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
         self._suppress_discord_errors = False
         self._wedged_skip_count = 0
         self._wedge_usb_reset_tried = False
-        self._dying_camera = None
 
         try:
             # Update state immediately for responsive UI
@@ -330,6 +354,9 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
             self.zwo_camera = None
 
             if camera:
+                # Dying until the teardown has joined its capture thread; a
+                # Start in between waits for it (_wait_for_previous_capture).
+                self._dying_camera = camera
                 self._shutdown_camera_async(camera)
 
             self.capture_stopped.emit()
@@ -340,7 +367,9 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
     
     def _shutdown_camera_async(self, camera):
         """Stop and disconnect ``camera`` on a daemon thread, keeping the UI responsive."""
-        threading.Thread(target=self._stop_and_disconnect, args=(camera,), daemon=True).start()
+        thread = threading.Thread(target=self._stop_and_disconnect, args=(camera,), daemon=True)
+        self._teardown_thread = thread
+        thread.start()
 
     def _stop_and_disconnect(self, camera):
         """stop_capture() aborts the exposure and joins the capture thread;
@@ -351,12 +380,17 @@ class CameraControllerQt(QObject, CameraRecoveryMixin):
             app_logger.debug(f"Error stopping capture: {e}")
         # Wedged worker (3s join timed out) still holds the SDK;
         # retain it so a later start waits instead of reinitialising
-        # the SDK concurrently (which crashes the ZWO DLL).
+        # the SDK concurrently (which crashes the ZWO DLL). Only a joined
+        # thread lets it go.
         try:
-            if isinstance(camera.capture_thread, threading.Thread) and camera.capture_thread.is_alive():
-                self._dying_camera = camera
+            thread = camera.capture_thread
+            alive = isinstance(thread, threading.Thread) and thread.is_alive()
         except Exception:
-            pass
+            alive = True
+        if alive:
+            self._dying_camera = camera
+        elif self._dying_camera is camera:
+            self._dying_camera = None
         try:
             camera.disconnect_camera()
         except Exception as e:

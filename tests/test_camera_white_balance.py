@@ -173,7 +173,8 @@ def test_capture_start_hands_the_configured_mode_to_the_camera(monkeypatch):
                   wb_config={'mode': 'manual'}, scheduled_capture_mode='always',
                   scheduled_start_time='17:00', scheduled_end_time='09:00')
     fake_self = SimpleNamespace(
-        _dying_camera=None, _resolve_camera_index=lambda *a: 0,
+        _dying_camera=None, _wait_for_previous_capture=lambda: None,
+        _resolve_camera_index=lambda *a: 0,
         _capture_start_done=MagicMock(), config=MagicMock(),
         _on_camera_error=MagicMock(), _on_calibration_status=MagicMock())
     cc.CameraControllerQt._start_capture_worker(fake_self, params)
