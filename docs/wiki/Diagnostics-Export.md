@@ -9,7 +9,7 @@
 ## Creating a Bundle
 
 1. Open the [Logs](Logs) tab.
-2. If you are reporting an image problem in ZWO camera mode, leave capture running so the bundle can include a fresh frame.
+2. If you are reporting an image problem in camera mode (ZWO, or Alpaca from the next release), leave capture running so the bundle can include a fresh frame.
 3. Click **Export Diagnostics**.
 
 While the export runs, the button reads **Exporting…** and a status line below the controls shows progress:
@@ -75,6 +75,7 @@ Before your settings are written to `config.redacted.json`, any setting whose na
 | Webhooks and addresses | `webhook`, `url` |
 | Location | `latitude`, `longitude`, `location`, `elevation` |
 | Identifiers | `distinct_id` (the anonymous analytics ID), `serial` |
+| Alpaca camera | The server address (`alpaca_camera.host`) and the camera's unique ID (`alpaca_camera.unique_id`). New in the next release. |
 
 This covers, for example, your Discord webhook, OpenWeatherMap API key, web server control token, notification webhook URLs and secrets, and your observatory coordinates.
 
@@ -87,6 +88,7 @@ Check the ZIP before sharing it publicly. The following are included as they are
 - **Log files.** Redaction applies to the settings file only. Logs are copied unchanged and can contain anything the app logged, such as folder paths, camera names, and web addresses. Your observatory coordinates, weather city name, and OpenWeatherMap API key are not written to the log, so they don't appear there. (Version 3.7.6 and earlier did log the coordinates and city, and could log the API key in weather error messages; those older logs are in a different folder and are not included in the bundle, but check them before sharing them any other way. See [Logs](Logs#log-files-on-disk).)
 - **File and folder paths** in settings and logs. These often include your Windows user name (for example `C:\Users\YourName\...`).
 - **Camera name** and camera settings in `summary.json`.
+- **Alpaca server address in the logs.** From the next release, connection lines in the log name the [Alpaca camera](Alpaca-Camera)'s server address and port, and sometimes its unique ID. Only the settings file hides them.
 - **Images.** The raw frame and latest output show whatever the camera sees, including any text overlays such as the date, time, or weather.
 - **Approximate site coordinates** in the calibration buffer dump, rounded to two decimal places (about a kilometre). Replaying a calibration needs to know where the sky was seen from; the exact coordinates in your settings stay redacted.
 

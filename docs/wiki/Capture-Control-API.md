@@ -264,6 +264,7 @@ These blocks appear in `GET /capture` and in the unauthenticated `GET /status` (
 | Field | Type | Description |
 |-------|------|-------------|
 | `mode` | string | `camera`, `watch`, or `idle` (not capturing). |
+| `camera_source` | string | Which camera camera mode uses: `zwo` (a ZWO camera over USB) or `alpaca` (an [Alpaca camera](Alpaca-Camera) on the network). `mode` still reads `camera` for both. New in the next release. |
 | `enabled` | boolean | Whether capture is enabled. Stays true while the camera is recovering. |
 | `running` | boolean | Whether capture is producing frames right now. |
 | `state` | string | `capturing`, `waiting`, `recovering`, `outside_window`, `stopped` or `error`. `waiting` is only reported in headless mode, between frames. `calibrating` appears in the API reference but is never reported. |

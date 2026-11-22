@@ -24,7 +24,7 @@ A special theme only restyles the app window. It never changes your images, over
 | **Enable System Tray** | Off | Run in the background. When on, a PFR Sentinel icon appears in the Windows notification area, closing the main window hides it to the tray instead of quitting, and a launch at Windows logon starts hidden in the tray. When off, closing the window quits the app and a logon launch opens the window normally. |
 | **Start at login** | Off | Launch PFR Sentinel automatically when you log in. On macOS it is also relaunched after a crash. |
 | **Auto-start capture on launch** | On | When PFR Sentinel is launched at login by **Start at login**, begin capturing with the saved camera or watch folder automatically. |
-| **Automatic camera recovery** | On | How hard PFR Sentinel works to get a ZWO camera back after a fault. On: the full [camera recovery](Capture-Settings#camera-recovery) process, including USB resets and an app restart. Off: one plain reconnect, then capture stops until you start it again. New in the next release. |
+| **Automatic camera recovery** | On | How hard PFR Sentinel works to get a camera back after a fault. On: the full [camera recovery](Capture-Settings#camera-recovery) process, including USB resets (ZWO cameras only) and an app restart. For an [Alpaca camera](Alpaca-Camera#when-the-connection-drops) it also retries a start that fails before the first frame. Off: one plain reconnect, then capture stops until you start it again. New in the next release. |
 | **Send Anonymous Usage Data** | On | Share anonymous usage information, error reports, and warning/error log messages with the developer. See [Anonymous Usage Data](#anonymous-usage-data). |
 
 ### System Tray
