@@ -1350,4 +1350,9 @@ class TestControllerRecoveryWiring:
         assert ctrl._usb_reset_attempted is False
         assert ctrl._suppress_discord_errors is False
         assert ctrl._wedged_skip_count == 0
+        # The stopped camera stays "dying" until the teardown thread has seen its
+        # capture thread end, so a quick Start waits for it; only then is it let go.
+        # Asserting before the join raced that thread (failed on Linux CI, #173).
+        ctrl._teardown_thread.join(timeout=5)
+        assert not ctrl._teardown_thread.is_alive()
         assert ctrl._dying_camera is None
