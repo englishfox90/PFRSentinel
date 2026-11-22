@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import parse_qsl, urlsplit
 
-from alpaca_sim import SCENES, FakeAlpacaCamera, SimCameraSpec
+from alpaca_sim import SCENES, FakeAlpacaCamera, SimCameraSpec, indigo_readout_modes
 
 LOG = logging.getLogger("alpaca_camera_sim")
 DISCOVERY_PORT = 32227
@@ -182,6 +182,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-imagebytes", action="store_true", help="Serve JSON ImageArray only")
     p.add_argument("--lenient-params", action="store_true",
                    help="Accept PUT parameter names in any case")
+    p.add_argument("--indigo-readout", action="store_true",
+                   help="Behave like INDIGO's Alpaca bridge: ReadoutModes 'RAW 8' (default) and "
+                        "'RAW 16', 8-bit or MSB-aligned 16-bit data, MaxADU unchanged, and "
+                        "ImageBytes replies 44 bytes short")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -196,7 +200,11 @@ def spec_from_args(args) -> SimCameraSpec:
         ccd_temperature=None if args.no_temperature else SimCameraSpec().ccd_temperature,
         readout_s=args.readout_s, scene=args.scene,
         supports_imagebytes=not args.no_imagebytes,
-        strict_param_case=not args.lenient_params)
+        strict_param_case=not args.lenient_params,
+        readout_modes=(indigo_readout_modes(args.width, args.height)
+                       if args.indigo_readout else []),
+        readout_depth_from_name=args.indigo_readout,
+        imagebytes_short_by=44 if args.indigo_readout else 0)
 
 
 def main(argv=None) -> int:

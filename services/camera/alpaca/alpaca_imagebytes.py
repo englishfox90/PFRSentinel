@@ -20,6 +20,7 @@ are a UTF-8 error message instead of pixels.
 """
 import struct
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -51,6 +52,7 @@ TRANSMISSION_DTYPES = {
 # Guard against a hostile or broken header asking for a huge allocation:
 # 100 Mpx x 3 planes is far beyond any all-sky sensor.
 MAX_ELEMENTS = 300_000_000
+MAX_PADDED_ELEMENTS = 64   # a header's worth: 11 Int32 elements for a 44-byte header
 
 
 @dataclass(frozen=True)
@@ -108,11 +110,23 @@ def _to_numpy_orientation(arr: np.ndarray, rank: int) -> np.ndarray:
     return np.array(arr.transpose(1, 0, 2), order="C")
 
 
-def parse_imagebytes(payload: bytes) -> np.ndarray:
+def _header_sized_shortfall(payload: bytes, header, dtype, count, shape) -> np.ndarray:
+    """INDIGO 2.0's ImageBytes: sized as the pixels alone, so the last
+    ``DataStart`` bytes of pixels never arrive. Those few elements (the end of
+    the last column: the bottom-right corner) are filled with 0."""
+    have = (len(payload) - header.data_start) // dtype.itemsize
+    flat = np.zeros(count, dtype=dtype)
+    flat[:have] = np.frombuffer(payload, dtype=dtype, count=have, offset=header.data_start)
+    return flat.reshape(shape)
+
+
+def parse_imagebytes(payload: bytes, notes: Optional[list] = None) -> np.ndarray:
     """Decode an ``application/imagebytes`` body to ``(H, W)`` / ``(H, W, P)``.
 
     Raises the mapped Alpaca error when the header carries an ErrorNumber, and
-    ``AlpacaProtocolError`` for a malformed or truncated payload.
+    ``AlpacaProtocolError`` for a malformed or truncated payload — except a
+    payload short by exactly its own header size, no more than a few elements
+    (INDIGO 2.0's sizing bug), which is padded with 0 and described in ``notes``.
     """
     header = parse_header(payload)
     if header.metadata_version != METADATA_VERSION:
@@ -142,8 +156,18 @@ def parse_imagebytes(payload: bytes) -> np.ndarray:
     needed = count * dtype.itemsize
     available = len(payload) - header.data_start
     if available < needed:
-        raise AlpacaProtocolError(
-            f"ImageBytes payload truncated: {available} data bytes, {needed} expected")
+        missing = needed - available
+        if missing != header.data_start or missing % dtype.itemsize \
+                or missing // dtype.itemsize > MAX_PADDED_ELEMENTS:
+            raise AlpacaProtocolError(
+                f"ImageBytes payload truncated: {available} data bytes, {needed} expected")
+        if notes is not None:
+            notes.append(f"Alpaca server's ImageBytes images arrive {missing} bytes short "
+                         f"(the size of their header — a known INDIGO bug): the last "
+                         f"{missing // dtype.itemsize} pixels (bottom-right corner) are "
+                         f"filled with 0")
+        arr = _header_sized_shortfall(payload, header, dtype, count, shape)
+        return _to_numpy_orientation(arr, header.rank)
     flat = np.frombuffer(payload, dtype=dtype, count=count, offset=header.data_start)
     return _to_numpy_orientation(flat.reshape(shape), header.rank)
 

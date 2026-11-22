@@ -49,6 +49,7 @@ from .alpaca_protocol import (
     INVALID_VALUE,
     NOT_IMPLEMENTED,
     AlpacaError,
+    AlpacaImageBytesError,
     AlpacaInvalidValueError,
     AlpacaNotImplementedError,
     AlpacaProtocolError,
@@ -401,8 +402,12 @@ class AlpacaHttpClient:
                         except Exception:
                             pass
 
+        notes = []
         if IMAGEBYTES_MIME in content_type:
-            image = parse_imagebytes(payload)
+            try:
+                image = parse_imagebytes(payload, notes)
+            except AlpacaProtocolError as exc:
+                raise AlpacaImageBytesError(str(exc)) from exc
             self.last_image_format = "imagebytes"
         else:
             try:
@@ -412,6 +417,7 @@ class AlpacaHttpClient:
                     from None
             image = parse_imagearray_json(obj)
             self.last_image_format = "json"
+        self.last_image_note = notes[0] if notes else ""
         self.last_image_bytes = len(payload)
         self.last_download_s = time.monotonic() - started
         return image

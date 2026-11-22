@@ -12,7 +12,8 @@ import numpy as np
 
 from ..errors import CameraConfigurationError, FrameSkipped
 from .alpaca_protocol import AlpacaInvalidOperationError
-from .alpaca_sensor import RGB, effective_max_adu
+from .alpaca_readout import adopt_pixel_range, pixel_ceiling
+from .alpaca_sensor import RGB
 
 DURATION_TOLERANCE_S = 0.5
 DURATION_TOLERANCE_FRACTION = 0.05
@@ -66,8 +67,12 @@ def _duration_mismatch(device, duration, warnings) -> bool:
     return True
 
 
-def check_delivered(device, info, image: np.ndarray, duration: float, warnings) -> None:
-    """Raise unless ``image`` is the full-frame image of the exposure just taken."""
+def check_delivered(device, info, image: np.ndarray, duration: float, warnings) -> int:
+    """Raise unless ``image`` is the full-frame image of the exposure just taken.
+
+    Returns the pixel ceiling to normalise it with (``alpaca_readout``): MaxADU,
+    or 65535 once this session has seen the driver send more than MaxADU.
+    """
     want_rgb = info.bayer_pattern == RGB
     rank_ok = (image.ndim == 3 and image.shape[2] == 3) if want_rgb else image.ndim == 2
     if not rank_ok:
@@ -84,11 +89,9 @@ def check_delivered(device, info, image: np.ndarray, duration: float, warnings) 
         raise FrameSkipped(f"delivered image is {width}x{height}, not full frame")
     if _duration_mismatch(device, duration, warnings):
         raise FrameSkipped("delivered image is not this frame's exposure")
-    top = effective_max_adu(info.max_adu)
-    if image.size and image.max() > top:
-        warnings.once("max-adu", f"Alpaca camera delivered pixels above its MaxADU {info.max_adu} "
-                                 f"(max {image.max()}): the driver's MaxADU is wrong or its data "
-                                 f"is not right-aligned; values above it are clipped")
+    if not image.size:
+        return pixel_ceiling(info.max_adu, warnings.state)
+    return adopt_pixel_range(image.max(), info.max_adu, warnings.state, warnings)
 
 
 __all__ = ["prepare_frame", "check_delivered"]

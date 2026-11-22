@@ -21,6 +21,7 @@ DriverVersion, InterfaceVersion, SupportedActions, Connected, Connecting) work
 while disconnected, as ASCOM requires.
 """
 import itertools
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -89,6 +90,20 @@ class SimCameraSpec:
     strict_param_case: bool = True      # reject PUT names not in canonical casing
     roi_locked_while_exposing: bool = False   # Bin/Start/Num PUT mid-exposure → 0x40B
     extra_devices: List[dict] = field(default_factory=list)
+    readout_modes: List[str] = field(default_factory=list)   # empty → ReadoutModes NotImplemented
+    readout_mode: int = 0
+    # INDIGO's bridge: MaxADU stays the sensor's, but a "RAW 8" mode sends the
+    # top 8 bits and a "RAW 16" mode sends the data MSB-aligned to 16 bits.
+    readout_depth_from_name: bool = False
+    # INDIGO 2.0 sizes an ImageBytes reply as W*H*4 and drops the 44-byte header's
+    # worth from the end of the pixels; 44 reproduces it.
+    imagebytes_short_by: int = 0
+
+
+def indigo_readout_modes(width: int, height: int) -> List[str]:
+    """INDIGO's names for an ASI camera's full-resolution modes, in its order."""
+    return [f"RAW 8 {width}x{height}", f"RGB 24 {width}x{height}",
+            f"RAW 16 {width}x{height}", f"Y 8 {width}x{height}"]
 
 
 @dataclass
@@ -135,6 +150,7 @@ class FakeAlpacaCamera:
         self.connecting_until = None
         self.state = IDLE
         self.bin_x = self.bin_y = 1
+        self.readout_mode = s.readout_mode
         self.start_x = self.start_y = 0
         self.num_x, self.num_y = s.width, s.height
         self.gain = s.gain
@@ -312,7 +328,20 @@ class FakeAlpacaCamera:
         if bx > 1 or by > 1:
             shape = (self.num_y, by, self.num_x, bx) + crop.shape[2:]
             crop = np.rint(crop.reshape(shape).mean(axis=(1, 3))).astype(np.int32)
-        return np.ascontiguousarray(crop)
+        return np.ascontiguousarray(self._readout_depth(crop))
+
+    def _readout_depth(self, frame: np.ndarray) -> np.ndarray:
+        s = self.spec
+        if not (s.readout_depth_from_name and s.readout_modes):
+            return frame
+        name = s.readout_modes[self.readout_mode]
+        bits = int(s.max_adu).bit_length()
+        frame = frame.astype(np.int32)
+        if re.search(r"(?i)\b(?:raw|y)\s*8\b", name) and bits > 8:
+            return frame >> (bits - 8)
+        if re.search(r"(?i)\b(?:raw|y)\s*16\b", name) and bits < 16:
+            return frame << (16 - bits)
+        return frame
 
     def _gain_db(self) -> float:
         s = self.spec
@@ -341,6 +370,8 @@ class FakeAlpacaCamera:
         accept = next((v for k, v in headers.items() if k.lower() == "accept"), "")
         if self.spec.supports_imagebytes and wire.IMAGEBYTES_MIME in accept.lower():
             body = wire.encode_imagebytes(self.image, client_tx=client_tx, server_tx=server_tx)
+            if self.spec.imagebytes_short_by:
+                body = body[:-self.spec.imagebytes_short_by]
             return SimResponse(200, wire.IMAGEBYTES_MIME, body)
         return self._json(wire.imagearray_json(self.image, client_tx, server_tx))
 

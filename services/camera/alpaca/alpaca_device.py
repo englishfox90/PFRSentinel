@@ -34,6 +34,7 @@ from ..errors import FrameSkipped
 from .alpaca_protocol import (
     ALPACA_SDK,
     AlpacaError,
+    AlpacaImageBytesError,
     AlpacaInvalidOperationError,
     AlpacaInvalidValueError,
     AlpacaNotConnectedError,
@@ -42,6 +43,7 @@ from .alpaca_protocol import (
     SensorType,
 )
 from .alpaca_warnings import SessionWarnings
+from .alpaca_readout import pixel_ceiling, preferred_readout_mode
 from .alpaca_sensor import to_raw_bytes
 from .alpaca_static_info import AlpacaStaticInfo
 
@@ -49,6 +51,7 @@ ABORT_TIMEOUT_S = 2.0
 CONNECT_POLL_S = 0.25
 IDLE_GRACE_S = 2.0
 START_GRACE_S = 10.0
+IMAGEBYTES_OFF = "imagebytes_off"
 
 _ABSENT = (AlpacaNotImplementedError, AlpacaInvalidOperationError)
 _STARTING = "starting"
@@ -66,7 +69,8 @@ class AlpacaCameraDevice:
                  release_on_disconnect: bool = False,
                  warnings: Optional[SessionWarnings] = None):
         self.client = client
-        self.use_imagebytes = bool(use_imagebytes)
+        self.warnings = warnings if warnings is not None else SessionWarnings()
+        self.use_imagebytes = bool(use_imagebytes) and not self.warnings.state.get(IMAGEBYTES_OFF)
         self.release_on_disconnect = bool(release_on_disconnect)
         self.info: Optional[AlpacaStaticInfo] = None
         self.flip = 0
@@ -79,7 +83,6 @@ class AlpacaCameraDevice:
         self._gain = None
         self._offset = None
         self._temperature_ok = True
-        self.warnings = warnings if warnings is not None else SessionWarnings()
 
     # -- helpers ----------------------------------------------------------
     def _optional(self, member, default=None):
@@ -221,6 +224,34 @@ class AlpacaCameraDevice:
             return 'range', 0, None, ()
         return None, None, None, ()
 
+    def select_readout_mode(self) -> Optional[str]:
+        """Move an 8-bit readout mode to its 16-bit twin (``alpaca_readout``).
+
+        Returns the name of the mode in use, or None when the camera names no
+        modes. A refused write keeps the current mode and is logged once.
+        """
+        names = self._optional("readoutmodes")
+        current = self._optional("readoutmode")
+        if not isinstance(names, list) or not names:
+            return None
+        target = preferred_readout_mode(names, current)
+        if target is not None:
+            try:
+                self.client.put("readoutmode", ReadoutMode=int(target))
+                app_logger.info(f"Alpaca camera readout mode: '{names[target]}' "
+                                f"(was '{names[int(current)]}', 8-bit)")
+                current = target
+            except AlpacaNotConnectedError:
+                raise
+            except AlpacaError as exc:
+                self._warn_once("readout-mode",
+                                f"Alpaca camera refused readout mode '{names[target]}' ({exc}); "
+                                f"frames stay 8-bit")
+        try:
+            return str(names[int(current)])
+        except (TypeError, ValueError, IndexError):
+            return None
+
     # -- native exposure API (seconds) -------------------------------------
     @property
     def pending_exposure_s(self) -> float:
@@ -306,12 +337,26 @@ class AlpacaCameraDevice:
 
     def download(self, abort_event=None, timeout: float = 60.0) -> np.ndarray:
         try:
-            image = self.client.get_image(timeout=timeout, use_imagebytes=self.use_imagebytes,
-                                          abort_event=abort_event)
+            try:
+                image = self.client.get_image(timeout=timeout, use_imagebytes=self.use_imagebytes,
+                                              abort_event=abort_event)
+            except AlpacaImageBytesError as exc:
+                # The image is still on the server until the next exposure: take
+                # it as JSON, and stay on JSON for the session (reconnects too).
+                self.use_imagebytes = False
+                self.warnings.state[IMAGEBYTES_OFF] = True
+                self.warnings.once("imagebytes-broken",
+                                   f"Alpaca server sent an ImageBytes image that cannot be "
+                                   f"decoded ({exc}); downloading as JSON for this session")
+                image = self.client.get_image(timeout=timeout, use_imagebytes=False,
+                                              abort_event=abort_event)
         finally:
             self._finished()
         fmt = self.client.last_image_format
         self.imagebytes_used = fmt == "imagebytes"
+        note = getattr(self.client, "last_image_note", "")
+        if note:
+            self.warnings.once("imagebytes-short", note)
         if self.use_imagebytes and fmt == "json":
             self.warnings.once("imagebytes-ignored",
                                "Alpaca server ignored the ImageBytes request and sent JSON: "
@@ -508,7 +553,7 @@ class AlpacaCameraDevice:
         if image.ndim == 3:
             image = image.mean(axis=2)
         max_adu = self.info.max_adu if self.info else 65535
-        data, _depth = to_raw_bytes(image, max_adu)
+        data, _depth = to_raw_bytes(image, pixel_ceiling(max_adu, self.warnings.state))
         return data
 
     def get_camera_property(self) -> dict:

@@ -30,6 +30,7 @@ from ..errors import CameraConfigurationError, CameraError
 from .alpaca_device import AlpacaCameraDevice
 from .alpaca_http import AlpacaHttpClient, ci_get, lan_session, split_host_port  # noqa: F401
 from .alpaca_protocol import ALPACA_SDK, AlpacaInvalidOperationError, AlpacaNotImplementedError
+from .alpaca_readout import readout_bit_depth
 from .alpaca_transport_text import not_alpaca_server_text
 from .alpaca_warnings import SessionWarnings
 
@@ -240,6 +241,7 @@ class AlpacaConnection:
 
     def _configure(self, device: AlpacaCameraDevice, settings: dict) -> None:
         device.set_full_frame_roi()
+        self._configure_readout(device)
         for kind in ("gain", "offset"):
             if kind not in settings:
                 continue
@@ -253,6 +255,17 @@ class AlpacaConnection:
             device.set_pending_exposure(settings["exposure_sec"])
         if "flip" in settings:
             device.flip = int(settings["flip"] or 0)
+
+    def _configure_readout(self, device: AlpacaCameraDevice) -> None:
+        """16-bit readout where the server offers it by name (INDIGO's "RAW 8" default)."""
+        mode = device.select_readout_mode()
+        info = device.info
+        if mode and readout_bit_depth(mode) == 8 and info is not None and info.max_adu > 255:
+            self.warnings.once("readout-8-bit",
+                               f"Alpaca camera reads out in '{mode}' (8-bit) but reports MaxADU "
+                               f"{info.max_adu}: frames will look about "
+                               f"{max(1, (info.max_adu + 1) // 256)}x too dark. Choose a 16-bit "
+                               f"readout mode on the Alpaca server if it has one")
 
     def configure(self, settings: dict) -> None:
         if self.camera is not None:

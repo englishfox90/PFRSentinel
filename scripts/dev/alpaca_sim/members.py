@@ -116,6 +116,12 @@ def _device_state(cam):
     return [{"Name": n, "Value": v} for n, v in items]
 
 
+def _readout(cam, what):
+    if not cam.spec.readout_modes:
+        _not_impl("ReadoutModes" if what == "modes" else "ReadoutMode")
+    return list(cam.spec.readout_modes) if what == "modes" else int(cam.readout_mode)
+
+
 GETTERS = {
     "connected": lambda c: bool(c.connected),
     "connecting": _connecting,
@@ -170,6 +176,8 @@ GETTERS = {
     "percentcompleted": _percent,
     "lastexposureduration": lambda c: _last(c, "duration"),
     "lastexposurestarttime": lambda c: _last(c, "start"),
+    "readoutmodes": lambda c: _readout(c, "modes"),
+    "readoutmode": lambda c: _readout(c, "mode"),
     "imagearray": None,   # served by FakeAlpacaCamera._imagearray (binary/JSON)
 }
 
@@ -221,6 +229,16 @@ def _put_nonneg(cam, p, name, attr, minimum):
     setattr(cam, attr, value)
 
 
+def _put_readout_mode(cam, p):
+    _readout(cam, "mode")
+    value = p.int("ReadoutMode")
+    _roi_unlocked(cam)
+    if not 0 <= value < len(cam.spec.readout_modes):
+        raise SimError(INVALID_VALUE, f"ReadoutMode {value} outside "
+                                      f"[0, {len(cam.spec.readout_modes) - 1}]")
+    cam.readout_mode = value
+
+
 def _put_start(cam, p):
     cam.start_exposure(p.float("Duration"), p.bool("Light"))
 
@@ -256,6 +274,7 @@ SETTERS = {
     "gain": lambda c, p: _set_range_or_list(c, "gain", p.int("Gain")),
     "offset": lambda c, p: _set_range_or_list(c, "offset", p.int("Offset")),
     "cooleron": _put_cooler,
+    "readoutmode": _put_readout_mode,
     "startexposure": _put_start,
     "abortexposure": _put_abort,
     "stopexposure": _put_stop,

@@ -107,6 +107,11 @@ class AlpacaProtocolError(AlpacaTransportError):
     """A reply that does not follow the Alpaca wire format (bad JSON, header)."""
 
 
+class AlpacaImageBytesError(AlpacaProtocolError):
+    """An ImageBytes payload that cannot be decoded; the same image may still
+    download as JSON (INDIGO 2.0 sends it 44 bytes short)."""
+
+
 _ERROR_CLASSES = {
     NOT_IMPLEMENTED: AlpacaNotImplementedError,
     ACTION_NOT_IMPLEMENTED: AlpacaNotImplementedError,

@@ -38,6 +38,7 @@ from .alpaca_protocol import (
     AlpacaTransportError,
     CameraState,
 )
+from .alpaca_readout import adopt_pixel_range
 from .alpaca_sensor import apply_flip, flip_bayer_pattern, to_raw_array
 from .alpaca_shared_camera import check_delivered, prepare_frame
 
@@ -225,9 +226,9 @@ def capture_single_frame(session):
 
         image = download_frame(session, device, info, _SessionAbort(session))
         _record_transfer(session, connection)
-        check_delivered(device, info, image, duration, warnings)
+        ceiling = check_delivered(device, info, image, duration, warnings)
 
-        raw, bit_depth = to_raw_array(image, info.max_adu, inplace=True)
+        raw, bit_depth = to_raw_array(image, ceiling, inplace=True)
         del image
         flip = int(session.flip or 0)
         raw = apply_flip(raw, flip)
@@ -325,5 +326,7 @@ def calibration_exposure(session, seconds: float, abort_event):
         device.set_full_frame_roi()
         raise FrameSkipped(f"calibration image is {image.shape[1]}x{image.shape[0]}, "
                            f"not full frame")
-    raw, _depth = to_raw_array(image, info.max_adu, inplace=True)
+    ceiling = adopt_pixel_range(image.max() if image.size else 0, info.max_adu,
+                                connection.warnings.state, connection.warnings)
+    raw, _depth = to_raw_array(image, ceiling, inplace=True)
     return np.ascontiguousarray(raw).tobytes()
