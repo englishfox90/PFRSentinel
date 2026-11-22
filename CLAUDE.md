@@ -1,13 +1,15 @@
 # CLAUDE.md — PFR Sentinel
 
-PFR Sentinel is a dual-mode astrophotography monitoring app built for 24/7 unattended observatory use. It either (1) watches a directory for new images written by another capture program (e.g. NINA), or (2) captures directly from a ZWO ASI camera. Either way, it adds configurable metadata + weather overlays and pushes the result to multiple output sinks simultaneously (file, web, Discord).
+PFR Sentinel is a dual-mode astrophotography monitoring app built for 24/7 unattended observatory use. It either (1) watches a directory for new images written by another capture program (e.g. NINA), or (2) captures directly from a camera — a ZWO ASI over USB, or any ASCOM Alpaca camera on the network. Either way, it adds configurable metadata + weather overlays and pushes the result to multiple output sinks simultaneously (file, web, Discord).
 
 Stack: Python 3.13, PySide6 6.10.2 (pinned) + qfluentwidgets 1.11.1 (Windows 11 Fluent Design), Pillow, OpenCV, watchdog, ONNX runtime for ML inference. Packaged as a Windows installer via PyInstaller + Inno Setup.
 
 ## Capture modes
 
 1. **Directory Watch** — `services/watcher.py` (watchdog) detects new FITS/JPEG/PNG, waits for file stability, parses sidecar metadata, runs the processor.
-2. **ZWO Camera** — `services/camera/zwo_camera.py` captures RAW8 Bayer frames, debayers (BGGR), and produces a PIL image + metadata dict for the processor.
+2. **Camera** — `capture_mode == "camera"`, with `camera_source` picking the backend (`services/camera/camera_source.py`); both are `CaptureSessionBase` sessions driven by the same shared capture loop and produce a PIL image + metadata dict for the processor.
+   - **ZWO** (`camera_source: "zwo"`, default) — `services/camera/zwo_camera.py` captures RAW8/RAW16 Bayer frames through the ZWO SDK and debayers (BGGR).
+   - **Alpaca** (`camera_source: "alpaca"`, issue #43) — `services/camera/alpaca/alpaca_camera.py` drives an ASCOM Alpaca camera over HTTP (ASCOM Remote, a vendor's Alpaca server); Bayer pattern and bit depth come from the device, no USB reset, no SDK. See `docs/ALPACA_CAMERA_PLAN.md`.
 
 ## Output sinks (run simultaneously)
 
@@ -49,7 +51,18 @@ PFRSentinel/
 │   │                             camera_white_balance.py (ASI_WB_R/B per mode, low-gain warning),
 │   │                             camera_connection.py (SDK init, detection, USB reconnect),
 │   │                             camera_calibration.py, camera_utils.py,
-│   │                             linux_usb_preflight.py (udev rule + usbfs_memory_mb warnings)
+│   │                             linux_usb_preflight.py (udev rule + usbfs_memory_mb warnings);
+│   │                             backend-neutral session seam: driver.py (ExposureHandle + SdkConstants protocols),
+│   │                             session.py (CaptureSession protocol), capabilities.py (CameraCapabilities per source),
+│   │                             errors.py, capture_session_base.py (schedule gate, start/stop/join, auto-exposure wrappers),
+│   │                             capture_loop.py (shared recovery loop), frame_metadata.py (one metadata builder),
+│   │                             session_params.py (config → start params), session_factory.py (build_session per source),
+│   │                             camera_source.py (camera_source, alpaca_settings, active_camera_identity, profile key)
+│   │   └── alpaca/             # ASCOM Alpaca backend — alpaca_http.py (client, timeouts, error mapping),
+│   │                             alpaca_imagebytes.py, alpaca_sensor.py (Bayer phase / flip / MaxADU bit depth),
+│   │                             alpaca_discovery.py (UDP 32227 + Management API), alpaca_device.py (native API + zwoasi facade),
+│   │                             alpaca_connection.py (per-device lock, UniqueID gate), alpaca_camera.py (session),
+│   │                             alpaca_capture_frame.py, alpaca_probe.py (Test Connection), alpaca_protocol.py
 │   ├── cleanup.py              # Disk space management (files only, never folders)
 │   ├── gc_scheduler.py         # GUI-thread cyclic GC (automatic GC off, QTimer-driven)
 │   ├── discord_alerts.py       # Discord webhook client
@@ -84,6 +97,7 @@ PFRSentinel/
 ├── archive/                    # Legacy Tkinter GUI (do not modify)
 ├── nina-plugin/                # NINA plugin (C#/.NET 8 + WPF) — see below
 ├── installer/                  # Inno Setup packaging
+├── scripts/dev/alpaca_camera_sim.py # ASCOM Alpaca camera simulator (HTTP + discovery; dev only) — scripts/dev/README.md
 ├── main.py                     # Entry point
 └── version.py                  # __version__
 ```
@@ -92,7 +106,7 @@ PFRSentinel/
 
 ### Data flow
 - **Watch mode**: `watcher.py` → file stable → parse sidecar → `processor.py` → `_push_to_output_servers()`
-- **Camera mode**: `camera/zwo_camera.py` → debayer → PIL Image + metadata → `camera_controller.py` → `processor.py` → outputs
+- **Camera mode**: `session_factory.build_session` → `camera/zwo_camera.py` (ZWO SDK) or `camera/alpaca/alpaca_camera.py` (Alpaca HTTP) → shared `capture_loop.py` → debayer → PIL Image + metadata → `camera_controller.py` → `processor.py` → outputs
 
 ### Threading
 - Camera capture, watcher observer, Discord poster, and web server all run on background threads.
@@ -432,6 +446,31 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_allsky_target_status_log.py` | 10 | `target_status_log` — one INFO line per change in what the overlay does with the NINA target: drawn with a box, a reticle and why, not drawn and why, hidden once stale (logged once while the age grows), a new target or a return to a state is logged again, `forget` on a clear; the preview path logs a stale target once and a cleared one not at all, the renderer reports the placement |
 | `test_allsky_target_preview.py` | 15 | `render_allsky_for_preview` — `_nina_target` injected from the store, none / cleared → None, a stale target dropped after the default 120 s, `stale_after_s` read from the layer config and clamped 30–3600 (unusable value never fatal), the caller's config not written, a null block or a raising store loses the target and not the rest of the overlay |
 | `test_allsky_nina_target_card.py` | 26 | `NinaTargetCard` — `load` / `values` round-trip the four controlled keys and leave the rest of the layer alone, a fresh card shows the defaults, `load` never emits, each control emits `changed` exactly once, hide-after clamped to 30–3600 (and refused by the spin box itself), only `#RRGGBB` colours the renderer can read are kept, the default colour is one the picker offers (offscreen Qt) |
+| `test_frame_metadata.py` | 9 | `frame_metadata` — golden ZWO frame metadata: exact keys, order and values for RAW8 and RAW16 at a fixed clock, unreadable / negative temperature text, camera-property fallbacks, `wb_config` copied, the builder's key list is the golden one (every backend must produce it) |
+| `test_camera_session_contract.py` | 165 | `session` / `driver` contracts — `ZWOCamera` and `AlpacaCamera` carry every `CaptureSession` attribute and method and satisfy the protocol, zwoasi `Camera` covers `ExposureHandle` with the constant values it names, loop-owned attributes left to the loop, `stop_capture` takes the connection's `sdk_lock`, gain clamped to the session limits, factory post-construction settings, `read_capture_params` reads the saved profile, the loop prints a session's own troubleshooting steps (ZWO's unchanged) |
+| `test_capabilities.py` | 12 | `capabilities` — frozen dataclass, static set per source (unknown reads as ZWO), ZWO shows the USB controls and Alpaca hides them, ZWO hints are the five the loop always printed, ZWO refined by the open connection (RAW16, bit depth), every field set on both static sets |
+| `test_camera_source.py` | 20 | `camera_source` — defaults land on new and old configs, unknown source reads `zwo`, `alpaca_settings` typed and bounded, profile key prefers the UniqueID (`alpaca:<id>`, else `alpaca:<host>:<port>:<n>`), ZWO identity is exactly the old lookup, an Alpaca profile survives `prune_bogus_profiles`, same-named legacy profile seeds it, `capture_source_label` (ZWO text unchanged), `camera_ready`, `persist_alpaca_identity` writes once, moves a host-keyed profile to the UniqueID and never overwrites one |
+| `test_camera_controller_teardown.py` | 3 | `CameraControllerQt` — Stop pressed while connecting stops the already-running loop (the old `disconnect()` call raised and orphaned it with the USB handle open), a late stop keeps a wedged session for the next start, start tears a leftover session down before connecting |
+| `test_raw16_revert.py` | 2 | a refused RAW16 change unticks the switch on the camera settings widget (the revert used to raise `AttributeError` on the panel), an accepted one leaves it (offscreen Qt) |
+| `test_debayer_mono.py` | 13 | `debayer_raw_image` `'MONO'` (8- and 16-bit, grey to every channel, dst buffers honoured) and `'RGB'` passthrough, the four Bayer patterns and the BGGR default unchanged, `build_frame` / rebuild carry both, raw export: RGB gives a PNG and no Bayer FITS, mono a FITS without `BAYERPAT` |
+| `test_alpaca_imagebytes.py` | 26 | `alpaca_imagebytes` — 44-byte little-endian header, `[x][y]` element order transposed to (H, W) on a non-square frame, every transmission element type, rank 3 planes last, error payload raises the mapped exception (NotConnected is a disconnect for the loop), malformed payload is a protocol error, JSON fallback equals ImageBytes, case-insensitive JSON keys |
+| `test_alpaca_http.py` | 19 | `alpaca_http` — ClientID and increasing ClientTransactionID on every request, GET query vs canonical-case PUT form fields (wrong casing rejected by the strict fake), case-insensitive reply keys, ErrorNumber / HTTP status mapping, 5xx / bad JSON / connection error / timeout are transport errors, every call time-bounded, ImageBytes and JSON downloads agree, JSON fallback, download on its own session in 1 MiB chunks, abort and stall cut it short, wall-clock deadline on a trickle, Management API |
+| `test_alpaca_sensor.py` | 75 | `alpaca_sensor` — physical pattern from the four BayerOffsets and subframe start parity, the pipeline name (physical reversed) debayers the right colours and matches the ZWO ASI676MC "BGGR", agrees with the simulator's mosaic, mono / RGB, CMYG / LRGB read mono and warn once, flips move the pattern (odd dimensions keep that axis), MaxADU 255 is 8-bit clipped and larger is MSB-aligned 16-bit, above 16 bits shifts right, unknown reads 65535, row-major little-endian bytes |
+| `test_alpaca_discovery.py` | 9 | `alpaca_discovery` — `alpacadiscovery1` to broadcast and loopback on UDP 32227 (fake socket), replies parsed and deduped in order, garbage ignored, socket / send failures never raise, the Camera filter drops PFR's own SafetyMonitor, a dead server among live ones, a renumbered device listed under its new number |
+| `test_alpaca_sim_device.py` | 13 | `scripts/dev/alpaca_sim` fake camera pinned to the spec — 0x407 on camera members while disconnected, exposure state machine on an injected clock, wrong-moment / bad-value errors, Abort discards and Stop keeps the image, Can* NotImplemented, mono without Bayer offsets and colour as rank 3, gain / offset modes, V4 asynchronous Connect, every fault switch (N NotConnected, dropped connection, idle blip, failed exposure, renumbering, transport), request log |
+| `test_alpaca_device.py` | 20 | `alpaca_device` — V3 `Connected=true` and V4 `Connect` + bounded `Connecting` poll, an already-connected device left alone, release only when configured, static sensor facts, NotImplemented optional members switch capabilities off, gain list mode is an index range, gain clamped and sent on change only, full-frame ROI in canonical casing, facade µs → s and range clamp, exposure status incl. the idle-after-start grace, MSB-aligned row-major data, ROI / dropped frames, temperature in tenths, Abort falls back to Stop |
+| `test_alpaca_connection.py` | 14 | `alpaca_connection` — handshake reads static facts and configures, learns the UniqueID and profile key, a renumbered device found by UniqueID, unknown UniqueID fails the gate, a server with no Camera (the SafetyMonitor port) and a missing device number get clear errors, unreachable server / no host fail without raising, `sdk_lock` per instance and never `SDK_LOCK`, disconnect idempotent and leaves the device connected unless `release_on_disconnect`, aborts an exposure in flight, reconnect after the driver dropped the camera, `verify_identity`, never touches config |
+| `test_alpaca_camera.py` | 31 | `AlpacaCamera` + `alpaca_capture_frame` — metadata keys and order equal ZWO's, Duration = profile ms / 1000, `max_exposure` (ZWO message) and device-range clamps, red-top / blue-bottom correct under every BayerOffset, software flip keeps colour, mono and RGB sensors, recovery request and Stop abort the exposure, idle blip and three transient poll failures tolerated (a fourth raises), bounded exposure timeout, CameraState Error fails the frame, download diagnostics and JSON fallback, gain sent on change only, capabilities follow the device, a profile Bayer pattern never clobbers the device's, `asi_auto` runs as gray world and manual's software red gain scales red without rewriting the stored config (ZWO's `wb_config` left as given), RAW16 refused and offset live, identity learned but not persisted, Stop returns within 3 s during a long download, params read the shared `zwo_*` mirror keys |
+| `test_alpaca_capture_loop.py` | 7 | shared `capture_loop` driving a real `AlpacaCamera` on the fake network (fake clock) — outage → reconnect → resume, a transport outage that outlasts one reconnect still recovers, recovery off gets one reconnect then stops and releases the handle, gated off-peak never sends `Connected=false` by default and does when configured, the window reopens after off-peak, an unreachable camera prints the Alpaca hints |
+| `test_alpaca_calibration.py` | 4 | `CameraCalibration` on the Alpaca facade converges to the target on the simulator's exposure × gain scene, µs → s happens only in the facade, `adjust_exposure_auto` writes through it |
+| `test_alpaca_probe.py` | 10 | `alpaca_probe` (Test Connection) — summary line, never configures and releases only when asked, labels mono / RGB sensors, says why it failed, never raises, bounded when the server accepts and then stalls |
+| `test_alpaca_sim.py` | 12 | `scripts/dev/alpaca_camera_sim.py` over real sockets on 127.0.0.1 — Bayer orientation end to end, ImageBytes and JSON agree in (H, W), brightness follows exposure × gain, spec errors over HTTP, ASCOM's `alpyca` reads it like our client (JSON path and Management API too; skipped without alpyca), UDP discovery + listing, the CLI starts and serves (`requires_network`) |
+| `test_alpaca_session_live.py` | 4 | `AlpacaCamera` against the real-HTTP simulator on its own thread — live frames carry the full metadata and correct colour, auto-exposure converges on the sky scene, JSON fallback and the probe (`requires_network`) |
+| `test_capture_source_selector.py` | 11 | Capture Mode selector — three segments ↔ (`capture_mode`, `camera_source`), Directory Watch leaves the source alone, load selects the segment from the pair, description per segment, the source gates the camera widgets, capture locks the selector (offscreen Qt) |
+| `test_camera_capability_gate.py` | 13 | `apply_capabilities` — ZWO shows SDK path, picker, RAW16 and hardware WB, Revive notice ZWO only; Alpaca hides them and shows its card, a stored `asi_auto` reads as gray world without writing and switching back restores it, the detected Bayer pattern read-only (mono shows none), unsupported gain / offset disabled / hidden, back to ZWO exactly, a clamped value reloads in full, Alpaca settings save to the Alpaca profile, software WB gains write `white_balance`, stop resets to the static set (offscreen Qt) |
+| `test_alpaca_connection_card.py` | 14 | `AlpacaConnectionCard` + settings-widget wiring — ranges and defaults, load never emits, typed address emitted and clears the learned identity without a profile per keystroke, discovered devices listed by label with none picked, picking one fills the address and writes its identity, discovery error / empty result, button progress, test caption (long failure shortened, whole text in the tooltip), capture locks the card, loading never writes `alpaca_camera` (offscreen Qt) |
+| `test_alpaca_discovery_controller.py` | 7 | `AlpacaDiscoveryController` — discovery result delivered on the GUI thread, a failure reports its error, a second discovery while one runs is ignored, Test Connection passes the settings and delivers the details, a raising probe or a missing probe module is a failed test, `capabilities_from_probe` (offscreen Qt) |
+| `test_alpaca_main_window_wiring.py` | 8 | main-window Alpaca wiring — Start needs a host, not detected cameras (ZWO gate unchanged), startup auto-detect skips the SDK, Connect Camera on an Alpaca rig discovers, Discover results reach the panel, Test without a host never reaches the controller, a passed test and a live session push their capabilities to the panel (offscreen Qt) |
 
 Standalone (not in pytest suite):
 - `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
@@ -462,6 +501,7 @@ Standalone (not in pytest suite):
 - [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
 - [`docs/ALLSKY_HOSTING_SITE_PLAN.md`](docs/ALLSKY_HOSTING_SITE_PLAN.md) — issue #93: persisted equipment map, observable-sky gate (roof verdict + star evidence), chance-aware quality, pole from the rotating field with Polaris hidden, pole-constrained solve; six independently mergeable packages with agent briefs
 - [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
+- [`docs/ALPACA_CAMERA_PLAN.md`](docs/ALPACA_CAMERA_PLAN.md) — issue #43: ASCOM Alpaca as a second camera source behind the capture-session seam; the Decisions at the top override the body. Read before touching `services/camera/` structure or `camera_source`
 
 Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).
 
