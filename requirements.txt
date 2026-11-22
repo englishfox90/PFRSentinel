@@ -4,6 +4,7 @@ zwoasi>=0.2.0
 numpy>=2.5.3
 opencv-python>=5.0.0.93
 requests>=2.31.0
+ifaddr==0.2.0  # Alpaca discovery: each interface's directed broadcast (pure Python, MIT)
 platformdirs>=4.4.0  # Cross-platform app-data root (services/utils_paths.py).
 # Floor is the oldest release declaring Python 3.13 support; 4.0.0 predates it.
 astral>=3.2  # Accurate sunrise/sunset/twilight calculations

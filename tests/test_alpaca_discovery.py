@@ -1,6 +1,9 @@
 """alpaca_discovery — UDP query/reply on a fake socket, Camera filter, dedupe, bounded waits."""
 import functools
+import logging
+from types import SimpleNamespace
 
+from services.camera.alpaca import alpaca_discovery
 from services.camera.alpaca.alpaca_discovery import (
     AlpacaDeviceInfo,
     cameras_on_server,
@@ -30,7 +33,8 @@ def _servers(responders, clock=None, **kw):
     return found, sock, clock
 
 
-def test_query_is_alpacadiscovery1_to_broadcast_and_loopback_on_32227():
+def test_query_is_alpacadiscovery1_to_broadcast_and_loopback_on_32227(monkeypatch):
+    monkeypatch.setattr(alpaca_discovery, "_adapters", lambda: [])
     found, sock, clock = _servers({})
     assert found == []
     targets = [addr for _, addr in sock.sent]
@@ -125,3 +129,51 @@ def test_renumbered_device_is_listed_under_its_new_number():
     net.servers[("192.168.1.30", 32323)].renumber(5)
     cams = cameras_on_server("192.168.1.30", 32323, client_factory=factory)
     assert [(c.device_number, c.unique_id) for c in cams] == [(5, "uid-b")]
+
+
+def _adapter(*ips):
+    return SimpleNamespace(ips=[SimpleNamespace(ip=ip, network_prefix=prefix) for ip, prefix in ips])
+
+
+def test_each_interface_gets_its_directed_broadcast():
+    adapters = [_adapter(("192.168.1.20", 24), (("fe80::1", 0, 3), 64)),
+                _adapter(("10.147.17.5", 16)),          # ZeroTier
+                _adapter(("127.0.0.1", 8)),             # loopback: covered already
+                _adapter(("100.64.0.9", 32)),           # point-to-point: no broadcast
+                _adapter(("192.168.1.21", 24))]         # same subnet twice
+    assert alpaca_discovery.discovery_targets(lambda: adapters) == (
+        "255.255.255.255", "127.0.0.1", "192.168.1.255", "10.147.255.255")
+
+
+def test_interface_enumeration_failure_falls_back_to_broadcast_and_loopback():
+    def broken():
+        raise OSError("no permission")
+    assert alpaca_discovery.discovery_targets(broken) == ("255.255.255.255", "127.0.0.1")
+
+
+def test_a_camera_on_a_second_subnet_is_found(monkeypatch):
+    monkeypatch.setattr(alpaca_discovery, "_adapters",
+                        lambda: [_adapter(("10.147.17.5", 16))])
+    found, sock, _ = _servers({"10.147.255.255": [("10.147.17.80", discovery_reply(11111))]})
+    assert found == [("10.147.17.80", 11111)]
+    assert ("10.147.255.255", 32227) in [addr for _, addr in sock.sent]
+
+
+def test_listing_failures_are_debug_with_one_info_summary(caplog):
+    clock = FakeClock()
+    net = FakeAlpacaNetwork(clock)
+    net.add_camera(FakeAlpacaCamera(SimCameraSpec(), clock=clock), host="192.168.1.20",
+                   port=11111)
+    sock = FakeDiscoverySocket({"255.255.255.255": [
+        ("192.168.1.20", discovery_reply(11111)), ("192.168.1.99", discovery_reply(11111))]},
+        clock)
+    factory = functools.partial(AlpacaHttpClient, session_factory=net.session)
+    with caplog.at_level(logging.DEBUG, logger="PFRSentinel"):
+        cams = discover_cameras(2.0, socket_factory=lambda: sock, client_factory=factory,
+                                clock=clock)
+    assert len(cams) == 1
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    infos = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO
+             and r.getMessage().startswith("Alpaca discovery:")]
+    assert infos == ["Alpaca discovery: 2 server(s) answered, 1 camera(s) found; "
+                     "192.168.1.99:11111 did not list devices (details at DEBUG)"]

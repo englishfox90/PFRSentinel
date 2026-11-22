@@ -84,7 +84,7 @@ class SimServer:
 
     def __init__(self, camera: FakeAlpacaCamera, host: str = "127.0.0.1", port: int = 0,
                  discovery_port: Optional[int] = DISCOVERY_PORT,
-                 discovery_bind: str = ""):
+                 discovery_bind: Optional[str] = None):
         self.camera = camera
         self._httpd = ThreadingHTTPServer((host, port), _Handler)
         self._httpd.daemon_threads = True
@@ -93,6 +93,11 @@ class SimServer:
         self._threads = []
         self._udp = None
         if discovery_port is not None:
+            # Answer discovery only where the HTTP server listens: a reply
+            # from every interface while HTTP is on 127.0.0.1 sends clients to
+            # addresses that refuse them.
+            if discovery_bind is None:
+                discovery_bind = "" if host in ("", "0.0.0.0") else host
             self._udp = self._open_discovery(discovery_bind, discovery_port)
 
     @property

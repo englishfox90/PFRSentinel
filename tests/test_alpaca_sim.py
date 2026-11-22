@@ -218,3 +218,32 @@ def test_cli_starts_and_serves(tmp_path):
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_discovery_binds_where_http_listens():
+    sim = _sim_module()
+    loop = sim.SimServer(FakeAlpacaCamera(SimCameraSpec(width=8, height=8)), "127.0.0.1", 0,
+                         discovery_port=0).start()
+    everywhere = sim.SimServer(FakeAlpacaCamera(SimCameraSpec(width=8, height=8)), "0.0.0.0", 0,
+                               discovery_port=0).start()
+    try:
+        assert loop._udp.getsockname()[0] == "127.0.0.1"
+        assert everywhere._udp.getsockname()[0] == "0.0.0.0"
+    finally:
+        loop.stop()
+        everywhere.stop()
+
+
+def test_live_download_through_the_guarded_session_and_slow_readout_calibration(start_sim):
+    import time as _time
+    from services import posthog_service
+    from services.camera.alpaca.alpaca_camera import AlpacaCamera
+    posthog_service.capture_event = lambda *a, **k: None
+    server = start_sim(width=64, height=64, max_adu=4095, seed=7, readout_s=2.5)
+    server.camera.clock = _time.monotonic
+    session = AlpacaCamera({"host": "127.0.0.1", "port": server.port, "device_number": 0},
+                           exposure_sec=0.002, gain=500, auto_exposure=True,
+                           max_exposure_sec=2.0)
+    assert session.connect_camera(), session.last_connect_error
+    assert session.calibration_manager.run_calibration(max_attempts=4) is True
+    session.disconnect_camera()
