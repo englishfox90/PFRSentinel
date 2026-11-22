@@ -167,6 +167,11 @@ class AlpacaCamera(CaptureSessionBase):
             temperature=info.has_temperature,
         )
 
+    @property
+    def last_connect_error(self) -> str:
+        """Why the last connect failed, in words fit for the user ('' after success)."""
+        return self._connection.last_error
+
     def learned_identity(self) -> tuple:
         """``(unique_id, name)`` learned on connect, for the main thread to persist."""
         return self._connection.unique_id, self._connection.camera_name or ''

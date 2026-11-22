@@ -598,11 +598,11 @@ class MeteorController(QObject):
 
     def _get_exposure_sec(self) -> float:
         try:
-            from services.camera.camera_utils import get_selected_camera_name
+            from services.camera.camera_source import active_camera_identity, is_alpaca
             cfg = self._main_window.config
-            cam_name = get_selected_camera_name(cfg)
-            serial = cfg.get('zwo_selected_camera_serial', '')
-            profile = cfg.get_camera_profile(cam_name, serial) if cam_name else {}
+            cam_name, serial = active_camera_identity(cfg)
+            known = cam_name or (serial if is_alpaca(cfg) else '')
+            profile = cfg.get_camera_profile(cam_name, serial) if known else {}
             return float(profile.get("exposure_ms", 0)) / 1000.0
         except (TypeError, ValueError, AttributeError):
             return 0.0

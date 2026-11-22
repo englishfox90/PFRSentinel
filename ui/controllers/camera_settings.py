@@ -3,37 +3,25 @@ import threading
 from services.logger import app_logger
 from services.capture_schedule_window import gate_for_config
 from services.config import DEFAULT_CAMERA_PROFILE
+from services.camera.capabilities import CameraCapabilities
+from services.camera.camera_source import active_camera_identity, is_alpaca
+from .camera_wedge_recovery import is_alpaca_session
 
 
 def apply_camera_settings(zwo_camera, config):
-    """Push all mutable settings to a running ZWOCamera instance (no stop/restart needed).
+    """Push all mutable settings to a running capture session (no stop/restart needed).
 
     The caller is responsible for checking zwo_camera is not None before calling.
     """
-    camera_name = config.get('zwo_selected_camera_name', '')
-    if '(Index:' in camera_name:
-        camera_name = camera_name.split('(Index:')[0].strip()
-    serial = config.get('zwo_selected_camera_serial', '')
-
-    # Identity guard: this pushes the *selected* camera's profile onto the
-    # *running* camera. If the user changed the dropdown to a different body
-    # mid-capture, the selection and the live camera have decoupled — pushing
-    # here would drive the running camera with another camera's gain/exposure/
-    # target-brightness (and never actually switch hardware). Switching cameras
-    # requires Stop → select → Start; refuse the cross-camera push instead.
-    running_name = (getattr(zwo_camera, 'camera_name', '') or '').strip()
-    if camera_name and running_name and camera_name != running_name:
-        app_logger.warning(
-            f"Skipping live settings push: selected camera '{camera_name}' differs "
-            f"from the running camera '{running_name}'. Stop capture and Start again "
-            "to switch cameras."
-        )
-        return
-
-    profile = (
-        config.get_camera_profile(camera_name, serial) if camera_name
-        else dict(DEFAULT_CAMERA_PROFILE)
-    )
+    caps = _capabilities(zwo_camera)
+    if is_alpaca_session(zwo_camera) or is_alpaca(config):
+        profile = _alpaca_profile(zwo_camera, config)
+        if profile is None:
+            return
+    else:
+        profile = _zwo_profile(zwo_camera, config)
+        if profile is None:
+            return
 
     exposure_ms = profile.get('exposure_ms', DEFAULT_CAMERA_PROFILE['exposure_ms'])
     gain = profile.get('gain', DEFAULT_CAMERA_PROFILE['gain'])
@@ -77,14 +65,18 @@ def apply_camera_settings(zwo_camera, config):
     # set_control_value here races the capture worker's SDK calls and can
     # corrupt the ZWO DLL.
     offset = profile.get('offset', DEFAULT_CAMERA_PROFILE['offset'])
-    zwo_camera.set_offset_live(offset)
+    if caps is None or caps.offset:
+        zwo_camera.set_offset_live(offset)
 
     flip = profile.get('flip', DEFAULT_CAMERA_PROFILE['flip'])
     if flip != zwo_camera.flip:
         zwo_camera.set_flip_live(flip)
 
     bayer = profile.get('bayer_pattern', DEFAULT_CAMERA_PROFILE['bayer_pattern'])
-    zwo_camera.bayer_pattern = bayer
+    # A device-reported pattern (Alpaca SensorType/BayerOffset) must not be
+    # clobbered by the profile's value on every settings change.
+    if caps is None or not caps.bayer_from_device:
+        zwo_camera.bayer_pattern = bayer
 
     mode = config.get('scheduled_capture_mode', 'always')
     zwo_camera.scheduled_capture_mode = mode
@@ -110,6 +102,67 @@ def apply_camera_settings(zwo_camera, config):
         f"max_exposure={max_exposure_ms}ms, interval={zwo_camera.capture_interval}s, "
         f"offset={offset}, flip={flip}, bayer={bayer}"
     )
+
+
+def _capabilities(session):
+    try:
+        caps = session.capabilities
+    except Exception:
+        return None
+    return caps if isinstance(caps, CameraCapabilities) else None
+
+
+def _zwo_profile(zwo_camera, config):
+    """The selected ZWO camera's profile, or None when it is not the running one."""
+    camera_name = config.get('zwo_selected_camera_name', '')
+    if '(Index:' in camera_name:
+        camera_name = camera_name.split('(Index:')[0].strip()
+    serial = config.get('zwo_selected_camera_serial', '')
+
+    # Identity guard: this pushes the *selected* camera's profile onto the
+    # *running* camera. If the user changed the dropdown to a different body
+    # mid-capture, the selection and the live camera have decoupled — pushing
+    # here would drive the running camera with another camera's gain/exposure/
+    # target-brightness (and never actually switch hardware). Switching cameras
+    # requires Stop → select → Start; refuse the cross-camera push instead.
+    running_name = (getattr(zwo_camera, 'camera_name', '') or '').strip()
+    if camera_name and running_name and camera_name != running_name:
+        app_logger.warning(
+            f"Skipping live settings push: selected camera '{camera_name}' differs "
+            f"from the running camera '{running_name}'. Stop capture and Start again "
+            "to switch cameras."
+        )
+        return None
+
+    return (
+        config.get_camera_profile(camera_name, serial) if camera_name
+        else dict(DEFAULT_CAMERA_PROFILE)
+    )
+
+
+def _alpaca_profile(session, config):
+    """The configured Alpaca camera's profile, or None when it is not the running one.
+
+    The identity is the profile key (``alpaca:<UniqueID>``, or host:port:n
+    before one is learned); a config that switched source or server
+    mid-capture no longer describes the running camera.
+    """
+    if not (is_alpaca_session(session) and is_alpaca(config)):
+        app_logger.warning("Skipping live settings push: the camera source changed "
+                           "while capturing. Stop capture and Start again to switch.")
+        return None
+    name, key = active_camera_identity(config)
+    running_key = (getattr(session, 'camera_serial', '') or '').strip()
+    if key and running_key and key != running_key:
+        app_logger.warning(
+            f"Skipping live settings push: the configured Alpaca camera ({key}) differs "
+            f"from the running one ({running_key}). Stop capture and Start again "
+            "to switch cameras."
+        )
+        return None
+    if not (name or key):
+        return dict(DEFAULT_CAMERA_PROFILE)
+    return config.get_camera_profile(name, key) or dict(DEFAULT_CAMERA_PROFILE)
 
 
 def apply_camera_settings_async(controller):

@@ -14,31 +14,20 @@ from services.logger import app_logger
 from services.zwo_sdk_library import library_name, resolve_library_path
 from services.camera.session_factory import build_session
 from services.camera.session_params import read_capture_params
+from services.camera.camera_source import ALPACA
 from services.capture_schedule_window import gate_for_config
 from .camera_settings import apply_camera_settings_async, set_raw16_mode_async
 from .camera_usb_recovery import UsbResetWorker
-
-
-# ZWO SDK errors that corrupt the DLL for the process lifetime — only a
-# USB reset or app restart recovers.
-_UNRECOVERABLE_ERROR_PATTERNS = (
-    "access violation",
-    "0xe06d7363",
-    "winerror -529697949",
-    "exception: exception",
+from .camera_wedge_recovery import (  # noqa: F401 — re-exported for existing callers
+    _MAX_WEDGED_SKIPS, _UNRECOVERABLE_ERROR_PATTERNS, _WEDGED_THREAD_JOIN_TIMEOUT_SEC,
+    CameraRecoveryMixin, is_alpaca_session,
 )
 
 _DISCORD_ERROR_SUPPRESS_AFTER_ATTEMPTS = 3
-_WEDGED_THREAD_JOIN_TIMEOUT_SEC = 3.0
 _SUSTAINED_CAPTURE_RESET_SEC = 300
-# Wedge handling: the capture thread is stuck inside an uninterruptible ZWO SDK
-# C call. We try ONE USB disable/enable to free it (an OS-level toggle, safe
-# against the wedged DLL), then escalate. Keeping this small means we reach the
-# real cure (a process restart) in minutes, not the ~90 it used to take.
-_MAX_WEDGED_SKIPS = 2
 
 
-class CameraControllerQt(QObject):
+class CameraControllerQt(QObject, CameraRecoveryMixin):
     """
     Qt-compatible camera controller.
     
@@ -213,9 +202,12 @@ class CameraControllerQt(QObject):
                     pass
                 self._dying_camera = None
 
-            camera_index = self._resolve_camera_index(
-                params['sdk_path'], params['camera_name'], params['saved_camera_index']
-            )
+            if params.get('camera_source') == ALPACA:
+                camera_index = 0
+            else:
+                camera_index = self._resolve_camera_index(
+                    params['sdk_path'], params['camera_name'], params['saved_camera_index']
+                )
 
             cam = build_session(
                 params, gate_for_config(self.config), camera_index,
@@ -224,7 +216,8 @@ class CameraControllerQt(QObject):
             )
 
             if not cam.connect_camera(camera_index):
-                raise Exception("Failed to connect to camera")
+                raise Exception(getattr(cam, 'last_connect_error', '')
+                                or "Failed to connect to camera")
 
             app_logger.info("Starting capture loop...")
             cam.start_capture(
@@ -250,6 +243,12 @@ class CameraControllerQt(QObject):
         """
         from services.camera.camera_identity import persist_camera_serial
         cam = self.zwo_camera
+        if is_alpaca_session(cam):
+            from services.camera.camera_source import persist_alpaca_identity
+            unique_id, name = cam.learned_identity()
+            if persist_alpaca_identity(self.config, unique_id, name):
+                app_logger.info(f"Persisted Alpaca camera identity: {name or '?'} ({unique_id or 'no UniqueID'})")
+            return
         serial = getattr(cam, 'camera_serial', None) if cam else None
         if persist_camera_serial(self.config, serial):
             app_logger.info(f"Persisted camera serial to config: {serial}")
@@ -287,7 +286,8 @@ class CameraControllerQt(QObject):
                     "Click Start when the camera is ready."
                 )
                 return
-            if self._is_unrecoverable_error(err):
+            alpaca = self._alpaca_source()
+            if not alpaca and self._is_unrecoverable_error(err):
                 if not self._usb_reset_attempted:
                     self._usb_reset_attempted = True
                     self._start_usb_reset_worker()
@@ -295,6 +295,10 @@ class CameraControllerQt(QObject):
                 self._enter_unrecoverable_mode(err)
                 return
             if self._last_successful_frame_ts > 0:
+                self._schedule_auto_recovery()
+            elif alpaca:
+                # A rig can boot before its Alpaca server is listening.
+                app_logger.warning("Alpaca camera not reachable yet — retrying under auto-recovery")
                 self._schedule_auto_recovery()
             else:
                 app_logger.warning(
@@ -503,128 +507,6 @@ class CameraControllerQt(QObject):
             # failure), keep the recovery chain alive.
             app_logger.error(f"Auto-recovery restart raised: {e}")
             self._schedule_auto_recovery()
-
-    def _join_or_skip_dying_camera(self) -> bool:
-        """Wait for the previous capture thread to exit; skip recovery if it
-        is still wedged.
-
-        Returns True if it's safe to proceed with SDK calls, False if the
-        caller must abort this recovery cycle.  Calling the ZWO SDK while
-        another thread is blocked inside it crashes the DLL (SEH 0xe06d7363);
-        Windows USB IO usually times out within 30–60s, so we prefer to
-        re-schedule rather than race.
-        """
-        dying = self._dying_camera
-        if dying is None:
-            self._wedged_skip_count = 0
-            return True
-        try:
-            joined = dying.wait_for_capture_thread_exit(
-                timeout=_WEDGED_THREAD_JOIN_TIMEOUT_SEC
-            )
-        except Exception as e:
-            app_logger.warning(f"Error while joining dying capture thread: {e}")
-            joined = False
-        if joined:
-            self._dying_camera = None
-            self._wedged_skip_count = 0
-            self._wedge_usb_reset_tried = False
-            return True
-        self._wedged_skip_count += 1
-        # The thread is stuck inside an uninterruptible ZWO SDK C call; the
-        # backoff ladder alone can never free it. A USB disable/enable is an
-        # OS-level operation (NOT an SDK call — safe against the wedged DLL)
-        # that usually forces the stuck call to error out so the thread unwinds.
-        # Try it once before escalating to a restart.
-        if not self._wedge_usb_reset_tried and not self._usb_reset.in_progress:
-            self._wedge_usb_reset_tried = True
-            app_logger.warning(
-                "Capture thread wedged in the ZWO SDK — attempting USB "
-                "disable/enable to free it before escalating."
-            )
-            self._start_usb_reset_worker()
-            return False
-        if self._wedged_skip_count >= _MAX_WEDGED_SKIPS:
-            app_logger.error(
-                f"Previous capture thread still wedged after "
-                f"{self._wedged_skip_count} recovery attempts."
-            )
-            self._escalate_to_restart_or_alert(
-                "capture thread stuck inside ZWO SDK; process restart required"
-            )
-            return False
-        app_logger.warning(
-            f"Previous capture thread still wedged "
-            f"(skip {self._wedged_skip_count}/{_MAX_WEDGED_SKIPS}) — "
-            "rescheduling retry to avoid concurrent SDK crash."
-        )
-        self._schedule_auto_recovery()
-        return False
-
-    @staticmethod
-    def _is_unrecoverable_error(message: str) -> bool:
-        if not message:
-            return False
-        lowered = message.lower()
-        return any(pat in lowered for pat in _UNRECOVERABLE_ERROR_PATTERNS)
-
-    def _start_usb_reset_worker(self):
-        app_logger.warning(
-            "Attempting USB device disable/enable to recover the camera..."
-        )
-        self._usb_reset.run_async(
-            self.config.get('zwo_selected_camera_name', '') or '',
-            lambda ok, _name: self._usb_reset_done.emit(ok),
-        )
-
-    def _on_usb_reset_done(self, success: bool):
-        # The switch can't recall a reset already in flight when it was turned
-        # off; drop the result so a failure can't go on to relaunch the app.
-        if not self._auto_recovery_enabled():
-            app_logger.info("USB reset finished after automatic recovery was turned off — ignored")
-            return
-        if success:
-            # The toggle may have freed a wedged capture thread; re-run
-            # recovery, which re-joins the dying thread before any new SDK call.
-            # _wedge_usb_reset_tried stays set so a still-wedged thread escalates
-            # rather than looping resets forever.
-            self._schedule_auto_recovery()
-            return
-        # USB reset failed — usually admin denial (CM_Disable_DevNode 0x17) or
-        # not on Windows. The DLL stays corrupt for the process lifetime, so the
-        # only heal left is a clean process restart (inside the capture window);
-        # otherwise alert and wait for a manual restart.
-        self._escalate_to_restart_or_alert(
-            "USB reset failed — Administrator rights are required to "
-            "disable/enable the camera device"
-        )
-
-    def _escalate_to_restart_or_alert(self, last_error: str):
-        """Last resort once in-process recovery is exhausted: restart the app if
-        the policy allows (inside the capture window, not boot-looping), else
-        give up and alert for a manual restart. See camera_restart_policy."""
-        from .camera_restart_policy import attempt_restart
-        if attempt_restart(self, last_error):
-            return
-        self._enter_unrecoverable_mode(last_error)
-
-    def revive_missing_camera(self, camera_name: str):
-        """Best-effort user-triggered USB reset. Emits camera_revive_done."""
-        app_logger.info(f"User-initiated revive for '{camera_name}'")
-        self._usb_reset.run_async(
-            camera_name,
-            lambda ok, name: self.camera_revive_done.emit(ok, name),
-        )
-
-    def _enter_unrecoverable_mode(self, last_error: str):
-        self._unrecoverable_mode = True
-        self._cancel_auto_recovery_timer()
-        self.capture_stopped.emit()
-        self.error.emit(
-            "Camera unrecoverable — ZWO SDK state is corrupted. "
-            "Please restart the application. "
-            f"(last error: {last_error})"
-        )
 
     def recovery_state(self) -> dict:
         """Snapshot of auto-recovery state for the status API.
