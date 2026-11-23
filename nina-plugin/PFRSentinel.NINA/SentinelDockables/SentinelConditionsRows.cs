@@ -21,7 +21,7 @@ namespace PFRSentinel.NINA.SentinelDockables {
         /// <summary>The measurements behind it.</summary>
         public IReadOnlyList<SentinelStat> Rows { get; init; } = Array.Empty<SentinelStat>();
 
-        /// <summary>The baseline-learning note, or empty.</summary>
+        /// <summary>Notes: a bad latest frame Sentinel has not acted on yet, and the baseline-learning note. Empty when none.</summary>
         public string Note { get; init; } = string.Empty;
     }
 
@@ -74,8 +74,21 @@ namespace PFRSentinel.NINA.SentinelDockables {
                 Headline = headline,
                 Reasons = reasons,
                 Rows = rows,
-                Note = c.BaselineLearning ? SentinelConditionsText.Learning(c.BaselineStatus!) + "." : string.Empty,
+                Note = Notes(verdict, c),
             };
+        }
+
+        private static string Notes(SentinelConditionsVerdict verdict, SentinelConditions c) {
+            var notes = new List<string>();
+            foreach (string note in verdict.Notes) {
+                notes.Add(Capitalise(note) + ".");
+            }
+
+            if (c.BaselineLearning) {
+                notes.Add(SentinelConditionsText.Learning(c.BaselineStatus!) + ".");
+            }
+
+            return string.Join(Environment.NewLine, notes);
         }
 
         private static string Roof(SentinelConditionsRoof roof) =>

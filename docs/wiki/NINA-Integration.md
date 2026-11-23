@@ -316,7 +316,9 @@ The trigger's status line in the sequencer, and NINA's log (`PFR Sentinel: pause
 | "No verdict: … has no /conditions endpoint (HTTP 404) …" | Sentinel is older than the plugin. Update Sentinel. |
 | "No verdict: imaging conditions are switched off in Sentinel" | Turn imaging conditions on in Sentinel — see [Imaging Conditions](Imaging-Conditions). |
 | "No verdict: Sentinel has not judged a frame recently …" | Sentinel's capture stopped or stalled. Check the panel's **Health** line and start capture. |
-| "No verdict: Sentinel is still gathering its first frames" | Normal for the first few frames after Sentinel starts. |
+| "No verdict: Sentinel is still gathering its first good frames" | Normal after Sentinel starts or after a gap in frames. A Sentinel running headless, with no frames reaching its imaging-conditions check, stays here and then turns stale — with **No verdict = bad** on, the trigger pauses rather than treating that as OK. |
+| "Not OK: the sky looks good again; Sentinel is waiting for a few good frames in a row" | Normal: Sentinel only says OK again after several good frames in a row. The trigger's **Settle (s)** time starts after that. |
+| "OK to image. latest frame: …" | The latest frame was bad, but Sentinel waits for a few bad frames in a row before saying "not OK", so imaging continues. Your own limits still apply to that frame's figures. |
 | "Not OK: …" | The sky is bad by Sentinel's rules or yours; the rest of the line names which. Loosen your limits on the item, or Sentinel's own on its [Imaging Conditions](Imaging-Conditions) settings. |
 | Never pauses although the sky is bad | Check the trigger is on a container that holds the exposures. With **Only before exposures** on it checks only before NINA's own exposure instructions (Take Exposure, Take Many Exposures, Smart Exposure); an imaging instruction from another plugin may not count, so turn the setting off if you use one. A limit is skipped while its measurement is missing or while Sentinel is learning this sky — the line ends with a note saying so. |
 

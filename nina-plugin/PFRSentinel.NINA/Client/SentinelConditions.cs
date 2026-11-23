@@ -47,6 +47,9 @@ public static class SentinelConditionReasons
     /// <summary>Sentinel has not judged enough frames since it started.</summary>
     public const string WarmingUp = "warming_up";
 
+    /// <summary>Frames are good again; Sentinel waits for enough good frames in a row before saying OK.</summary>
+    public const string Recovering = "recovering";
+
     /// <summary>Imaging conditions are switched off in Sentinel's config.</summary>
     public const string Disabled = "disabled";
 
@@ -56,6 +59,8 @@ public static class SentinelConditionReasons
     /// <remarks>
     /// These are the states the operator's "treat no verdict as bad" setting governs,
     /// the same as an unreachable Sentinel: nothing about the sky has been measured.
+    /// <see cref="Recovering"/> is deliberately not one of them: the sky has been
+    /// measured, and it is Sentinel's own hysteresis still saying "not yet".
     /// </remarks>
     public static bool IsNoVerdict(string code) =>
         code is Stale or WarmingUp or Disabled;
@@ -183,7 +188,15 @@ public sealed class SentinelConditions
     /// <summary>Whether Sentinel considers its verdict out of date.</summary>
     public bool Stale { get; init; }
 
-    /// <summary>Sentinel's verdict. False whenever it has no verdict at all.</summary>
+    /// <summary>
+    /// Sentinel's verdict, after its own bad/good-frame hysteresis. False whenever it has
+    /// no verdict at all.
+    /// </summary>
+    /// <remarks>
+    /// This, not <see cref="Reasons"/>, is the verdict: during the grace frames before
+    /// Sentinel turns "not OK", <see cref="Reasons"/> already lists the latest frame's
+    /// codes while this is still true.
+    /// </remarks>
     public bool ImagingOk { get; init; }
 
     /// <summary>Reason codes; see <see cref="SentinelConditionReasons"/>. Never null.</summary>

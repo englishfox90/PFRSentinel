@@ -109,7 +109,8 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
     /// <list type="number">
     /// <item><description>No reading, a failed read, or one older than <see cref="MaxReadingAge"/> is NoVerdict.</description></item>
     /// <item><description>Sentinel off, stale, or "not OK" only for warming_up / stale / disabled is NoVerdict.</description></item>
-    /// <item><description>Sentinel "not OK" for any measured reason is Bad.</description></item>
+    /// <item><description>Sentinel "not OK" for any measured reason is Bad, <c>recovering</c> included.</description></item>
+    /// <item><description>Sentinel "OK" is decided by <c>imaging_ok</c>, never by <c>reasons</c>: during Sentinel's grace frames <c>reasons</c> lists a bad frame's codes while <c>imaging_ok</c> is still true; those become a note.</description></item>
     /// <item><description>Each limit set and crossed adds a Bad reason; a limit whose measurement is null is skipped with a note, never treated as crossed - except Require roof Open, where an Unknown roof is not Open.</description></item>
     /// <item><description>While <c>baseline_status</c> reads learning, the star-ratio and cloud-cover limits are skipped with a note; the change-% limits still apply.</description></item>
     /// </list>
@@ -165,6 +166,10 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                 if (reasons.Count == 0) {
                     reasons.Add("Sentinel says imaging is not OK");
                 }
+            } else if (c.Reasons.Count > 0) {
+                // Sentinel's grace frames: the latest frame was bad, but not for long
+                // enough to change the verdict. Shown, never acted on - imaging_ok decides.
+                notes.Add("latest frame: " + string.Join("; ", Phrases(c)) + " (Sentinel still says OK until it repeats)");
             }
 
             ApplyLimits(c, thresholds, reasons, notes);
