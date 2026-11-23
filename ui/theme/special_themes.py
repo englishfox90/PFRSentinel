@@ -60,6 +60,46 @@ SPECIAL_THEMES = {
             "Ghoul's night", "No garlic", "Phantom star", "Black cat!", "Broom parked",
         ],
     },
+    'christmas': {
+        'label': 'Christmas',
+        'icon': 'pine-tree',
+        'colors': {
+            # Santa red accent scale. Kept at a pure red hue: qfluentwidgets
+            # lightens the theme colour in dark mode, and a bluer red comes out pink.
+            'iris_3':  '#2B0C0D', 'iris_4':  '#3D1012', 'iris_5':  '#521517',
+            'iris_6':  '#6E1A1D', 'iris_7':  '#931C20', 'iris_8':  '#B5191E',
+            'iris_9':  '#D0161B', 'iris_10': '#E03A3E', 'iris_11': '#FF8F8F',
+            'iris_12': '#FFD9D9',
+            # Sand greys pushed hard toward evergreen at the same luminance, so
+            # dark-site brightness is unchanged. Text greys are left alone.
+            'gray_1': '#08130A', 'gray_2': '#0C1C10', 'gray_3': '#102615',
+            'gray_4': '#142F1A', 'gray_5': '#17371F', 'gray_6': '#1C4224',
+            'gray_7': '#23532D',
+        },
+        # The Bold cut: the Regular's thin strokes break up on the dark cards.
+        'display_font_file': 'MountainsofChristmas-Bold.ttf',
+        'display_font_family': 'Mountains of Christmas',
+        'display_size': 22,
+        'nav_icons': {
+            'monitoring': 'fireplace',
+            'capture': 'gift-outline',
+            'processing': 'cookie-outline',
+            'overlays': 'ribbon',
+            'allsky': 'snowflake',
+            'output': 'bell-ring-outline',
+            'timelapse': 'string-lights',
+            'library': 'stocking',
+        },
+        'sprite': 'christmas',
+        'waiting_words': [
+            "Ho ho ho!", "Silent night", "Star of wonder", "Let it snow", "Sleigh spotted",
+            "Rudolph: red", "North Pole up", "Frosty optics", "Elf on mount", "Mince pie?",
+            "Jingle all", "Holy night", "Snow on dome", "Wrapped subs", "Nice list!",
+            "Yule log on", "Cold fingers", "Mulled wine?", "Santa trail", "Tinsel flats",
+            "Bright star!", "Chimney clear", "Dew? Frost!", "Long night", "Cracker!",
+            "Figgy seeing", "Three kings", "Deck the dome",
+        ],
+    },
 }
 
 # Semantic aliases in tokens.Colors are copied by value at class creation, so

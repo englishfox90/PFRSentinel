@@ -17,10 +17,11 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 
 from ..theme.tokens import Colors
 from ..theme.special_themes import active_special_theme
-from . import status_sprite_astro, status_sprite_halloween
+from . import status_sprite_astro, status_sprite_christmas, status_sprite_halloween
 
 _THEMED_SETS = {
     'halloween': status_sprite_halloween,
+    'christmas': status_sprite_christmas,
 }
 
 

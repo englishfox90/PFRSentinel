@@ -196,12 +196,33 @@ def test_every_sprite_state_paints(qapp, special):
         _flush(qapp, sprite)
 
 
-def test_waiting_words_follow_the_active_pack(qapp):
+@pytest.mark.parametrize("key", PACKS)
+def test_pack_names_a_registered_sprite_set(key):
+    from ui.components import status_sprite
+
+    themed = status_sprite._THEMED_SETS[SPECIAL_THEMES[key]['sprite']]
+    assert set(themed.PAINTERS) | set(themed.OVERLAYS) <= set(status_sprite.StatusSpriteWidget.STATE_TOOLTIPS)
+    assert callable(themed.waiting_dots)
+
+
+def test_switching_between_packs_leaves_nothing_of_the_first():
+    apply_appearance('iris', 'halloween')
+    apply_appearance('iris', 'christmas')
+
+    colors = SPECIAL_THEMES['christmas']['colors']
+    assert special_themes.active_special_theme_key() == 'christmas'
+    assert Colors.accent_default == colors['iris_9']
+    assert Colors.bg_app == colors['gray_1']
+    assert 'Creepster' not in get_stylesheet()
+
+
+@pytest.mark.parametrize("key", PACKS)
+def test_waiting_words_follow_the_active_pack(qapp, key):
     from ui.components.status_sprite import StatusSpriteWidget
 
     sprite = StatusSpriteWidget()
     try:
-        pack = SPECIAL_THEMES['halloween']
+        pack = SPECIAL_THEMES[key]
         assert sprite._next_waiting_word(pack) in pack['waiting_words']
         assert sprite._next_waiting_word(None) in StatusSpriteWidget.WAITING_WORDS
     finally:

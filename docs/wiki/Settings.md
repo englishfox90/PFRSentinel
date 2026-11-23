@@ -9,7 +9,7 @@ The Settings tab holds application-wide options: the accent colour and special t
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Theme** (accent swatches) | Iris | Six colour swatches (hover one to see its name): **Iris**, **Nebula**, **Aurora**, **Solar**, **Nova**, and **Forest**. The accent colours buttons, switches, the selected navigation item, and other highlights. The change applies immediately. The app always uses its dark theme. |
-| **Theme** (special themes) | Off | The chips after the divider are special themes. **Halloween** changes more than the colour: a pumpkin accent on purple-black backgrounds, card headings in a display font, themed icons in the navigation rail, and spooky versions of the pipeline status animations. Click the chip again to switch it off, or click any accent swatch; your accent comes back as you left it. |
+| **Theme** (special themes) | Off | The chips after the divider are special themes. **Halloween** changes more than the colour: a pumpkin accent on purple-black backgrounds, card headings in a display font, themed icons in the navigation rail, and spooky versions of the pipeline status animations. **Christmas** (new in the next release, not available in version 3.8.0 or earlier) is a Santa-red accent on evergreen backgrounds, card headings in a festive display font, festive icons in the navigation rail and Christmas versions of the status animations. Click the chip again to switch it off, or click any accent swatch; your accent comes back as you left it. |
 
 > **New in the next release** — special themes are not available in version 3.7.6 or earlier.
 

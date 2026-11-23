@@ -242,6 +242,9 @@ added_files = [
     # Heading font for the Halloween special theme (ui/theme/special_themes.py)
     ('assets/fonts/Creepster-Regular.ttf', 'assets/fonts'),
     ('assets/fonts/OFL-Creepster.txt', 'assets/fonts'),
+    # Heading font for the Christmas special theme. Apache 2.0; the licence ships beside it.
+    ('assets/fonts/MountainsofChristmas-Bold.ttf', 'assets/fonts'),
+    ('assets/fonts/Apache-MountainsofChristmas.txt', 'assets/fonts'),
     # ML models (ONNX format for production)
     ('ml/models/roof_classifier_v1.onnx', 'ml/models'),
     ('ml/models/sky_classifier_v1.onnx', 'ml/models'),
