@@ -115,6 +115,12 @@ The roof reading is now corroborated by the frame itself. A frame flagged as sen
 
 The [Meteor Detection](Meteor-Detection) roof check is separate and does not follow this setting or the star check. With ML analysis on, meteor detection pauses whenever the roof is not reported Open, which includes Closed and uncertain (`N/A`) readings, and also when only the sky model loaded. See [Meteor Detection](Meteor-Detection#roof-gate) for details. The roof change notifications, the timelapse roof mode and the ASCOM safety file likewise follow the roof classifier alone.
 
+### Imaging Conditions
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+The roof reading and the sky class feed the [imaging conditions](Imaging-Conditions) verdict the NINA plugin uses to pause a sequence under cloud, in camera and Directory Watch mode alike. Without ML the verdict has no roof reading, so turn off `require_roof_open` if your camera has no roof; see [Imaging Conditions](Imaging-Conditions#settings).
+
 ### Roof Change Notifications
 
 [Discord](Discord-Integration) and [Hermes](Hermes-Notifications) can post a message when the roof opens or closes. A change is only reported after two consecutive frames agree, so a single misread frame doesn't trigger a notification.
@@ -129,14 +135,14 @@ The [Image Library](Image-Library) stores the roof and sky results with each fra
 
 ### ASCOM Safety File (NINA Integration)
 
-PFR Sentinel can write the roof status to a text file watched by NINA's **GenericFile** safety monitor, so NINA can react when the roof closes. The file is written in ZWO Camera mode only.
+> **New in the next release** — not available in version 3.8.0 or earlier. Both settings are in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab. In 3.8.0 and earlier they are in the ML Models card on Image Processing, labelled **ASCOM Safety File** and **File Path**.
+
+PFR Sentinel can write the roof status to a text file watched by NINA's **GenericFile** safety monitor, so NINA can react when the roof closes. The file is written in camera capture mode only (ZWO Camera, or [Alpaca Camera](Alpaca-Camera) from the next release), not in Directory Watch mode.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **ASCOM Safety File** | Off | Write roof status to the file. |
-| **File Path** | `%LOCALAPPDATA%\PFRSentinel\RoofStatusFile.txt` | The file NINA monitors. Type a path or use **Browse**. |
-
-From the next release these two settings are in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab, labelled **ASCOM safety file** and **File path**; in 3.8.0 and earlier they are in the ML Models card on Image Processing.
+| **ASCOM safety file** | Off | Write roof status to the file. |
+| **File path** | `%LOCALAPPDATA%\PFRSentinel\RoofStatusFile.txt` | The file NINA monitors. Type a path or use **Browse**. |
 
 File format:
 
@@ -166,13 +172,13 @@ Because the file only changes when frames are processed, it can only be as curre
 
 ### Alpaca Safety Monitor
 
-Added in version v3.8.0.
+Added in version v3.8.0. From the next release it is set up in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab; in 3.8.0 it is in the ML Models card on Image Processing.
 
 PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**, so any Alpaca client can use it directly: NINA (ASCOM Alpaca safety monitor), INDIGO A1 (ASCOM Alpaca Client driver), and others on Windows, macOS or Linux. No file or shared folder is needed. Like the file, it is fed in camera capture mode only (ZWO Camera, or [Alpaca Camera](Alpaca-Camera) from the next release). If your Alpaca camera's server also uses port 11111, see [Port 11111](Alpaca-Camera#port-11111-and-pfrs-own-safety-monitor).
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Alpaca SafetyMonitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. In the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab from the next release (the ML Models card on Image Processing in 3.8.0 and earlier). |
+| **Alpaca SafetyMonitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. Underneath, the card shows the address it listens on ("Listening on 127.0.0.1:11111 …") and how to add it in NINA. |
 
 By default it listens on **this computer only**, at `127.0.0.1:11111`. In a client on the same computer, add the server by hand as `127.0.0.1:11111`.
 
@@ -202,7 +208,7 @@ The models ship with the application and run with ONNX Runtime. They load when y
 | ✗ Error: ... | Something went wrong while checking the models; the start of the error is shown |
 | Disabled | ML analysis is off |
 
-In ZWO Camera mode, ML results drive everything on this page. In Directory Watch mode the models only provide the [overlay tokens](#overlay-tokens): the Live Monitoring tiles, roof change notifications, the ASCOM safety file, the timelapse and meteor detection roof checks, and data contribution are ZWO Camera mode features.
+In ZWO Camera mode, ML results drive everything on this page. In Directory Watch mode the models provide the [overlay tokens](#overlay-tokens) and, from the next release, the roof and sky readings for [imaging conditions](#imaging-conditions); the Live Monitoring tiles, roof change notifications, the ASCOM safety file, the timelapse and meteor detection roof checks, and data contribution are ZWO Camera mode features.
 
 Development builds can additionally save per-frame calibration data (FITS and JSON files with the model predictions) for retraining. That is a developer tool and is not part of the released application.
 

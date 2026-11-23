@@ -1,6 +1,6 @@
 # Output Settings
 
-The **Output** tab controls where processed images go and who hears about them. Saved files, the built-in web server, Discord and Hermes notifications all run at the same time, so you can switch on any combination. The tab also holds the NINA plugin installer, storage cleanup and the Image Library settings. Everything except **File Output** sits in a collapsible card, and the cards start collapsed. Click a card's header to open it.
+The **Output** tab controls where processed images go and who hears about them. Saved files, the built-in web server, Discord and Hermes notifications all run at the same time, so you can switch on any combination. The tab also holds storage cleanup and the Image Library settings. From the next release the NINA plugin installer and the capture control API are on the [NINA & ASCOM](NINA-and-ASCOM) tab. Everything except **File Output** sits in a collapsible card, and the cards start collapsed. Click a card's header to open it.
 
 ---
 
@@ -43,15 +43,9 @@ A built-in HTTP server that serves the latest image, a JSON status report and an
 
 ## NINA Plugin
 
-Installs, updates or removes the PFR Sentinel plugin for N.I.N.A.
+> **New in the next release** — not available in version 3.8.0 or earlier.
 
-| Element | Description |
-|---------|-------------|
-| **Status** | Whether NINA was found and whether the plugin is installed, out of date, or installed for an older NINA plugin version. |
-| **Install Plugin** | Copies the plugin into NINA. The button reads **Update Plugin** when a newer plugin is bundled, and **Reinstall Plugin** when the plugin is already installed. |
-| **Remove** | Removes the plugin from NINA. |
-
-Close NINA before you install, update or remove the plugin, then restart NINA to load the change. See [NINA Integration](NINA-Integration).
+The **NINA Plugin** card has moved to the [NINA & ASCOM](NINA-and-ASCOM) tab; the **Open** button in the Web Server card takes you there. In 3.8.0 and earlier the card is on this tab, below the Web Server card. See [NINA Integration](NINA-Integration#installing-updating-and-removing) for what it does.
 
 ---
 

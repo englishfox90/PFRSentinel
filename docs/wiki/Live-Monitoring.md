@@ -9,7 +9,7 @@ Live Monitoring is the operational view of PFR Sentinel: the latest processed fr
 From top to bottom the window has:
 
 1. **App bar**: app name, pipeline status animation, notification bell, and the main Start/Stop button.
-2. **Status strip**: tiles for Web, Discord, Roof, Sky, Weather, and Seeing, plus the capture/camera state.
+2. **Status strip**: tiles for Web, Discord, Roof, Sky, Weather, Seeing and (from the next release) Imaging, plus the capture/camera state.
 3. **Content area**: the navigation rail on the left, then the page content.
 4. **Telemetry bar**: disk space and the latest frame's exposure, gain, sensor temperature, and capture time.
 
@@ -70,11 +70,10 @@ The band below the app bar shows live observatory status. Tiles that have nothin
 | **WEB** | **On** when the web server is running, **Starting…** when it is enabled but not yet running, **Off** when disabled. See [Web Server](Web-Server). |
 | **DISCORD** | **On** or **Off**, following the Discord setting on the [Output](Output-Settings) tab. |
 | **ROOF** | **Open** (green) or **Closed** (red) from the roof classifier. Turns amber and reads **Open · unreliable** or **Closed · unreliable** when the frame is only sensor noise, with **Too much static** on the Sky tile (new in the next release; see [ML Models](ML-Models#too-much-static)). Needs ML models enabled; see [ML Models](ML-Models). |
-| **SKY** | Sky condition from the sky classifier: **Clear** (green), **Partly Cloudy** (amber), or other conditions such as **Overcast** (red). Shows **Roof closed** while the roof is closed, because the camera can't see the sky. Shows **Exposure too short** or **No stars detected** when the frame was judged not to show a night sky (new in the next release; see [When the overlay is drawn](All-Sky-Overlay#when-the-overlay-is-drawn)). Needs ML models enabled for the sky condition; the two gate messages appear without them. |
+| **SKY** | Sky condition from the sky classifier: **Clear** (green), **Partly Cloudy** (amber) or **Overcast** (red). Shows **Roof closed** while the roof is closed, because the camera can't see the sky. Shows **Exposure too short** or **No stars detected** when the frame was judged not to show a night sky (new in the next release; see [When the overlay is drawn](All-Sky-Overlay#when-the-overlay-is-drawn)). Needs ML models enabled for the sky condition; the two gate messages appear without them. |
 | **WEATHER** | Temperature, condition, and cloud cover from OpenWeatherMap, e.g. "12.0°C · Clear · 20%". Needs an API key and a location or coordinates in [Settings](Settings). The tile keeps updating while capture is stopped, and dims if the weather data is more than 30 minutes old (for example, an invalid API key or no internet). |
 | **SEEING** | Star count and FWHM from star detection, e.g. "412 stars · FWHM 2.3". Shows **—** until the first reading arrives, **Roof closed** while the roof is closed, and **—** again while the Sky tile reports **Exposure too short** or **No stars detected**, because star detection is skipped on those frames. |
-
-| **IMAGING** | The [imaging conditions](Imaging-Conditions) verdict NINA reads: **OK · 5% cloud**, **Paused · Cloud cover high**, **Warming up**, **Recovering**, **Idle** or **Off**. Click it to open the conditions panel on Live Monitoring (new in the next release). |
+| **IMAGING** | New in the next release. The [imaging conditions](Imaging-Conditions#the-imaging-tile) verdict NINA reads, for example **OK · 5% cloud**, **Paused · Cloud cover high**, **Paused · No recent frames**, **Paused · Capture stopped**, **Warming up**, **Recovering**, **Idle** or **Off**. Click it, from any page, to open the [conditions panel](#imaging-conditions-panel) on Live Monitoring. |
 
 Roof, Sky, and Seeing are updated with each processed frame and are dimmed while capture is stopped, so you can tell a live reading from the last known one.
 
@@ -86,7 +85,19 @@ At the right-hand end, the capture/camera pill shows:
 | Idle | **CAMERA** "Connected · idle" |
 | Idle, Alpaca camera not yet reached | **CAMERA** "Alpaca · not connected": in [Alpaca Camera](Alpaca-Camera) mode, shown until a **Test Connection** passes or capture runs against the current host, port and device. **Start Capture** is still available. New in the next release. |
 | Capturing, camera recovering | Amber **CAPTURE** pill with "Reconnecting to camera…" while a reconnect runs, or "Camera lost · retrying" while it waits for the next attempt. ZWO and Alpaca cameras alike. New in the next release. |
+| Capturing, Alpaca camera reconnected | Amber **CAPTURE** pill with "Reconnected · waiting for a frame" after a reconnect, until the next frame arrives, or "Camera not finishing exposures" while the camera answers but its exposures never finish (see [Alpaca Camera](Alpaca-Camera#when-the-camera-answers-but-exposures-never-finish)). New in the next release. |
 | No camera | Red **CAMERA** "Disconnected" (or "Camera error" after a camera failure) |
+
+### On a Narrow Window
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+When the window is too narrow for every tile at full width, the strip makes room in this order, and changes nothing while everything fits:
+
+1. Tiles fold to just their icon, one at a time: first ROOF, SKY and WEATHER while they only say **Not configured**, then WEB, DISCORD, WEATHER and SEEING.
+2. If that is still not enough, the remaining values are shortened at a word boundary with "…" (never in the middle of a word): ROOF, SKY and the camera pill first, a word at a time in turn, and IMAGING last.
+
+ROOF and SKY never fold while they show a reading, and IMAGING never folds. Hover a folded or shortened tile to see its full value at the top of its tooltip. Widening the window brings the full layout back.
 
 ---
 

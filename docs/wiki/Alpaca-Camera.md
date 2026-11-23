@@ -12,7 +12,7 @@ Use it when:
 
 On a Windows PC, **ASCOM Remote** can serve any camera that has an ASCOM driver ([ZWO's ASCOM driver](https://www.zwoastro.com/software/ascom-driver/) included) as an Alpaca device. ASCOM Remote and ZWO's ASCOM driver are Windows-only, so a camera plugged into a Mac or a Linux machine needs an Alpaca server made for that system. Some cameras and other programs have an Alpaca server built in.
 
-**What has been tested so far:** PFR Sentinel's Alpaca support has been checked against a simulated camera that follows the ASCOM Alpaca specification, that same simulator against ASCOM's official Python client (alpyca), and a ZWO ASI676MC served by an Alpaca server on a Mac and reached over a VPN. It has **not yet been tested with ZWO's ASCOM driver through ASCOM Remote**. If you try it with your camera, please report how it went on the [issues page](https://github.com/englishfox90/PFRSentinel/issues), with a [Diagnostics Export](Diagnostics-Export) if something is wrong.
+**What has been tested so far:** PFR Sentinel's Alpaca support has been checked against a simulated camera that follows the ASCOM Alpaca specification, that same simulator against ASCOM's official Python client (alpyca), a ZWO ASI676MC served by an Alpaca server on a Mac and reached over a VPN, and a user's ASI676MC through ZWO's ASCOM driver in ASCOM Remote on Windows 11, with NINA running on the same PC ([issue #177](https://github.com/englishfox90/PFRSentinel/issues/177): connecting another ZWO camera in NINA could leave the 676 unable to finish exposures; Sentinel now reopens the camera in the driver when that happens, see [When the camera answers but exposures never finish](#when-the-camera-answers-but-exposures-never-finish)). If you try it with your camera, please report how it went on the [issues page](https://github.com/englishfox90/PFRSentinel/issues), with a [Diagnostics Export](Diagnostics-Export) if something is wrong.
 
 ---
 
@@ -136,7 +136,7 @@ If PFR Sentinel is the only program using the camera and you want it to disconne
 
 ## Port 11111 and PFR's Own Safety Monitor
 
-11111 is the default port for Alpaca servers, and it is also the default port of PFR Sentinel's own [Alpaca Safety Monitor](ML-Models#alpaca-safety-monitor). If PFR Sentinel's camera settings point at its own safety monitor, Test Connection and Start Capture fail with:
+11111 is the default port for Alpaca servers, and it is also the default port of PFR Sentinel's own [Alpaca Safety Monitor](ML-Models#alpaca-safety-monitor), which is switched on in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab. If PFR Sentinel's camera settings point at its own safety monitor, Test Connection and Start Capture fail with:
 
 > `127.0.0.1:11111 answers but has no Camera device (it lists: SafetyMonitor). Is this PFR's own Alpaca SafetyMonitor port, or another server? Check the host and port.`
 
@@ -187,7 +187,9 @@ The messages below appear on the Camera Connection card after **Test Connection*
 | `Exposure error: camera returned to IDLE without an image` | The server started the exposure but never produced an image. Most often another program on the server computer (a second copy of PFR Sentinel, the camera maker's capture app, another astronomy program) has the camera open. Close it, reconnect the camera in the server, and try again. |
 | `Alpaca camera reads out in '...' (8-bit) but reports MaxADU ...` | The camera is in an 8-bit readout mode with no 16-bit mode to switch to, so frames look darker than they should. Pick a 16-bit readout mode in the Alpaca server if it has one. |
 | `Alpaca camera delivered pixels above its MaxADU ...` | The driver's MaxADU is wrong. PFR Sentinel uses the full 16-bit range for the session; see [What Is Different](#what-is-different). |
-| `Alpaca server sent an ImageBytes image that cannot be decoded ...; downloading as JSON for this session` | The server's compact image format was unreadable, so images are downloaded in the larger JSON format instead. Frames still arrive, just more slowly. |
+| `Alpaca ImageBytes image could not be decoded (...); taking this frame as JSON` | One image in the compact ImageBytes format was unreadable, so that frame was downloaded again in the larger JSON format. The next frame tries ImageBytes again. |
+| `Alpaca server sent an ImageBytes image that cannot be decoded ...; downloading as JSON for this session` | ImageBytes was unreadable on two frames in a row, so images are downloaded as JSON for the rest of the session, reconnects included. Frames still arrive, just more slowly. |
+| `Alpaca server's ImageBytes images arrive N bytes short (the size of their header — a known INDIGO bug) ...` | A warning, logged once. The server sends each image a few bytes short. PFR Sentinel keeps using ImageBytes and fills the last few pixels (the bottom-right corner) with black. Any other short image is fetched again as JSON. |
 | `Exposure timeout: camera did not complete ... (camera still reports ...)` | The exposure took more than 30 seconds longer than it should have. The part in brackets says what the camera reported. If it keeps happening while the camera reads Exposing, see [When the camera answers but exposures never finish](#when-the-camera-answers-but-exposures-never-finish). |
 | `Alpaca camera reconnected but did not finish a 1s test exposure: ...` | After a reconnect, the camera still didn't finish a short exposure. PFR Sentinel tries again, and has the driver reopen the camera if needed (same section). |
 | `⚠ Exposure ...s is outside the camera's range ... — using ...s` | The exposure was moved into the range the camera accepts. |

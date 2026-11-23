@@ -24,7 +24,7 @@ When control is on, the API reference served by Sentinel at `/docs` (the **Open 
 
 ## The API Token
 
-The **API Token** row shows the token masked, with three buttons (from the next release, Copy and Regenerate are icon buttons; hover for their names):
+The **API Token** row shows the token masked, with three buttons. From the next release **Copy** and **Regenerate** are icon buttons beside **Show**: hover them for "Copy the token" and "Make a new token (the old one stops working)".
 
 | Button | What it does |
 |--------|--------------|
@@ -76,8 +76,9 @@ The control routes live under `/capture` by default. The base path can be change
 | `POST` | `/capture/stop` | Stop capture. |
 | `GET` | `/capture` | Current capture state plus a readiness flag, without issuing a command. |
 | `POST` | `/nina/target` | Report the target your imaging rig is on, for the all-sky overlay (see [below](#post-ninatarget)). Added in version v3.7.9. |
+| `GET` | `/conditions` | Whether the sky is good enough to image, with the reasons and measurements. See [Imaging Conditions](Imaging-Conditions#reading-it-from-a-script). New in the next release. |
 
-All of them need the `Authorization: Bearer <token>` header. A query string on the path is ignored on every route. A trailing slash is ignored only on the `POST` routes, so `POST /capture/start/` works but `GET /capture/` returns `404`. A `POST` to any other path returns `404`. `/nina/target` is a fixed path: it does not move with `webserver_control_path`.
+All of them need the `Authorization: Bearer <token>` header. A query string on the path is ignored on every route. A trailing slash is ignored only on the `POST` routes, so `POST /capture/start/` works but `GET /capture/` returns `404`. A `POST` to any other path returns `404`. `/nina/target` and `/conditions` are fixed paths: they do not move with `webserver_control_path`.
 
 ---
 
@@ -321,7 +322,7 @@ Rejected requests return JSON with a machine-readable `code`. Branch on `code`, 
 |------|--------|-------|-----|
 | 400 | `bad_request` | Body is not valid UTF-8 JSON, not an object, `wait` is not a boolean, `timeout` is not a number between 1 and 300, a `/nina/target` field is missing or out of range, or `Content-Length` is invalid. The `error` text names the field. | Fix the request. |
 | 413 | `body_too_large` | Body larger than 4096 bytes. | Send only the documented fields. |
-| 401 | `unauthorized` | Token missing, malformed (not `Bearer <token>`) or wrong. | Copy the current token from the Output tab. |
+| 401 | `unauthorized` | Token missing, malformed (not `Bearer <token>`) or wrong. | Copy the current token from the NINA & ASCOM tab (the Output tab in 3.8.0 and earlier). |
 | 403 | `host_not_allowed` | `Host` header not on the allow-list. | Call from the same machine, or see [Host allow-list](#host-allow-list). |
 | 503 | `control_disabled` | **Enable Capture Control API** is off. | Turn it on in the NINA & ASCOM tab (the Output tab in 3.8.0 and earlier). |
 | 503 | `control_unavailable` | Control is on and the token is valid, but Sentinel's capture controls aren't connected to the server (this shouldn't happen). Capture commands only; `/nina/target` never returns it. | Restart Sentinel. |

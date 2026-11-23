@@ -34,10 +34,12 @@ The web server is set up in the **Web Server** card on the [Output Settings](Out
 | `/openapi.json` | The same reference as an OpenAPI 3.0 spec, for tools that read one. |
 | `/library`, `/library/image` | Recent frames from the Image Library. Only served when **Expose Web API** is on. See [Image Library](Image-Library). |
 | `/capture`, `/capture/start`, `/capture/stop` | Capture state and start/stop commands. Only served when the capture control API is enabled, and they need the API token. See [Capture Control API](Capture-Control-API). |
+| `/nina/target` | Where the NINA plugin reports the target it is imaging, for the [all-sky overlay](All-Sky-Overlay#nina-target). Same token. See [Capture Control API](Capture-Control-API#post-ninatarget). |
+| `/conditions` | The [imaging conditions](Imaging-Conditions) verdict NINA reads to pause and resume a sequence. Same token. New in the next release. |
 
 Query strings don't affect which endpoint you reach, so `/latest?t=1764384123178` still returns the latest image. That makes cache-busting easy. A request for an unknown path returns `404` and lists the paths that are available.
 
-The `/docs` page and the OpenAPI spec only list the library and capture control endpoints while those features are switched on.
+The `/docs` page and the OpenAPI spec only list the library and capture control endpoints (including `/nina/target` and `/conditions`) while those features are switched on.
 
 ---
 
@@ -96,6 +98,7 @@ The age headers let a viewer notice that capture has stalled without comparing i
 | `timestamp` | string | This PC's local time, in ISO format. |
 | `capture` | object | Capture mode, state, interval, schedule, last and next capture times, recovery state and last error. |
 | `health` | object | Overall health (`ok`, `idle`, `degraded`, `recovering` or `error`) and the reasons behind it. |
+| `conditions` | object | The [imaging conditions](Imaging-Conditions) verdict in short: `imaging_ok`, `reasons`, `changed_at` and `stale`. Needs no token; the full verdict is at `/conditions`. New in the next release. |
 
 The `capture` and `health` blocks are described field by field on the [Capture Control API](Capture-Control-API) page and on the server's own `/docs` page. For a simple "is it working?" check, look at `health.status`. It changes from `ok` when capture is off, outside its schedule, stalled, recovering or failed.
 
@@ -145,7 +148,7 @@ The server handles each request on its own thread and drops a connection that st
 Add a browser source with the URL `http://localhost:8080/latest`. Set its refresh interval to match your capture interval.
 
 **NINA:**
-Install the PFR Sentinel plugin from the **Output** tab. It shows the live frame and capture health inside NINA. See [NINA Integration](NINA-Integration). Any other image viewer can simply point at `http://<ip>:8080/latest`.
+Install the PFR Sentinel plugin from the **[NINA & ASCOM](NINA-and-ASCOM)** tab (the **Output** tab in 3.8.0 and earlier). It shows the live frame, capture health and the imaging conditions inside NINA. See [NINA Integration](NINA-Integration). Any other image viewer can simply point at `http://<ip>:8080/latest`.
 
 **Custom dashboard:**
 Poll `/status` for health and metadata, and show `/latest` for the image. Use ETags or a changing `?t=` value to control caching, and watch `image_stale` or `health.status` to raise an alert when capture stops.

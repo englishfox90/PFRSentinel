@@ -195,7 +195,7 @@ The plugin finds Sentinel by reading Sentinel's own settings file for the curren
 
 So there is nothing to set up in NINA and no token to copy. The plugin never displays or logs the token.
 
-If you click **Regenerate** next to **API Token** in Sentinel, the old token stops working immediately. The plugin notices the rejection, re-reads Sentinel's settings, and carries on with the new token — no NINA restart needed.
+If you make a new token with the regenerate button next to **API Token** in Sentinel (an icon button from the next release; hover it for "Make a new token"), the old token stops working immediately. The plugin notices the rejection, re-reads Sentinel's settings, and carries on with the new token — no NINA restart needed.
 
 Turning capture control on is different. The panel keeps the settings it last read, and only re-reads them when you click **Reconnect** or after the token is rejected. After turning capture control on, click **Reconnect** in the panel (or restart NINA). The sequencer instructions pick up the change on their own within about ten seconds.
 
@@ -290,8 +290,8 @@ The panel always explains why the buttons are disabled:
 |---------|-----|
 | …the capture control API is switched off in Sentinel. | Turn on **Enable Capture Control API** on Sentinel's NINA & ASCOM tab, then click **Reconnect**. |
 | …Sentinel is running but capture control is not wired up. | Restart Sentinel. |
-| …Sentinel rejected the control token. | Click **Regenerate** next to **API Token** in Sentinel, then **Reconnect**. |
-| …no capture control token is configured. | Turn on **Enable Capture Control API** to generate one. |
+| …Sentinel rejected the control token. | Click the regenerate button next to **API Token** on Sentinel's NINA & ASCOM tab, then **Reconnect**. |
+| …no capture control token is configured. | Turn on **Enable Capture Control API** on Sentinel's NINA & ASCOM tab to generate one. |
 | …capture control could not be reached. / …Sentinel has not been reached yet. | Check Sentinel is running with **Enable Web Server** on, and that nothing is blocking the port. |
 | Waiting for Sentinel to confirm the last command… | A Start or Stop is in progress; it can take up to about 45 seconds with the default wait. |
 
@@ -299,9 +299,9 @@ The panel always explains why the buttons are disabled:
 
 | Issue | Fix |
 |-------|-----|
-| PFR Sentinel's capture control API is switched off. Enable it on Sentinel's Output tab. | Turn on **Enable Capture Control API**. It is now on the NINA & ASCOM tab; the Output tab's **Web Server** card has an **Open** button that takes you there. |
+| PFR Sentinel's capture control API is switched off. Enable it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier). | Turn on **Enable Capture Control API** on the NINA & ASCOM tab. Plugin 1.2.1.0 and earlier say "Enable it on Sentinel's Output tab"; the Output tab's **Web Server** card has an **Open** button that takes you to the switch. |
 | PFR Sentinel is running but capture control is not wired up. Restart Sentinel. | Restart Sentinel. |
-| PFR Sentinel rejected the control token. Regenerate it on Sentinel's Output tab. | Click the regenerate button next to **API Token** (now on the NINA & ASCOM tab). |
+| PFR Sentinel rejected the control token. Regenerate it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier). | Click the regenerate button ("Make a new token") next to **API Token** on the NINA & ASCOM tab. Plugin 1.2.1.0 and earlier say "Regenerate it on Sentinel's Output tab". |
 | …not reachable… Check Sentinel is running with its web server enabled, and that the host and port match. | Start Sentinel and turn on **Enable Web Server**. |
 | PFR Sentinel refused the request's Host header… | Capture control accepts calls from the same machine only. See [Capture Control API](Capture-Control-API#host-allow-list). |
 | PFR Sentinel did not answer in time. | Check Sentinel is running and not blocked by a firewall. |
