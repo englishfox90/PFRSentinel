@@ -18,7 +18,11 @@ It works in camera mode (ZWO and [Alpaca](Alpaca-Camera) cameras) and in Directo
 
 ## Where to find it
 
-**Image Processing → Imaging Conditions**, under the ML Models card. The card shows the current verdict, why it was reached and the measurements behind it. It also holds the main settings. The status strip at the top of the window has an **IMAGING** tile that shows the same verdict.
+**Image Processing → Imaging Conditions**, under the ML Models card. The card shows the current verdict, any further reasons behind it and the measurements it was judged on. It also holds the main settings. The status strip at the top of the window has an **IMAGING** tile that shows the same verdict.
+
+Before capture starts the tile reads **Idle**. Once capture is running it reads **Warming up** until enough good frames have been seen.
+
+The card's **Star index** is not the same number as the star count on the **SEEING** tile. The star index counts stars on the sky disc after it has been scaled to a fixed size, so it can be compared from frame to frame and with your clear-sky figure. The SEEING count comes from the full-size frame, where the sharpness (FWHM) is measured, and changes with the frame size. Hover over the measurements for the same explanation.
 
 The roof and sky readings need [ML Models](ML-Models) switched on. Without them, turn off **require roof open** in `config.json` (see below) if you have no roof.
 
@@ -28,7 +32,7 @@ Every installation sees a different number of stars on a clear night. The lens, 
 
 A frame teaches it only when it is certain the sky is clear: the roof reads Open, the sun is more than 18° below the horizon, the sky classifier reads Clear, and the frame is not just sensor noise. A bright Moon washes out many stars, so the clear-sky count is learned separately for the Moon below the horizon and for each quarter of Moon brightness.
 
-Until enough clear frames have been seen for the current Moon phase (30 by default), the card says **Learning your sky (12/30 clear frames for this Moon phase)**. While it is learning:
+Until enough clear frames have been seen for the current Moon phase (30 by default), the card says, for example, **Learning your sky: 12/30 clear frames (Moon up, 25–50% lit)**. The line is hidden in daylight and whenever a frame has no star index, because those frames cannot teach it anything. While it is learning:
 
 - no star-count comparison is made, so a low count alone never pauses imaging
 - the cloud cover is a rough figure taken from the ML sky class, and is marked as such
@@ -53,7 +57,7 @@ A frame counts as **bad** when any of these is true:
 
 One bad frame does not pause imaging. It takes **3 bad frames in a row** to pause, and **3 good frames in a row** to resume, so a single passing cloud or a single clear gap does not stop and restart a sequence. When PFR Sentinel starts, imaging stays paused ("warming up") until it has seen 3 good frames.
 
-If frames stop arriving, for example because the camera disconnected, the verdict goes **stale** and reads as not OK. By default this happens after three frame intervals, and never sooner than 2 minutes. When frames resume, the 3 good frames are needed again.
+If frames stop arriving, for example because the camera disconnected, the verdict goes **stale** and reads as not OK: the tile shows **Paused · No recent frames**, or **Paused · Capture stopped** if you stopped capture yourself. The measurements on the card then start with the time of the last frame, so they are not mistaken for current ones. By default this happens after three frame intervals, and never sooner than 2 minutes. When frames resume, the 3 good frames are needed again.
 
 ## Settings
 
@@ -84,7 +88,7 @@ The verdict is served at `GET /conditions` on the [web server](Web-Server), with
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/conditions
 ```
 
-The main fields are `imaging_ok` (true or false), `reasons` (a list of codes such as `cloud_cover_high` or `stars_dropping`), `changed_at`, `stale`, `cloud_cover_pct` with `cloud_cover_source` (`star_baseline` or `ml_class`), `stars.change_pct` (signed %, e.g. `-45.0`, over `stars.window_frames` frames), `fwhm.px`, `fwhm.change_pct` and `baseline_status` (`learning` or `ready`, with `samples` and `needed`). `fwhm.arcsec` is filled in only when an [all-sky calibration](All-Sky-Overlay) gives the plate scale. Every field is described at `/docs` on the web server.
+The main fields are `imaging_ok` (true or false), `reasons` (a list of codes such as `cloud_cover_high` or `stars_dropping`), `changed_at`, `stale`, `cloud_cover_pct` with `cloud_cover_source` (`star_baseline` or `ml_class`), `stars.change_pct` (signed %, e.g. `-45.0`, over `stars.window_frames` frames), `fwhm.px`, `fwhm.change_pct` and `baseline_status` (`learning` or `ready`, with `samples` and `needed`). `fwhm.arcsec` is filled in only when an [all-sky calibration](All-Sky-Overlay) gives the plate scale. Every field, including the nested ones such as `stars.count`, is described in the `/conditions` fields table at `/docs` on the web server (shown once the control API is on).
 
 `/status` carries a short `conditions` block (`imaging_ok`, `reasons`, `changed_at`, `stale`) without a token.
 
