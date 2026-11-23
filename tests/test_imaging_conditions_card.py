@@ -219,5 +219,12 @@ def test_row_labels_fit_their_column(card):
     assert len(rows) >= 6
     for row in rows:
         label = row.findChild(BodyLabel)
-        width = label.fontMetrics().horizontalAdvance(label.text())
-        assert width <= label.width(), f"{label.text()!r} is {width}px in {label.width()}px"
+        metrics = label.fontMetrics()
+        if metrics.horizontalAdvance(label.text()) <= label.width():
+            continue
+        # Wider fonts (Windows' Segoe UI) wrap the label onto more lines; it is
+        # never clipped as long as each word fits the column.
+        assert label.wordWrap(), f"{label.text()!r} would be clipped"
+        for word in label.text().split():
+            width = metrics.horizontalAdvance(word)
+            assert width <= label.width(), f"{word!r} is {width}px in {label.width()}px"
