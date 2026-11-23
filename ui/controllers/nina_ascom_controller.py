@@ -70,7 +70,7 @@ class NinaAscomController(QObject):
             return
         regenerate()
         self._sync_token()
-        self._notify("New API token made — any tool using the old one must be updated.")
+        self._notify("New API token generated — any tool using the old one must be updated.")
 
     def _sync_token(self) -> None:
         ensure = getattr(self._main_window, 'ensure_control_token', None)

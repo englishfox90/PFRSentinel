@@ -39,7 +39,7 @@ class ControlApiCard(CollapsibleCard):
         self.add_widget(self.web_off_label)
 
         self.control_enabled_switch = SwitchRow(
-            "Capture control API",
+            "Enable Capture Control API",
             "Let NINA and other local tools read conditions and start/stop capture")
         self.control_enabled_switch.toggled.connect(self.enabled_toggled.emit)
         self.add_widget(self.control_enabled_switch)
@@ -70,7 +70,7 @@ class ControlApiCard(CollapsibleCard):
         token_row.addWidget(self.regen_token_btn)
         token_widget = QWidget()
         token_widget.setLayout(token_row)
-        self.add_row("API token", token_widget,
+        self.add_row("API Token", token_widget,
                      "The NINA plugin and scripts read this automatically — copy it "
                      "only for other tools")
 
@@ -102,7 +102,7 @@ class ControlApiCard(CollapsibleCard):
     def _copy_token(self):
         token = self.control_token_input.text()
         if not token:
-            self.notify.emit("No token yet — turn the capture control API on first.", 'warning')
+            self.notify.emit("No token yet — enable the capture control API first.", 'warning')
             return
         QApplication.clipboard().setText(token)
         self.notify.emit("API token copied to clipboard", 'info')
