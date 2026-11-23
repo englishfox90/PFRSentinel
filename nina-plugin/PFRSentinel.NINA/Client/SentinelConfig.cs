@@ -232,9 +232,9 @@ public sealed class SentinelConfig
         SentinelConfigStatus.ConfigUnreadable =>
             $"Sentinel configuration at {ConfigPath} could not be read.",
         SentinelConfigStatus.ControlDisabled =>
-            "The capture control API is switched off in Sentinel. Enable it on the Output tab, then retry.",
+            "The capture control API is switched off in Sentinel. Enable it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier), then retry.",
         SentinelConfigStatus.NoToken =>
-            "No control API token is configured in Sentinel. Enable the control API on the Output tab to mint one.",
+            "No control API token is configured in Sentinel. Enable the control API on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier) to mint one.",
         _ => "Sentinel control API is unavailable.",
     };
 

@@ -120,7 +120,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         /// Written out per kind rather than deferred to
         /// <see cref="SentinelException.OperatorAdvice"/> alone, because a validation
         /// list needs the cause and the fix in the same sentence - "Sentinel is not
-        /// reachable" and "enable it on the Output tab" are useless apart. Pasting the
+        /// reachable" and "enable it on the NINA &amp; ASCOM page" are useless apart. Pasting the
         /// two together mechanically does not work either: for several kinds the advice
         /// restates the message, and the operator gets the same sentence twice.
         /// </para>
@@ -133,13 +133,13 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         /// </remarks>
         public static string Describe(SentinelException failure) => failure.Kind switch {
             SentinelErrorKind.ControlDisabled =>
-                "PFR Sentinel's capture control API is switched off. Enable it on Sentinel's Output tab.",
+                "PFR Sentinel's capture control API is switched off. Enable it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier).",
 
             SentinelErrorKind.ControlUnavailable =>
                 ControlUnwiredIssue,
 
             SentinelErrorKind.Unauthorized =>
-                "PFR Sentinel rejected the control token. Regenerate it on Sentinel's Output tab.",
+                "PFR Sentinel rejected the control token. Regenerate it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier).",
 
             SentinelErrorKind.Unreachable =>
                 failure.Message + " Check Sentinel is running with its web server enabled, and that the host and port match.",

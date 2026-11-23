@@ -27,7 +27,7 @@ public enum SentinelErrorKind
     /// <summary>
     /// The control API is switched off in Sentinel (no token configured).
     /// Detected locally from config, or reported by the server as HTTP 503 with
-    /// <c>code = "control_disabled"</c>. Fix: enable it on Sentinel's Output tab.
+    /// <c>code = "control_disabled"</c>. Fix: enable it on Sentinel's NINA &amp; ASCOM page (the Output tab in Sentinel 3.8 and earlier).
     /// </summary>
     ControlDisabled,
 
@@ -130,13 +130,13 @@ public class SentinelException : Exception
         SentinelErrorKind.ConfigNotFound =>
             "Sentinel's configuration could not be read. If Sentinel runs on another machine or user account, set an explicit base URL and token in the plugin options.",
         SentinelErrorKind.ControlDisabled =>
-            "Enable the capture control API on Sentinel's Output tab, then retry.",
+            "Enable the capture control API on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier), then retry.",
         SentinelErrorKind.ControlUnavailable =>
             "Sentinel is running but capture control is not wired up. Restart Sentinel.",
         SentinelErrorKind.Unreachable =>
             "Sentinel is not reachable. Check it is running with the web server enabled, and that the host and port match.",
         SentinelErrorKind.Unauthorized =>
-            "Sentinel rejected the control token. Regenerate it on Sentinel's Output tab.",
+            "Sentinel rejected the control token. Regenerate it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier).",
         SentinelErrorKind.HostNotAllowed =>
             "Sentinel refused the request's Host header. Control calls are accepted from the same machine only, unless extra hosts are allow-listed in Sentinel's config.",
         SentinelErrorKind.BadRequest =>
@@ -336,7 +336,7 @@ public sealed class SentinelUnavailableException : SentinelException
     {
     }
 
-    /// <summary>The control API is switched off. Fix: enable it on the Output tab.</summary>
+    /// <summary>The control API is switched off. Fix: enable it on the NINA &amp; ASCOM page (Output tab in 3.8 and earlier).</summary>
     public bool ControlDisabled => Kind == SentinelErrorKind.ControlDisabled;
 
     /// <summary>Control is on but not wired up. Fix: restart Sentinel.</summary>

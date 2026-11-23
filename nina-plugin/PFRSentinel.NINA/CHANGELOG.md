@@ -1,6 +1,8 @@
 # PFR Sentinel
 
 ## 1.3.0.0
+- Messages about the control API point to Sentinel's new **NINA & ASCOM** page
+  (the Output tab in Sentinel 3.8 and earlier).
 - Advanced Sequencer trigger **Sentinel: pause on bad conditions**: before each
   exposure it reads Sentinel's `GET /conditions` verdict and, when the sky is not
   good enough, waits until it has stayed good for the settle time (default 60 s).
