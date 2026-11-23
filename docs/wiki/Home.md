@@ -42,6 +42,7 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 | [Image Library](Image-Library) | A browsable archive of recent nights with a scrubber and a condition band |
 | [Timelapse](Timelapse) | Nightly H.264 video via ffmpeg, with optional [YouTube upload](YouTube-Uploads) |
 | [NINA](NINA-Integration) | A plugin that shows the pier camera inside NINA and adds Start/Stop Sentinel Capture sequencer instructions |
+| [Imaging Conditions](Imaging-Conditions) | A live "good enough to image?" verdict for the NINA plugin to pause and resume a sequence on (new in the next release) |
 | [Capture Control API](Capture-Control-API) | Token-protected HTTP endpoints to start and stop capture from scripts |
 
 ---

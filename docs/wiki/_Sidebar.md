@@ -39,6 +39,7 @@
 ### Integrations
 
 - [NINA Integration](NINA-Integration)
+- [Imaging Conditions](Imaging-Conditions)
 - [Capture Control API](Capture-Control-API)
 - [Web Server API](Web-Server)
 - [Discord Integration](Discord-Integration)

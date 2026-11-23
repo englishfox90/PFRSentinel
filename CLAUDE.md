@@ -19,6 +19,8 @@ Stack: Python 3.13, PySide6 6.11.2 (pinned) + qfluentwidgets (`PySide6-Fluent-Wi
 
 All output dispatch goes through `_push_to_output_servers()` in `ui/main_window/output.py`.
 
+**Imaging conditions** — every processed frame (camera and Directory Watch) feeds `services/imaging_conditions/` right after star detection; `GET /conditions` (same bearer auth as the control routes) serves `imaging_ok` with hysteresis, reason codes and the measurements, and `/status` carries a compact `conditions` block. The clear-sky star baseline is learned on each installation — never ship star counts. See `docs/wiki/Imaging-Conditions.md`.
+
 **NINA target** — the NINA plugin POSTs the running sequencer target to `/nina/target` (same bearer auth as the control routes); `services/allsky/render_target.py` draws it on the all-sky overlay, and the pushed target goes stale after `nina_target.stale_after_s`. Headless mode accepts the POST but renders no overlay.
 
 ## Project structure
@@ -85,6 +87,12 @@ PFRSentinel/
 │   ├── alpaca_safety/          # ASCOM Alpaca SafetyMonitor: own RoofSafetyFSM feed → state (stale → UNSAFE) → HTTP + UDP discovery server
 │   ├── api_target.py           # POST /nina/target validation + OpenAPI catalog (pure)
 │   ├── web_target.py           # The /nina/target route behind the control-API auth
+│   ├── imaging_conditions/     # Per-frame "good enough to image?" verdict for NINA: frame_signals (metadata → roof/sky/stars/FWHM),
+│   │                             frame_rules (reason codes, all star rules relative), star_baseline (per-rig clear-sky count per Moon bin,
+│   │                             stamped camera + frame size + lens, persisted under <app-data>/imaging_conditions/), plate_scale (a1 → arcsec),
+│   │                             verdict_hysteresis, conditions_store (thread-safe, stale at read time), feed (the pipelines' one-line hook)
+│   ├── api_conditions.py       # GET /conditions contract catalog + OpenAPI (pure); the plugin depends on its field names
+│   ├── web_conditions.py       # The /conditions route behind the control-API auth
 │   ├── nina_plugin_install.py  # Install/update/remove the NINA plugin
 │   ├── headless_alpaca.py      # Headless runner's Alpaca branch (open, identity, one-reconnect pause with recovery off)
 │   ├── pe_version.py           # Windows PE FileVersion reader
@@ -499,6 +507,11 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_alpaca_identity_retention.py` | 11 | `alpaca_identity` — retyping the same port keeps the identity and the tuned profile, a different address clears it and going back restores it, a discovered device remembered at its address, a passed Test Connection learns the identity and moves the address profile, a result for an address edited mid-test not applied, tested ranges come back after a ZWO round trip, exposure hint follows the camera limit, named gains shown by name (list mode only), Alpaca edits write no legacy `zwo_*` mirror, a long Found label never widens the card (offscreen Qt) |
 | `test_camera_link_pill.py` | 12 | app bar camera pill — a session's `link_state` shows "Reconnecting to camera…" / "Camera lost · retrying" / "Reconnected · waiting for a frame" / "Camera not finishing exposures" on either backend, frames flowing again show the count, no `link_state` reads as ok, refresh pushes the idle label and the primary action at once (offscreen Qt) |
 | `test_camera_error_logging.py` | 5 | a capture-loop error reaches the log once (the controller logs it, the window no longer repeats it): ZWO "Camera error: …" at ERROR, an Alpaca loop retrying an outage at WARNING; errors the controller never logged (SDK missing, unrecoverable mode) still logged by the window |
+| `test_imaging_conditions_rules.py` | 39 | `imaging_conditions.frame_rules` / `frame_signals` / `settings` — every reason code, sun limit -18 / -12 and unknown sun fail-open, roof confidence and the roofless opt-out, Watch-mode tokens read like `_ML_RESULTS`, cloud cover null with neither baseline nor usable ML class and `ml_class` fallback, ratio → cloud and `stars_low`, cold start never judges a count on its own, `change_pct` vs the last `trend_frames` and a configurable % drop, FWHM `change_pct` vs the night median and `fwhm_rise_pct`, baseline frames only dark / open / Clear / not static, hand-edited config clamped, auto staleness, an old config merges the block's defaults |
+| `test_imaging_conditions_feed.py` | 22 | `ImagingConditionsFeed` + `ConditionsStore` on an injected clock — starts not-OK (`warming_up`), 3 bad to pause / 3 good to resume (`recovering`), stale after 3x the frame interval (min 120 s) or the configured limit and starting over on resume, disabled, reprocess not counted, baseline learning per Moon bin with `baseline_status` learning → ready, cloudy / closed / twilight frames never teach it, a new camera / frame size / lens restarts it (a refinement or a first calibration does not), arcsec only with a calibration (scaled from the calibration's frame size, null on a crop or a garbage file), the pipeline hook never raises, Directory Watch `process_image` feeds it, per-frame cost (`slow`: p50/p95 logged, 5 ms ceiling) |
+| `test_imaging_conditions_baseline.py` | 23 | `star_baseline` — Moon bins, no star count in the shipped defaults, median once enough samples, bounded per bin, invalid samples refused, throttled atomic saves with no temp left behind, stamp change starts over, reset removes the file (files only), truncated / foreign / non-UTF-8 / oversized files load as learning, a failed write stays dirty, concurrent adds and saves |
+| `test_api_conditions.py` | 15 | `GET /conditions` — golden contract key set (original names pinned, additive ones listed) on a cold and a published snapshot, catalog = payload, every reason code documented, auth matrix (401 / 403 / 503 `control_disabled`, no CORS, token never echoed), route matching and `web_output` GET dispatch, OpenAPI + `/docs` only with the control API, compact `/status` block |
+| `test_imaging_conditions_card.py` | 7 | `ImagingConditionsCard` / `ImagingConditionsController` / IMAGING tile — silent load, values round-trip, garbage loads as defaults, one `changed` per edit, verdict wording, the "Learning your sky (12/30 …)" line, controller saves into the config block, disabling reaches the store, Reset baseline forgets the counts (offscreen Qt) |
 | `test_logs_panel_layout.py` | 1 | Logs page fits the narrow pane beside the preview: the toolbar keeps "Clear" and a long log path doesn't widen the page (offscreen Qt) |
 
 Standalone (not in pytest suite):
