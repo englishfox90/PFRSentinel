@@ -68,10 +68,13 @@ CONDITIONS_FIELDS = [
     ("sky", _obj({
         "condition": dict(_STR, description="ML sky class (Clear / Partly Cloudy / Overcast)."),
         "confidence": dict(_NUM, description="0-1."),
-        "stars_visible": _BOOL,
+        "stars_visible": dict(_BOOL, description="ML stars-visible verdict."),
     }, "ML sky verdict for the latest frame.")),
     ("stars", _obj({
-        "count": dict(_INT, description="Star-like sources on the fixed 900 px evidence plane."),
+        "count": dict(_INT, description="Star index: star-like sources on the sky disc "
+                                         "resampled to a fixed 900 px plane, so it compares "
+                                         "between frames and with the baseline. Not the "
+                                         "full-frame count the FWHM is measured on."),
         "baseline": dict(_NUM, description="This rig's clear-sky count for the Moon's state; "
                                            "null until learned."),
         "ratio": dict(_NUM, description="count / baseline."),
@@ -94,15 +97,15 @@ CONDITIONS_FIELDS = [
     }, "Star sharpness.")),
     ("sun_altitude_deg", dict(_NUM, description="Sun altitude at evaluation; null without a site.")),
     ("moon", _obj({
-        "up": _BOOL,
-        "illumination_pct": _NUM,
+        "up": dict(_BOOL, description="Moon above the horizon; null without a site."),
+        "illumination_pct": dict(_NUM, description="Illuminated fraction, 0-100."),
     }, "Moon state the baseline bin was chosen from.")),
     ("baseline_bin", dict(_STR, description="Baseline bin in use (moon_down, moon_up_0_25, ...).")),
     ("baseline_status", _obj({
         "state": {"type": "string", "enum": ["learning", "ready"]},
         "samples": {"type": "integer", "description": "Clear frames learned for this bin."},
         "needed": {"type": "integer", "description": "Clear frames the bin needs to be ready."},
-        "bin": _STR,
+        "bin": dict(_STR, description="Moon bin being learned (same values as baseline_bin)."),
     }, "The clear-sky baseline is learned on each installation from its own frames; "
        "until the current Moon bin is ready, stars.baseline and stars.ratio are null "
        "and the star-ratio rule does not fire.")),
@@ -120,6 +123,28 @@ DESCRIPTION = (
     "frames stop arriving. Same bearer token and Host allow-list as the "
     "control routes."
 )
+
+
+def _type_text(schema: dict) -> str:
+    text = schema.get("type", "")
+    if text == "array":
+        text = f"array of {schema.get('items', {}).get('type', 'value')}"
+    return f"{text} or null" if schema.get("nullable") else text
+
+
+def field_rows() -> list:
+    """``(name, type, description)`` per field, nested objects flattened to
+    ``stars.count`` and so on — the /docs field table."""
+    rows = []
+    for name, schema in CONDITIONS_FIELDS:
+        rows.append((name, _type_text(schema), schema.get("description", "")))
+        for sub, sub_schema in (schema.get("properties") or {}).items():
+            desc = sub_schema.get("description", "")
+            if sub_schema.get("enum"):
+                values = ", ".join(str(v) for v in sub_schema["enum"])
+                desc = f"{desc} One of: {values}.".strip()
+            rows.append((f"{name}.{sub}", _type_text(sub_schema), desc))
+    return rows
 
 
 def openapi_paths() -> dict:

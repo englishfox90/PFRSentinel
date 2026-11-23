@@ -191,6 +191,21 @@ def test_openapi_and_docs_carry_the_route_only_with_control():
     assert "conditions" in spec["components"]["schemas"]["Status"]["properties"]
 
 
+def test_docs_describe_every_conditions_field():
+    html = api_docs.render_docs_html(api_docs.build_openapi_spec(control_path="/capture"))
+    assert "<code>/conditions</code> fields" in html
+    rows = api_conditions.field_rows()
+    names = [name for name, _, _ in rows]
+    assert set(api_conditions.CONTRACT_KEYS) <= set(names)
+    assert {"stars.count", "stars.change_pct", "fwhm.change_pct",
+            "baseline_status.state", "moon.up"} <= set(names)
+    for name, typ, desc in rows:
+        assert typ and desc, name
+        assert f"<td class='path'>{name}</td>" in html
+    assert "<code>/conditions</code> fields" not in api_docs.render_docs_html(
+        api_docs.build_openapi_spec())
+
+
 def test_status_carries_the_compact_block():
     status = ImageHTTPHandler._build_status_dict()
     assert status["conditions"] == {"imaging_ok": False, "reasons": ["warming_up"],

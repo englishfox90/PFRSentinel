@@ -605,9 +605,16 @@ def _render_conditions_section(spec: dict) -> str:
     """Reason codes of GET /conditions, shown only when the route is served."""
     if api_conditions.CONDITIONS_PATH not in spec.get("paths", {}):
         return ""
+    field_rows = [
+        f"<tr><td class='path'>{_esc(name)}</td><td class='type'>{_esc(typ)}</td>"
+        f"<td>{_esc(desc)}</td></tr>"
+        for name, typ, desc in api_conditions.field_rows()
+    ]
     rows = [f"<tr><td class='path'>{_esc(code)}</td><td>{_esc(text)}</td></tr>"
             for code, text in api_conditions.REASON_CODES]
-    return ("<h2><code>/conditions</code> &rarr; <code>reasons</code> values</h2>"
+    return ("<h2><code>/conditions</code> fields</h2>"
+            + _html_table(["Field", "Type", "Description"], field_rows)
+            + "<h2><code>/conditions</code> &rarr; <code>reasons</code> values</h2>"
             + _html_table(["Code", "Meaning"], rows))
 
 
