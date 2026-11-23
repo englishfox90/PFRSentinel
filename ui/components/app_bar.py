@@ -216,8 +216,12 @@ class AppBar(QFrame):
             self.primary_btn.setToolTip("")
 
     def _on_primary_clicked(self):
+        # While capturing the primary button is hidden behind Stop, but a
+        # programmatic click still reaches it; it must never mean Start then.
         if self._action_mode == 'connect':
             self.connect_clicked.emit()
+        elif self._action_mode == 'stop':
+            self.stop_clicked.emit()
         else:
             self.start_clicked.emit()
 
