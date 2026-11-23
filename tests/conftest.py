@@ -83,8 +83,16 @@ def _imaging_conditions_isolated(tmp_path_factory, monkeypatch):
     star baseline kept out of the developer's real app-data: every pipeline
     test that processes a frame feeds the process-wide singleton."""
     from services.imaging_conditions import (
-        reset_conditions_store, reset_imaging_conditions_feed, star_baseline)
+        conditions_history, reset_conditions_store, reset_imaging_conditions_feed,
+        star_baseline)
+    from services.imaging_conditions.nina_checkin import reset_nina_checkins
     holder = []
+    events_dir = []
+
+    def _events_path():
+        if not events_dir:
+            events_dir.append(str(tmp_path_factory.mktemp("imaging_conditions_events")))
+        return os.path.join(events_dir[0], "events.json")
 
     def _path():
         if not holder:
@@ -92,11 +100,16 @@ def _imaging_conditions_isolated(tmp_path_factory, monkeypatch):
         return holder[0]
 
     monkeypatch.setattr(star_baseline, "default_baseline_path", _path)
+    monkeypatch.setattr(conditions_history, "default_events_path", _events_path)
     reset_imaging_conditions_feed()
     reset_conditions_store()
+    conditions_history.reset_conditions_history()
+    reset_nina_checkins()
     yield
     reset_imaging_conditions_feed()
     reset_conditions_store()
+    conditions_history.reset_conditions_history()
+    reset_nina_checkins()
 
 
 @pytest.fixture

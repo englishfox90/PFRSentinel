@@ -243,6 +243,10 @@ DEFAULT_CONFIG = {
     # star evidence the pipeline already measures; costs no extra image pass.
     "imaging_conditions": {
         "enabled": True,
+        # Relaxed / balanced / strict / custom: which preset the thresholds
+        # below were set from (imaging_conditions/presets.py). Display only —
+        # the threshold keys are authoritative; balanced = these defaults.
+        "sensitivity": "balanced",
         "bad_frames": 3,           # consecutive bad frames before imaging_ok turns false
         "good_frames": 3,          # consecutive good frames before it turns true again
         "max_sun_alt_deg": -18.0,  # -18 astronomical night; -12 accepts nautical twilight

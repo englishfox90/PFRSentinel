@@ -23,7 +23,7 @@ ORIGINAL_KEYS = {
     "fwhm", "sun_altitude_deg",
 }
 ADDED_KEYS = {"stale_after_s", "frame_ok", "bad_streak", "good_streak", "moon",
-              "baseline_bin", "baseline_status"}
+              "baseline_bin", "baseline_status", "events"}
 NESTED = {
     "roof": {"state", "confidence"},
     "sky": {"condition", "confidence", "stars_visible"},

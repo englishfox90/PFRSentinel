@@ -25,6 +25,7 @@ from typing import Callable, Optional
 from services.logger import app_logger
 
 from . import frame_rules
+from .conditions_history import ConditionsHistory, get_conditions_history
 from .conditions_store import ConditionsStore, STALE, WARMING_UP, get_conditions_store
 from .frame_signals import read_frame_signals
 from .plate_scale import PlateScale
@@ -75,11 +76,13 @@ class ImagingConditionsFeed:
     def __init__(self, store: Optional[ConditionsStore] = None,
                  baseline: Optional[StarBaseline] = None,
                  plate_scale: Optional[PlateScale] = None,
+                 history: Optional[ConditionsHistory] = None,
                  sun_alt_fn: Callable = _default_sun_alt,
                  moon_fn: Optional[Callable[[], dict]] = None,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self._store = store
+        self._history = history
         self._baseline = baseline if baseline is not None else StarBaseline()
         self._plate_scale = plate_scale if plate_scale is not None else PlateScale()
         self._sun_alt_fn = sun_alt_fn
@@ -96,6 +99,10 @@ class ImagingConditionsFeed:
     @property
     def store(self) -> ConditionsStore:
         return self._store if self._store is not None else get_conditions_store()
+
+    @property
+    def history(self) -> ConditionsHistory:
+        return self._history if self._history is not None else get_conditions_history()
 
     @property
     def baseline(self) -> StarBaseline:
@@ -125,6 +132,7 @@ class ImagingConditionsFeed:
         now_mono = self._clock()
         now = self._wall()
         stale_after = self.stale_after_s(settings)
+        gap_limit = stale_after
         if self._last_mono is not None:
             gap = now_mono - self._last_mono
             if gap > stale_after:
@@ -164,6 +172,7 @@ class ImagingConditionsFeed:
                               night_fwhm, frame_size, settings)
         record['baseline_status'] = baseline_status
         store.publish(record, updated_at=now, stale_after_s=stale_after)
+        self.history.record(record, at=now, stale_after_s=gap_limit)
         if changed:
             self._log_transition(state['imaging_ok'], ev.reasons)
         elif was_ok and not ev.ok:

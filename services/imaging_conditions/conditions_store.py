@@ -9,6 +9,9 @@ tests), so a stalled capture reads ``imaging_ok: false`` with reason
 ``stale`` without anyone having to publish that — the same rule the Alpaca
 SafetyMonitor's state follows.
 
+``events`` (pauses and resumes, newest first) is read from the conditions
+history at snapshot time, so an ongoing state has no duration yet.
+
 ``snapshot()`` returns the ``GET /conditions`` contract exactly; see
 ``services/api_conditions.py`` for the field catalog the docs are built from.
 """
@@ -60,10 +63,17 @@ def empty_record() -> dict:
     }
 
 
+def _history_events() -> list:
+    from .conditions_history import get_conditions_history
+    return get_conditions_history().events_payload()
+
+
 class ConditionsStore:
-    def __init__(self, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, clock: Callable[[], float] = time.monotonic,
+                 events_fn: Optional[Callable[[], list]] = None):
         self._lock = threading.Lock()
         self._clock = clock
+        self._events_fn = events_fn if events_fn is not None else _history_events
         self._enabled = True
         self._record = empty_record()
         self._updated_at: Optional[datetime] = None
@@ -127,7 +137,14 @@ class ConditionsStore:
         payload['reasons'] = list(record.pop('reasons'))
         payload['changed_at'] = _iso(changed_at)
         payload.update(record)
+        payload['events'] = self._events() if enabled else []
         return payload
+
+    def _events(self) -> list:
+        try:
+            return list(self._events_fn() or [])
+        except Exception:
+            return []
 
     def compact(self) -> dict:
         """The ``conditions`` block of ``/status``."""

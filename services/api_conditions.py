@@ -109,6 +109,22 @@ CONDITIONS_FIELDS = [
     }, "The clear-sky baseline is learned on each installation from its own frames; "
        "until the current Moon bin is ready, stars.baseline and stars.ratio are null "
        "and the star-ratio rule does not fire.")),
+    ("events", {"type": "array", "description":
+                "Recent changes of imaging_ok, newest first (at most 10, from the last "
+                "24 h; kept across a Sentinel restart). Empty while imaging conditions "
+                "are off.",
+                "items": {"type": "object", "properties": {
+                    "at": {"type": "string", "format": "date-time",
+                           "description": "UTC time of the change."},
+                    "kind": {"type": "string", "enum": ["paused", "resumed"]},
+                    "reasons": {"type": "array", "items": {"type": "string"},
+                                "description": "Reason codes for a pause (the reason "
+                                               "table, plus 'restarted' when Sentinel "
+                                               "stopped while imaging was OK); empty "
+                                               "for a resume."},
+                    "duration_s": dict(_NUM, description="How long the state lasted; "
+                                                         "null while it still holds."),
+                }}}),
 ]
 
 CONTRACT_KEYS = [name for name, _ in CONDITIONS_FIELDS]
@@ -134,16 +150,20 @@ def _type_text(schema: dict) -> str:
 
 def field_rows() -> list:
     """``(name, type, description)`` per field, nested objects flattened to
-    ``stars.count`` and so on — the /docs field table."""
+    ``stars.count`` (array items as ``events[].kind``) and so on — the /docs
+    field table."""
     rows = []
     for name, schema in CONDITIONS_FIELDS:
         rows.append((name, _type_text(schema), schema.get("description", "")))
-        for sub, sub_schema in (schema.get("properties") or {}).items():
+        props, prefix = schema.get("properties"), name
+        if props is None:
+            props, prefix = (schema.get("items") or {}).get("properties"), f"{name}[]"
+        for sub, sub_schema in (props or {}).items():
             desc = sub_schema.get("description", "")
             if sub_schema.get("enum"):
                 values = ", ".join(str(v) for v in sub_schema["enum"])
                 desc = f"{desc} One of: {values}.".strip()
-            rows.append((f"{name}.{sub}", _type_text(sub_schema), desc))
+            rows.append((f"{prefix}.{sub}", _type_text(sub_schema), desc))
     return rows
 
 
