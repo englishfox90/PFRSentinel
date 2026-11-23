@@ -47,18 +47,17 @@ FWHM_HIGH = 'fwhm_high'
 SOURCE_STAR_BASELINE = 'star_baseline'
 SOURCE_ML_CLASS = 'ml_class'
 
-# ML sky class -> a coarse cover figure, used only while this rig has no
-# star baseline for the Moon's state. Coarse on purpose and labelled as
+# The sky model's three classes (ml.sky_classifier.SKY_CONDITIONS; a test
+# keeps this in step) -> a coarse cover figure, used only while this rig has
+# no star baseline for the Moon's state. Coarse on purpose and labelled as
 # such (cloud_cover_source "ml_class"): "Partly Cloudy" means noticeable
 # patches, read above the 50 % default so it pauses imaging.
 ML_CLASS_CLOUD_PCT = {
     'Clear': 5.0,
-    'Mostly Clear': 25.0,
     'Partly Cloudy': 60.0,
-    'Mostly Cloudy': 80.0,
     'Overcast': 95.0,
 }
-CLEAR_CLASSES = ('Clear', 'Mostly Clear')
+CLEAR_CLASSES = ('Clear',)
 
 # The trend needs at least this many earlier frames, and the night median
 # FWHM this many readings, before either may call a frame bad.

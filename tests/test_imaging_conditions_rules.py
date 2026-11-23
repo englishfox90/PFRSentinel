@@ -215,3 +215,9 @@ def test_old_config_without_the_block_gets_the_defaults(tmp_path):
     assert block['bad_frames'] == 5
     assert block['good_frames'] == DEFAULT_CONFIG['imaging_conditions']['good_frames']
     assert read_settings(Config(str(path))).bad_frames == 5
+
+
+def test_ml_class_cloud_map_matches_the_sky_model_classes():
+    from ml.sky_classifier import SKY_CONDITIONS
+    assert set(rules.ML_CLASS_CLOUD_PCT) == set(SKY_CONDITIONS)
+    assert set(rules.CLEAR_CLASSES) <= set(SKY_CONDITIONS)

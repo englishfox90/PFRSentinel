@@ -208,7 +208,7 @@ def predict_sky_condition(
     Returns:
         Dict with prediction results, or None if ML not available:
         {
-            'sky_condition': str,  # Clear, Mostly Clear, Partly Cloudy, etc
+            'sky_condition': str,  # Clear, Partly Cloudy or Overcast
             'sky_confidence': float,
             'sky_probabilities': dict,
             'stars_visible': bool,
