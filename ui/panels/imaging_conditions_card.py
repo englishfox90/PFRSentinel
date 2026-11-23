@@ -142,7 +142,7 @@ class ImagingConditionsCard(CollapsibleCard):
 
         self.reset_button = PushButton("Reset baseline")
         self.reset_button.clicked.connect(self.reset_baseline_requested.emit)
-        self.add_row("Clear-sky baseline", self.reset_button,
+        self.add_row("Sky baseline", self.reset_button,
                      "Learned from this camera's own clear frames. Reset after "
                      "changing what the camera sees or its exposure.")
 
