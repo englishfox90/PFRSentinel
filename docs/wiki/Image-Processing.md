@@ -127,7 +127,7 @@ When ML is enabled, the tokens `{ROOF_STATUS}`, `{SKY_CONDITION}`, `{STARS_VISIB
 
 ### ASCOM Safety File
 
-Set up in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab (this card in 3.8.0 and earlier). Point NINA's **GenericFile** safety monitor at the file and configure it with:
+Set up with **ASCOM safety file** and **File path** in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab (with **ASCOM Safety File** and **File Path** in this card in 3.8.0 and earlier). Point NINA's **GenericFile** safety monitor at the file and configure it with:
 
 - Preamble: `Roof Status:`
 - Safe trigger: `OPEN`
@@ -135,7 +135,7 @@ Set up in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM)
 
 The file is fail-safe. It only reports `OPEN` after two consecutive frames read the roof as open with at least 70% confidence. Everything else writes `CLOSED`: a closed reading, a low-confidence reading, or frames where the ML models are switched off or could not run. See [ML Models](ML-Models#ascom-safety-file-nina-integration) for the full behaviour and file format.
 
-The safety file is written in ZWO Camera mode only.
+The safety file is written in camera capture mode only (ZWO Camera, or [Alpaca Camera](Alpaca-Camera) from the next release), not in Directory Watch mode.
 
 ---
 

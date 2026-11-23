@@ -25,7 +25,7 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 
 **ZWO Camera** captures directly from a connected ZWO ASI camera via the ASI SDK. This mode supports auto-exposure, gain control, white balance, RAW16 mode, per-camera settings, automatic recovery when the camera drops off USB, and scheduled capture (from the next release, a schedule can also follow the timelapse window). See [Capture Settings](Capture-Settings).
 
-**Alpaca Camera** captures from a camera served over the network by an ASCOM Alpaca server, such as ASCOM Remote on the observatory PC. Auto-exposure, scheduled capture, outputs, timelapse and the all-sky overlay work as in ZWO Camera mode; the USB and SDK settings don't apply. New in the next release, and not yet tested with real camera drivers. See [Alpaca Camera](Alpaca-Camera).
+**Alpaca Camera** captures from a camera served over the network by an ASCOM Alpaca server, such as ASCOM Remote on the observatory PC. Auto-exposure, scheduled capture, outputs, timelapse and the all-sky overlay work as in ZWO Camera mode; the USB and SDK settings don't apply. New in the next release. It has been tested with a simulated camera and a ZWO ASI676MC served over a VPN, but not yet with ZWO's ASCOM driver through ASCOM Remote. See [Alpaca Camera](Alpaca-Camera).
 
 **Directory Watch** monitors a folder for new images written by other capture software (NINA, SharpCap, or anything else). PFR Sentinel detects each file as it lands, reads any metadata file saved alongside it, processes the image, and moves on.
 
@@ -41,9 +41,10 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 | [Hermes](Hermes-Notifications) | Signed JSON webhook notifications, with optional per-event URLs |
 | [Image Library](Image-Library) | A browsable archive of recent nights with a scrubber and a condition band |
 | [Timelapse](Timelapse) | Nightly H.264 video via ffmpeg, with optional [YouTube upload](YouTube-Uploads) |
-| [NINA](NINA-Integration) | A plugin that shows the pier camera inside NINA and adds Start/Stop Sentinel Capture sequencer instructions |
+| [NINA](NINA-Integration) | A plugin that shows the pier camera inside NINA and adds Start/Stop Sentinel Capture sequencer instructions, plus (next release) a trigger and a loop condition that pause or end imaging when the sky turns bad |
 | [Imaging Conditions](Imaging-Conditions) | A live "good enough to image?" verdict for the NINA plugin to pause and resume a sequence on (new in the next release) |
-| [Capture Control API](Capture-Control-API) | Token-protected HTTP endpoints to start and stop capture from scripts |
+| [Capture Control API](Capture-Control-API) | Token-protected HTTP endpoints to start and stop capture from scripts, and (next release) to read the imaging conditions |
+| [Alpaca Safety Monitor](ML-Models#alpaca-safety-monitor) and [ASCOM safety file](ML-Models#ascom-safety-file-nina-integration) | The roof state for NINA's safety checks, set up on the [NINA & ASCOM](NINA-and-ASCOM) tab from the next release |
 
 ---
 
@@ -52,7 +53,7 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 The window has four parts, top to bottom:
 
 - **App bar** — pipeline status, the notifications bell, and the main **Connect Camera** / **Start Capture** / **Stop** button
-- **Status strip** — WEB, DISCORD, ROOF, SKY, WEATHER and SEEING tiles, and the capture/camera state
+- **Status strip** — WEB, DISCORD, ROOF, SKY, WEATHER and SEEING tiles, the IMAGING tile (next release), and the capture/camera state
 - **Content** — the navigation rail on the left and the selected page. Most pages show the live preview beside their settings; Overlays, Library and Settings use the full width
 - **Telemetry bar** — disk space, exposure, gain, sensor temperature, last capture time, and the app version
 
@@ -80,16 +81,17 @@ The navigation rail groups the pages:
 - **[Auto-stretch (MTF)](Auto-Stretch)**: Midtone transfer function with configurable target median, shadow handling, dark scene colour correction, and SCNR green removal
 - **[Auto-exposure](Auto-Exposure)**: Calibration followed by per-frame adjustment and clipping protection for hands-off brightness control
 - **[ML scene classification](ML-Models)**: Local ONNX models for roof open/closed detection and sky conditions, with results available as overlay tokens
-- **ASCOM safety file**: ML roof status can be written to a file monitored by NINA's GenericFile safety monitor — see [ML Models](ML-Models)
-- **Alpaca safety monitor**: the same roof status served as an ASCOM Alpaca SafetyMonitor for NINA, INDIGO A1 and other Alpaca clients — see [ML Models](ML-Models#alpaca-safety-monitor)
+- **ASCOM safety file**: ML roof status can be written to a file monitored by NINA's GenericFile safety monitor — see [ML Models](ML-Models#ascom-safety-file-nina-integration). Set up on the [NINA & ASCOM](NINA-and-ASCOM) tab from the next release
+- **Alpaca safety monitor**: the same roof status served as an ASCOM Alpaca SafetyMonitor for NINA, INDIGO A1 and other Alpaca clients — see [ML Models](ML-Models#alpaca-safety-monitor). Also on the NINA & ASCOM tab from the next release
+- **[Imaging conditions](Imaging-Conditions)**: a per-frame verdict on whether the sky is good enough to image, learned against your own clear sky, so a NINA sequence pauses under cloud and resumes when it clears (new in the next release)
 - **[Overlay token system](Overlay-Tokens)**: Tokens for camera metadata, image statistics, weather data, and ML predictions
 - **Scheduled capture**: Capture only inside a time window, or at a different rate inside the window. Following the timelapse window with a margin is new in the next release
 - **[Weather integration](Weather-Setup)**: OpenWeatherMap data cached for 10 minutes, surfaced in overlays and the status strip
 - **[All-sky overlay](All-Sky-Overlay)**: Constellation lines, bright stars, Messier/NGC labels and planets projected onto fisheye frames, with automatic lens calibration and a guided calibration for difficult sites
 - **[Meteor tracker](Meteor-Detection)**: Detects meteor trails across a stack of frames, rejects planes and persistent artefacts, and keeps thumbnails for review
 - **[Image Library](Image-Library)**: A per-night archive with a scrubber, roof and cloud condition band, and live updates while capturing
-- **[NINA integration](NINA-Integration)**: Install the NINA plugin from the Output tab; capture follows your sequence
-- **Camera recovery**: Reconnects a dropped camera, resets the USB device (ZWO cameras), and restarts the app if needed
+- **[NINA integration](NINA-Integration)**: Install the NINA plugin from the NINA & ASCOM tab (the Output tab in 3.8.0 and earlier); capture follows your sequence
+- **Camera recovery**: Reconnects a dropped camera, resets the USB device (ZWO cameras), reopens an Alpaca camera that stops finishing exposures (next release), and restarts the app if needed
 - **Per-camera profiles**: Exposure, gain, white balance, and other settings stored independently for each camera
 - **[Diagnostics Export](Diagnostics-Export)**: One ZIP with logs, redacted settings and a fresh raw frame to attach to a bug report (new in the next release)
 - **[Output Framing](Image-Processing#output-framing)**: Crop saved and published images to a box you draw, while detection and calibration keep the full frame (new in the next release)
