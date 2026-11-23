@@ -17,6 +17,7 @@ from qfluentwidgets import (
 from ..theme.tokens import Colors, Spacing
 from ..theme.icons import mdi
 from ..components.cards import SwitchRow, CollapsibleCard
+from .imaging_conditions_card import ImagingConditionsCard
 from services.logger import app_logger
 from services.ml_service import get_ml_service
 from services.ml_data_collector import get_ml_collector, UPLOAD_FORM_URL
@@ -137,6 +138,10 @@ class ImageProcessingMLSection(QWidget):
         ml_card.add_widget(self.alpaca_safety_info)
 
         layout.addWidget(ml_card)
+
+        # Logic in ui/controllers/imaging_conditions_controller.py.
+        self.conditions_card = ImagingConditionsCard()
+        layout.addWidget(self.conditions_card)
 
         # === ML DATA CONTRIBUTION ===
         contrib_card = CollapsibleCard("Community Data Contribution", mdi('account-group'))
@@ -455,6 +460,8 @@ class ImageProcessingMLSection(QWidget):
             else:
                 self.ml_status_label.setText("Status: Disabled")
                 self.ml_status_label.setStyleSheet(f"color: {Colors.text_muted}; padding: 8px;")
+
+            self.conditions_card.load(config.get('imaging_conditions', {}) or {})
 
             ml_contrib = config.get('ml_contribution', {})
             self.ml_contrib_switch.set_checked(ml_contrib.get('enabled', False))

@@ -2,8 +2,8 @@
 Status Strip Component
 
 Persistent observatory-telemetry band shown directly below the app bar. The
-left group holds at-a-glance tiles (Web, Discord, Roof, Sky, Weather, Seeing);
-the right edge holds a single state pill that reports capture / camera state.
+left group holds at-a-glance tiles (Web, Discord, Roof, Sky, Weather, Seeing,
+Imaging); the right edge holds a single state pill that reports capture / camera state.
 
 Layout + display formatting only. All values are pushed in from the main
 window's 1 Hz status timer and per-frame handlers — this component never
@@ -241,8 +241,9 @@ class StatusStrip(QFrame):
         self.sky_tile = StatusTile('weather-partly-cloudy', "SKY")
         self.weather_tile = StatusTile('thermometer', "WEATHER")
         self.seeing_tile = StatusTile('star-four-points-outline', "SEEING")
+        self.imaging_tile = StatusTile('telescope', "IMAGING")
         self._tiles = (self.web_tile, self.discord_tile, self.roof_tile,
-                       self.sky_tile, self.weather_tile, self.seeing_tile)
+                       self.sky_tile, self.weather_tile, self.seeing_tile, self.imaging_tile)
         for t in self._tiles:
             lay.addWidget(t)
 
@@ -258,6 +259,7 @@ class StatusStrip(QFrame):
         self.set_sky("Not configured", 'muted')
         self.set_weather("Not configured", 'muted')
         self.set_seeing("—", 'muted')
+        self.set_imaging("—", 'muted')
         self.set_capture_state('idle', "Idle")
 
     def paintEvent(self, event):
@@ -295,6 +297,10 @@ class StatusStrip(QFrame):
     def set_seeing(self, text: str, tone: str = 'primary'):
         self.seeing_tile.set_value(text, tone, 'star-four-points-outline',
                                    mono=(tone != 'muted'))
+
+    def set_imaging(self, text: str, tone: str = 'primary'):
+        """The imaging-conditions verdict (GET /conditions), already worded."""
+        self.imaging_tile.set_value(text, tone, 'telescope')
 
     def set_sensors_stale(self, stale: bool):
         """Dim the per-frame sensor tiles (roof/sky/seeing) when capture is idle."""

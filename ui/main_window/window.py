@@ -46,6 +46,7 @@ from ..controllers.allsky_controller import AllSkyController
 from ..controllers.meteor_controller import MeteorController
 from ..controllers.library_controller import LibraryController
 from ..controllers.output_crop_controller import OutputCropController
+from ..controllers.imaging_conditions_controller import ImagingConditionsController
 from ..controllers.diagnostics_controller import DiagnosticsController
 
 from .capture import _MainWindowCaptureMixin
@@ -393,6 +394,9 @@ class MainWindow(
         self.image_processor.preview_ready.connect(self._on_preview_ready)
 
         self.output_crop_controller.bind(self.image_processor, self.processing_panel.crop_card)
+        self.imaging_conditions_controller = ImagingConditionsController(self)
+        self.imaging_conditions_controller.bind(
+            self.processing_panel.ml_section.conditions_card, self.status_strip)
         self.image_processor.error_occurred.connect(self._on_processing_error)
 
     def _apply_styles(self):
