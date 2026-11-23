@@ -1,6 +1,6 @@
 # NINA Integration
 
-PFR Sentinel can work hand in hand with N.I.N.A. A small plugin, bundled with Sentinel and installed from the **Output** tab, adds a **PFR Sentinel** panel to NINA showing the live pier camera frame and Sentinel's health, plus two Advanced Sequencer instructions — **Start Sentinel Capture** and **Stop Sentinel Capture** — so capture follows your observing session automatically. Everything runs through Sentinel's [Capture Control API](Capture-Control-API), and the plugin pairs itself with Sentinel: there is no address or token to type into NINA.
+PFR Sentinel can work hand in hand with N.I.N.A. A small plugin, bundled with Sentinel and installed from the **Output** tab, adds a **PFR Sentinel** panel to NINA showing the live pier camera frame and Sentinel's health, plus two Advanced Sequencer instructions — **Start Sentinel Capture** and **Stop Sentinel Capture** — so capture follows your observing session automatically, and a trigger and a loop condition that pause imaging when the pier camera says the sky has turned bad. Everything runs through Sentinel's [Capture Control API](Capture-Control-API), and the plugin pairs itself with Sentinel: there is no address or token to type into NINA.
 
 ---
 
@@ -17,6 +17,7 @@ A panel in NINA's **Imaging** tab, titled **PFR Sentinel**:
 | **Health** | Sentinel's overall capture health — **OK**, **IDLE**, **DEGRADED**, **RECOVERING** or **ERROR** — with Sentinel's own explanation underneath when there is one. See [Capture Control API](Capture-Control-API#health-block) for what each means. |
 | Statistics | **Capture** (state and mode), **Interval**, **Last frame**, **Next frame**. A **Recovery** row appears only while the camera is recovering or has needed recovery attempts. |
 | **All-sky target** | What the plugin last sent for the [all-sky overlay](#target-on-the-all-sky-overlay): whether it is sending, idle (no target running), off, or not reaching Sentinel, and while sending, the target's name, RA / Dec, field of view, rotation and how long ago Sentinel last accepted it. **Field: none (reticle)** means no field of view could be worked out, so Sentinel draws a reticle instead of a box. When a send fails, the reason is shown underneath in amber. Beside the statistics when the panel is wide enough, underneath them when it is not. *Added in version v3.7.9.* |
+| **Conditions** | Sentinel's [imaging conditions](Imaging-Conditions) verdict — **OK TO IMAGE**, **NOT OK** or **NO VERDICT** — with the reasons in plain words, then **Roof**, **Sky**, **Stars** (count and ratio to this rig's clear-sky count), **Star change** (percent against recent frames), **Cloud cover**, **FWHM** (with its change against the night median), **Sun**, **Baseline** (learning or ready) and how long ago Sentinel judged a frame. While Sentinel is still learning this sky an amber line says so. This is Sentinel's verdict alone; the limits you set on a trigger or condition are shown on that item. *New in the next release.* |
 | **Start** / **Stop** | Start or stop Sentinel capture. Both buttons are disabled while a command is waiting for Sentinel to confirm, and whenever capture control is unavailable — a line underneath always says why. |
 | **Reconnect** | Re-reads Sentinel's settings and checks in immediately. Use it after changing a setting in Sentinel, such as turning capture control on: the panel's regular checks don't re-read Sentinel's settings. |
 | Endpoint line | The Sentinel address the panel is talking to. It turns amber when an address override is in force. |
@@ -41,6 +42,72 @@ Each instruction has one setting:
 Both are safe to re-run: starting a capture that is already running, or stopping one that is already stopped, succeeds without changing anything. A sequence that fires Stop twice while aborting will not fail.
 
 A scheduled capture that is enabled but waiting for its capture window counts as started, so **Start Sentinel Capture** will not hold your sequence until the window opens.
+
+### Pausing on bad conditions
+
+> **New in the next release** — not available in plugin version 1.2.1.0 or Sentinel 3.8.0 or earlier.
+
+Two more entries under the **PFR Sentinel** category let a sequence react to what the pier camera sees. Both read Sentinel's [imaging conditions](Imaging-Conditions) verdict (`GET /conditions`), which judges each pier-camera frame for roof, daylight, cloud, star count and star size.
+
+| Entry | Kind | What it does |
+|-------|------|--------------|
+| **Sentinel: pause on bad conditions** | Trigger | Before each exposure, asks Sentinel whether the sky is good enough to image. If not, it waits — the sequence stays where it is — until the sky has stayed good for the **Settle (s)** time, then imaging carries on. |
+| **Sentinel: loop while conditions OK** | Loop condition | Keeps the container looping while the sky is good enough, and ends the loop once it is not, so the sequence moves on to whatever comes next. |
+
+**It only waits.** The trigger does not stop guiding or tracking, park the mount, close the roof or warm the camera. Use NINA's own instructions and your safety monitor for those. The mount keeps tracking during a pause. If a pause can last long, put NINA's **Restore Guiding** and **Center After Drift** triggers on the same container so guiding and framing are recovered when imaging resumes, and let PHD2's own star-lost handling deal with guiding through cloud.
+
+Both follow Sentinel's verdict, and both accept optional limits of your own. Leave a box empty (or enter 0) to not use it. A limit can only make the check stricter, never overrule Sentinel's "not OK".
+
+| Setting | Default | What counts as bad |
+|---------|---------|--------------------|
+| **Min star ratio** | empty | Stars on the frame divided by this rig's clear-sky count is below the number, e.g. 0.5. |
+| **Max cloud %** | empty | Estimated cloud cover is above the percentage. |
+| **Star drop %** | empty | The star count has dropped by this percentage or more against the recent frames, e.g. 40 is crossed at −40 %. |
+| **FWHM rise %** | empty | Star size (FWHM) is this percentage or more above the night's median. |
+| **Max FWHM (″)** | empty | Pier-camera FWHM in arcseconds is above the number. Needs Sentinel to know the pier camera's plate scale. |
+| **Max FWHM (px)** | empty | Pier-camera FWHM in pixels is above the number. |
+| **Require roof Open** | off | The roof does not read Open, whatever Sentinel's own roof setting. An unknown roof is not Open. |
+| **No verdict = bad** | on | See below. |
+
+A limit whose measurement Sentinel does not have yet (no stars detected, no plate scale) is skipped, not treated as bad, and the item's status line says so.
+
+**While Sentinel is learning this sky.** Every rig learns its own clear-sky star count on its own installation, so a new install starts out learning. Until it has enough clear frames, **Min star ratio** and **Max cloud %** have nothing to compare against and are skipped; the status line says, for example, "Sentinel is learning this sky (12/30 clear frames); star ratio and cloud cover not used yet". **Star drop %** and **FWHM rise %** work from the first frames, because they compare the sky with itself.
+
+**No verdict.** When Sentinel cannot give a verdict — it is not running or not reachable, it rejected the token, capture stopped so its verdict is stale, it is still gathering its first frames, imaging conditions are switched off in Sentinel, or this Sentinel is too old to have them — **No verdict = bad** decides. On (the default), the trigger pauses and the loop ends: no answer is not a yes. Off, imaging carries on. The status line always names the reason, so a pause caused by a rejected token is easy to tell from a cloudy sky.
+
+The trigger has a few settings of its own:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Settle (s)** | 60 | How long the sky must stay good, without a single bad check, before imaging resumes. 0–3600. |
+| **Max wait (min)** | 0 | The longest pause. 0 waits as long as it takes. A long pause also holds back everything after it in the sequence, so set a limit if your sequence ends with a park or warm-up. Up to 1440. |
+| **Fail on timeout** | off | When **Max wait** runs out: ticked, the trigger fails (NINA logs it and handles it like any other failed trigger); unticked, the sequence carries on with the next exposure. It is checked again before the exposure after that. |
+| **Only before exposures** | on | Check only before an exposure, so a park, warm-up or **Stop Sentinel Capture** after the imaging is never held back by a pause. |
+
+Each entry shows Sentinel's current verdict in the sequencer, for example "Sentinel: Not OK: cloud cover is high (72%)", so you can see what it would do before you start. NINA's validation checks only the settings (for example a settle time as long as the maximum wait); Sentinel's own state is shown on that line instead, because NINA fails a trigger outright on a validation issue, and that would turn "pause when there is no verdict" into "carry on imaging".
+
+How often it asks: all the entries in a sequence and the panel share one copy of Sentinel's answer, refreshed at most every 5 seconds, so adding the trigger to many containers does not add load. Between exposures the check uses an answer at most 15 seconds old, waiting up to 10 seconds for a fresh one when an exposure has taken longer than that. While paused it checks every 5 seconds. The loop condition, like NINA's own loop conditions, is checked between exposures and does not cut one short.
+
+#### Example sequence
+
+Put the trigger on the target's container, so it guards every exposure of that target:
+
+```text
+Sequence
+├─ Start                           (cool camera, unpark, Start Sentinel Capture)
+├─ Target: M31  (Deep Sky Object container)
+│   ├─ Triggers
+│   │   ├─ Sentinel: pause on bad conditions   Star drop % 40, Settle 120 s, Max wait 60 min
+│   │   ├─ Restore Guiding
+│   │   └─ Center After Drift
+│   ├─ Slew and center, Start Guiding, Run Autofocus
+│   └─ Smart Exposure  L 120 s x 60
+└─ End                             (Stop Sentinel Capture, park, warm camera)
+```
+
+Thin cloud passing over: the trigger pauses before the next exposure, waits until Sentinel has seen two minutes of good sky, and imaging resumes; if it is still cloudy after an hour, the sequence carries on and checks again before the next exposure. **Only before exposures** keeps the End block free to park and warm the camera whatever the sky.
+
+To move on instead of waiting — for example to a second target or to the end of the night — put **Sentinel: loop while conditions OK** on a loop container around the imaging instead (together with NINA's **Loop Until Time** if you also want a time limit).
 
 ### Target on the all-sky overlay
 
@@ -75,6 +142,7 @@ The marker is only drawn when the all-sky overlay is turned on and the lens is c
 | Same machine | NINA and Sentinel must run on the same PC, under the same Windows user account. See [Sentinel on another machine](#sentinel-on-another-machine). |
 | Web server | **Enable Web Server** turned on in the **Web Server** card of the [Output Settings](Output-Settings) tab. |
 | Capture control | **Enable Capture Control API** turned on in the same card. The live frame and health work without it, but Start/Stop and the sequencer instructions need it. |
+| Pausing on bad conditions | A Sentinel newer than 3.8.0 (with [imaging conditions](Imaging-Conditions)) and plugin version 1.3.0.0 or later. Also needs capture control, as above: `/conditions` uses the same token. An older Sentinel gives no verdict, and the status line says to update it. |
 | Target on the all-sky overlay | Sentinel 3.7.9 or newer with plugin version 1.2.0.0 or later — the plugin bundled with that Sentinel. Also needs capture control, as above, and a calibrated [All-Sky Overlay](All-Sky-Overlay). An older Sentinel ignores the target and the plugin notes it once in NINA's log. |
 
 ---
@@ -151,6 +219,8 @@ A typical night:
 **When a step fails**, the step fails in NINA with Sentinel's own explanation — for example the camera error Sentinel recorded ("No ZWO cameras detected…") — and the same text appears in NINA's log.
 
 **Aborting a sequence while Start is waiting** abandons the wait, but it does not undo the start: Sentinel has already been told to start capture by then. The plugin deliberately does not issue a Stop on your behalf and writes a warning to NINA's log instead. If you want capture stopped, press **Stop** in the panel or in Sentinel.
+
+**Pausing for cloud.** Add **Sentinel: pause on bad conditions** to each target's container — see [Pausing on bad conditions](#pausing-on-bad-conditions) for the settings and an example.
 
 **Headless mode.** If Sentinel runs without its window (headless mode), the instructions work the same way. Stop pauses capture rather than closing Sentinel, so a later Start resumes it.
 
@@ -235,6 +305,20 @@ The panel always explains why the buttons are disabled:
 | PFR Sentinel did not answer in time. | Check Sentinel is running and not blocked by a firewall. |
 | Sentinel configuration not found… | Sentinel is not installed for this Windows user on this PC. |
 | Timed out waiting for capture to reach 'running'… | The camera took longer than **Wait up to (s)**. Raise it. |
+
+### The pause trigger pauses, or never pauses
+
+The trigger's status line in the sequencer, and NINA's log (`PFR Sentinel: paused …`, `PFR Sentinel: conditions OK again …`), say why. *New in the next release.*
+
+| Status line | Fix |
+|-------------|-----|
+| "No verdict: … not reachable …", "… rejected the control token …", "… capture control API is switched off …" | Same fixes as the validation issues above. The trigger pauses on these while **No verdict = bad** is on. |
+| "No verdict: … has no /conditions endpoint (HTTP 404) …" | Sentinel is older than the plugin. Update Sentinel. |
+| "No verdict: imaging conditions are switched off in Sentinel" | Turn imaging conditions on in Sentinel — see [Imaging Conditions](Imaging-Conditions). |
+| "No verdict: Sentinel has not judged a frame recently …" | Sentinel's capture stopped or stalled. Check the panel's **Health** line and start capture. |
+| "No verdict: Sentinel is still gathering its first frames" | Normal for the first few frames after Sentinel starts. |
+| "Not OK: …" | The sky is bad by Sentinel's rules or yours; the rest of the line names which. Loosen your limits on the item, or Sentinel's own on its [Imaging Conditions](Imaging-Conditions) settings. |
+| Never pauses although the sky is bad | Check the trigger is on a container that holds the exposures. With **Only before exposures** on it checks only before NINA's own exposure instructions (Take Exposure, Take Many Exposures, Smart Exposure); an imaging instruction from another plugin may not count, so turn the setting off if you use one. A limit is skipped while its measurement is missing or while Sentinel is learning this sky — the line ends with a note saying so. |
 
 ### No target marker on the all-sky view
 
