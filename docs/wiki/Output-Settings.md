@@ -35,14 +35,9 @@ A built-in HTTP server that serves the latest image, a JSON status report and an
 
 ### Capture Control API
 
-The same card holds the switch that lets NINA and other local tools start and stop capture over HTTP.
+> **New in the next release** — not available in version 3.8.0 or earlier.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Enable Capture Control API** | Off | Turns on the start/stop endpoints. They run on the web server, so **Enable Web Server** must also be on. If it isn't, you'll get a warning. |
-| **API Token** | — | Generated the first time you turn the control API on. It's hidden until you click **Show**. **Copy** puts it on the clipboard. **Regenerate** creates a new token, and any tool still using the old one stops working. The field stays empty while the control API is off. |
-
-The bundled NINA plugin reads the token by itself, so you only need to copy it for other tools. See [Capture Control API](Capture-Control-API).
+**Enable Capture Control API**, the **API Token** and the **NINA Plugin** card have moved to the [NINA & ASCOM](NINA-and-ASCOM) tab. Their settings carry over. The Web Server card keeps a one-line note with an **Open** button that takes you there. In 3.8.0 and earlier they are in this card and below it. See [Capture Control API](Capture-Control-API).
 
 ---
 

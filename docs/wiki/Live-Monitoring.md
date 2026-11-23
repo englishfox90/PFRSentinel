@@ -17,8 +17,8 @@ How the content area is used depends on the page selected in the navigation rail
 
 | Selected page | Layout |
 |---------------|--------|
-| **Live Monitoring** | The preview fills the whole content area. The histogram, activity feed, and performance line are hidden to give the image maximum room. |
-| **Capture**, **Image Processing**, **All-Sky**, **Meteor Tracker**, **Output**, **Timelapse**, **Logs** | The live panel (preview, histogram, activity feed) on the left and the selected page's settings on the right. Drag the divider between them to resize; the split is remembered. |
+| **Live Monitoring** | The preview fills the content area, with the [imaging conditions panel](#imaging-conditions-panel) beside it (hide it with its arrow; **Conditions** in the preview header brings it back). The histogram, activity feed, and performance line are hidden to give the image maximum room. |
+| **Capture**, **Image Processing**, **All-Sky**, **Meteor Tracker**, **Output**, **Timelapse**, **NINA & ASCOM**, **Logs** | The live panel (preview, histogram, activity feed) on the left and the selected page's settings on the right. Drag the divider between them to resize; the split is remembered. |
 | **Overlays**, **Library**, **Settings** | The selected page fills the content area and the live panel is hidden. The Overlays page has its own preview. |
 
 The app reopens on the page you were last using.
@@ -74,6 +74,8 @@ The band below the app bar shows live observatory status. Tiles that have nothin
 | **WEATHER** | Temperature, condition, and cloud cover from OpenWeatherMap, e.g. "12.0°C · Clear · 20%". Needs an API key and a location or coordinates in [Settings](Settings). The tile keeps updating while capture is stopped, and dims if the weather data is more than 30 minutes old (for example, an invalid API key or no internet). |
 | **SEEING** | Star count and FWHM from star detection, e.g. "412 stars · FWHM 2.3". Shows **—** until the first reading arrives, **Roof closed** while the roof is closed, and **—** again while the Sky tile reports **Exposure too short** or **No stars detected**, because star detection is skipped on those frames. |
 
+| **IMAGING** | The [imaging conditions](Imaging-Conditions) verdict NINA reads: **OK · 5% cloud**, **Paused · Cloud cover high**, **Warming up**, **Recovering**, **Idle** or **Off**. Click it to open the conditions panel on Live Monitoring (new in the next release). |
+
 Roof, Sky, and Seeing are updated with each processed frame and are dimmed while capture is stopped, so you can tell a live reading from the last known one.
 
 At the right-hand end, the capture/camera pill shows:
@@ -85,6 +87,14 @@ At the right-hand end, the capture/camera pill shows:
 | Idle, Alpaca camera not yet reached | **CAMERA** "Alpaca · not connected": in [Alpaca Camera](Alpaca-Camera) mode, shown until a **Test Connection** passes or capture runs against the current host, port and device. **Start Capture** is still available. New in the next release. |
 | Capturing, camera recovering | Amber **CAPTURE** pill with "Reconnecting to camera…" while a reconnect runs, or "Camera lost · retrying" while it waits for the next attempt. ZWO and Alpaca cameras alike. New in the next release. |
 | No camera | Red **CAMERA** "Disconnected" (or "Camera error" after a camera failure) |
+
+---
+
+## Imaging Conditions Panel
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+Beside the preview on the Live Monitoring page: the imaging-conditions verdict in one sentence, the latest star, cloud and FWHM figures, when NINA last asked for the verdict, a chart of the star index over the last few hours with the not-OK stretches shaded, the recent pauses and resumes, and how far Sentinel has learned your clear sky. Clicking the **IMAGING** tile from any page opens it. See [Imaging Conditions](Imaging-Conditions#the-conditions-panel-on-live-monitoring) for each part.
 
 ---
 
@@ -169,13 +179,14 @@ EXP, GAIN, and SENSOR show "—" when capture is stopped. With no camera connect
 
 ## Navigation Rail
 
-The rail on the left lists the app's pages in three groups, with **Logs** and **Settings** at the bottom:
+The rail on the left lists the app's pages in four groups, with **Logs** and **Settings** at the bottom:
 
 | Group | Pages |
 |-------|-------|
 | **MONITOR** | [Live Monitoring](Live-Monitoring), [Meteor Tracker](Meteor-Detection) |
 | **IMAGE** | [Capture](Capture-Settings), [Image Processing](Image-Processing), [Overlays](Overlay-Settings), [All-Sky](All-Sky-Overlay) |
 | **PUBLISH** | [Output](Output-Settings), [Timelapse](Timelapse), [Library](Image-Library) |
+| **AUTOMATION** | [NINA & ASCOM](NINA-and-ASCOM) (new in the next release) |
 | (bottom) | [Logs](Logs), [Settings](Settings) |
 
 The selected page is highlighted in the accent colour. Click the menu icon at the top of the rail to collapse it to icons only, or expand it again.

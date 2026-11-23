@@ -19,7 +19,7 @@ Stack: Python 3.13, PySide6 6.11.2 (pinned) + qfluentwidgets (`PySide6-Fluent-Wi
 
 All output dispatch goes through `_push_to_output_servers()` in `ui/main_window/output.py`.
 
-**Imaging conditions** — every processed frame (camera and Directory Watch) feeds `services/imaging_conditions/` right after star detection; `GET /conditions` (same bearer auth as the control routes) serves `imaging_ok` with hysteresis, reason codes and the measurements, and `/status` carries a compact `conditions` block. The clear-sky star baseline is learned on each installation — never ship star counts. See `docs/wiki/Imaging-Conditions.md`.
+**Imaging conditions** — every processed frame (camera and Directory Watch) feeds `services/imaging_conditions/` right after star detection; `GET /conditions` (same bearer auth as the control routes) serves `imaging_ok` with hysteresis, reason codes and the measurements, and `/status` carries a compact `conditions` block. The clear-sky star baseline is learned on each installation — never ship star counts. Settings live on the **NINA & ASCOM** page (with the control API token, the NINA plugin card and the roof SafetyMonitor / safety file — config keys unchanged); the Sensitivity preset (`presets.py`) only sets the threshold keys, which stay authoritative, and Balanced must equal `DEFAULT_CONFIG`. Live Monitoring's conditions panel (opened by the IMAGING tile) reads `conditions_history` and `nina_checkin`. See `docs/wiki/Imaging-Conditions.md`.
 
 **NINA target** — the NINA plugin POSTs the running sequencer target to `/nina/target` (same bearer auth as the control routes); `services/allsky/render_target.py` draws it on the all-sky overlay, and the pushed target goes stale after `nina_target.stale_after_s`. Headless mode accepts the POST but renders no overlay.
 
@@ -29,14 +29,18 @@ All output dispatch goes through `_push_to_output_servers()` in `ui/main_window/
 PFRSentinel/
 ├── ui/                         # PySide6 + qfluentwidgets UI
 │   ├── main_window/            # FluentWindow + QStackedWidget navigation (window.py, capture.py, output.py, lifecycle.py,
-│   │                             alpaca_camera.py — Discover / Test Connection wiring and the "Alpaca · not connected" pill …)
+│   │                             alpaca_camera.py — Discover / Test Connection wiring and the "Alpaca · not connected" pill …,
+│   │                             navigation.py — splitter, sections, the NINA & ASCOM page and the links into it)
 │   ├── system_tray_qt.py       # QSystemTrayIcon tray menu (no third-party backend)
 │   ├── components/             # Reusable widgets (header, monitoring panel, status indicator)
 │   ├── panels/                 # Pages (layout only) — monitoring, capture, output, overlays, timelapse, logs;
-│   │                             _zwo_connection_card.py / _alpaca_connection_card.py, _camera_capability_gate.py
+│   │                             _zwo_connection_card.py / _alpaca_connection_card.py, _camera_capability_gate.py;
+│   │                             nina_ascom_panel.py (plugin, control_api_card, imaging_conditions_card, roof_safety_card),
+│   │                             conditions_live_panel.py (beside the preview on Live Monitoring)
 │   ├── controllers/            # Business logic — capture, output, overlay, timelapse, ML prediction;
 │   │                             alpaca_discovery_controller.py, alpaca_identity.py (identity/ranges kept per address),
-│   │                             camera_wedge_recovery.py (wedged-thread + USB-reset recovery, ZWO-only USB steps)
+│   │                             camera_wedge_recovery.py (wedged-thread + USB-reset recovery, ZWO-only USB steps),
+│   │                             nina_ascom_controller.py (control API + roof-safety edits), imaging_conditions_controller.py
 │   └── theme/                  # tokens.py, styles.py, accent_themes.py, special_themes.py (seasonal packs), icons.py
 ├── services/                   # Core processing modules
 │   ├── host_platform.py        # OS facts for user-facing wording (labels, SDK filename, file manager)
@@ -90,7 +94,9 @@ PFRSentinel/
 │   ├── imaging_conditions/     # Per-frame "good enough to image?" verdict for NINA: frame_signals (metadata → roof/sky/stars/FWHM),
 │   │                             frame_rules (reason codes, all star rules relative), star_baseline (per-rig clear-sky count per Moon bin,
 │   │                             stamped camera + frame size + lens, persisted under <app-data>/imaging_conditions/), plate_scale (a1 → arcsec),
-│   │                             verdict_hysteresis, conditions_store (thread-safe, stale at read time), feed (the pipelines' one-line hook)
+│   │                             verdict_hysteresis, conditions_store (thread-safe, stale at read time), feed (the pipelines' one-line hook),
+│   │                             presets (Relaxed / Balanced / Strict; star floor 10 points under the cloud line), conditions_history
+│   │                             (12 h ring + paused/resumed events, events.json kept 24 h), nina_checkin (last /conditions request, by User-Agent)
 │   ├── api_conditions.py       # GET /conditions contract catalog + OpenAPI (pure); the plugin depends on its field names
 │   ├── web_conditions.py       # The /conditions route behind the control-API auth
 │   ├── nina_plugin_install.py  # Install/update/remove the NINA plugin
@@ -512,78 +518,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_imaging_conditions_feed.py` | 22 | `ImagingConditionsFeed` + `ConditionsStore` on an injected clock — starts not-OK (`warming_up`), 3 bad to pause / 3 good to resume (`recovering`), stale after 3x the frame interval (min 120 s) or the configured limit and starting over on resume, disabled, reprocess not counted, baseline learning per Moon bin with `baseline_status` learning → ready, cloudy / closed / twilight frames never teach it, a new camera / frame size / lens restarts it (a refinement or a first calibration does not), arcsec only with a calibration (scaled from the calibration's frame size, null on a crop or a garbage file), the pipeline hook never raises, Directory Watch `process_image` feeds it, per-frame cost (`slow`: p50/p95 logged, 5 ms ceiling) |
 | `test_imaging_conditions_baseline.py` | 23 | `star_baseline` — Moon bins, no star count in the shipped defaults, median once enough samples, bounded per bin, invalid samples refused, throttled atomic saves with no temp left behind, stamp change starts over, reset removes the file (files only), truncated / foreign / non-UTF-8 / oversized files load as learning, a failed write stays dirty, concurrent adds and saves |
 | `test_api_conditions.py` | 16 | `GET /conditions` — golden contract key set (original names pinned, additive ones listed) on a cold and a published snapshot, catalog = payload, every reason code documented, auth matrix (401 / 403 / 503 `control_disabled`, no CORS, token never echoed), route matching and `web_output` GET dispatch, OpenAPI + `/docs` only with the control API, `/docs` renders every field (nested ones flattened, each with a type and a description), compact `/status` block |
-| `test_imaging_conditions_card.py` | 14 | `ImagingConditionsCard` / `ImagingConditionsController` / IMAGING tile — silent load, values round-trip, garbage loads as defaults, one `changed` per edit, verdict wording, a change that rounds to zero reads ±0% (stars and FWHM), the headline reason is not repeated on the line below ("Also: …", recovering shows the good-frame count), stale reads Paused · No recent frames (Capture stopped with capture off) and dates the measurements, Idle before capture with no frames and Warming up once it runs, the learning line names the Moon bin and is hidden in daylight or without a star index, empty lines hidden, the Star index tooltip, every row label fits its column, controller saves into the config block, disabling reaches the store, Reset baseline forgets the counts (offscreen Qt) |
-| `test_logs_panel_layout.py` | 1 | Logs page fits the narrow pane beside the preview: the toolbar keeps "Clear" and a long log path doesn't widen the page (offscreen Qt) |
-
-Standalone (not in pytest suite):
-- `ml/test_classifier.py` — interactive accuracy eval against a user-specific labelled dataset (walks `D:/Pier Camera ML Data`). Use this to validate a new model checkpoint, not for CI.
-- `scripts/dev/test_usb_reset.py` — interactive USB reset, requires camera
-
-## Key dependencies
-
-| Package | Purpose |
-|---------|---------|
-| PySide6 6.11.2 (pinned in requirements.txt) | Qt6 bindings |
-| qfluentwidgets (`PySide6-Fluent-Widgets[full]>=1.11.3`) | Fluent Design components |
-| opencv-python | Bayer debayering |
-| Pillow | Image processing |
-| watchdog | Directory monitoring |
-| zwoasi | ZWO SDK wrapper |
-| ifaddr 0.2.0 (pinned) | Alpaca camera discovery: each IPv4 interface's directed broadcast (in the spec's hiddenimports) |
-| onnxruntime | ML inference |
-| astral | Sunset/sunrise for timelapse windows |
-| requests | Weather API + Discord webhooks |
-| ffmpeg (external) | Timelapse |
-| PyInstaller 6.17.0 | Standalone executable |
-
-## Active plans
-
-- [`docs/CODE_QUALITY_PLAN.md`](docs/CODE_QUALITY_PLAN.md) — code quality + structure roadmap
-- [`docs/ALLSKY_CALIBRATION_PLAN.md`](docs/ALLSKY_CALIBRATION_PLAN.md) — read before touching all-sky calibration
-- [`docs/METEOR_DETECTION_PLAN.md`](docs/METEOR_DETECTION_PLAN.md) — meteor detection rework for the long-exposure regime; read before touching `services/meteor/`
-- [`docs/FEATURE_HARDENING_PLAN.md`](docs/FEATURE_HARDENING_PLAN.md) — prioritized hardening backlog (web server, ASCOM roof safety file, timelapse) from the 2026-06-28 deep review; P0/P1/P2 + sizing + file:line pointers
-- [`docs/ALLSKY_POLE_ANCHOR_PLAN.md`](docs/ALLSKY_POLE_ANCHOR_PLAN.md) — pole-anchor (Polaris) ground truth + model admission gates; fixes the wrong-basin model that poisons refinement
-- [`docs/ALLSKY_HOSTING_SITE_PLAN.md`](docs/ALLSKY_HOSTING_SITE_PLAN.md) — issue #93: persisted equipment map, observable-sky gate (roof verdict + star evidence), chance-aware quality, pole from the rotating field with Polaris hidden, pole-constrained solve; six independently mergeable packages with agent briefs
-- [`docs/NINA_INTEGRATION_PLAN.md`](docs/NINA_INTEGRATION_PLAN.md) — NINA dockable widget + capture control API + sequencer instructions; read before touching the web control/API surface
-- [`docs/ALPACA_CAMERA_PLAN.md`](docs/ALPACA_CAMERA_PLAN.md) — issue #43: ASCOM Alpaca as a second camera source behind the capture-session seam; the Decisions at the top override the body. Read before touching `services/camera/` structure or `camera_source`
-
-Developer-facing technical reference (feature design, build/release tooling, vendor SDK) lives in [`docs/dev/`](docs/dev/README.md). End-user content is on the project wiki, whose source is [`docs/wiki/`](docs/wiki/Home.md).
-
-<!-- code-review-graph MCP tools -->
-## MCP Tools: code-review-graph
-
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool | Use when |
-|------|----------|
-| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
-| `get_review_context` | Need source snippets for review — token-efficient |
-| `get_impact_radius` | Understanding blast radius of a change |
-| `get_affected_flows` | Finding which execution paths are impacted |
-| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes` | Finding functions/classes by name or keyword |
-| `get_architecture_overview` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes` for code review.
-3. Use `get_affected_flows` to understand impact.
-4. Use `query_graph` pattern="tests_for" to check coverage.
+| `test_imaging_conditions_card.py` | 14 | `ImagingConditionsCard` / `ImagingConditionsController` / IMAGING tile — silent load, values round-trip, garbage loads as defaults, one `changed` per edit, verdict wording, a change that rounds to zero reads ±0% (stars and FWHM), the headline reason is not repeated on the line below ("Also: …", recovering shows the good-frame count), stale reads Paused · No recent frames (Capture stopped with capture off) and dates the measurements, Idle before capture with no frames and Warming up once it runs, the learning line names the Moon bin and is hidden in daylight or without a star index, empty lines hidden, the star-index tooltip on the cloud limit, every row label fits its column, controller saves into the config block (with `sensitivity` and the derived star floor), disabling reaches the store, Reset baseline forgets the counts (offscreen Qt) |
+| `test_imaging_conditions_presets.py` | 12 | `presets` + the card's Sensitivity — Balanced is the old defaults written out, `read_settings` never reads the preset name, every preset's star floor sits under its cloud line and the presets order Relaxed → Strict, star floor bounds, a moved number reads Custom; picking a preset writes all six keys with one `changed`, editing shows Custom and editing back restores the preset, the cloud limit carries the star floor, picking Custom opens Advanced and changes nothing, a hand-edited ratio survives (offscreen Qt) |
+| `test_conditions_history.py` | 12 | `conditions_history` + `nina_checkin` — events follow `imaging_ok` with durations and a JSON payload, a frames gap while OK is a pause at the stale limit, the ring bounded by count and age, events survive a restart (an open OK closed as `restarted`), old / garbled / oversized / missing files load as nothing, 4 writers + 2 readers, the feed records every judged frame, the store's `events` block (empty while off); client labels, last NINA vs last anyone, the real `/conditions` route records accepted and refused requests without the token |
+| `test_conditions_live_view.py` | 12 | Live Monitoring conditions panel + NINA & ASCOM page — verdict sentences (paused with time and cause, recovering with the good-frame count, OK since, idle, checking, stale, off, waiting for dark, not OK yet), no jargon in pause causes, event lines with durations / "so far", learning and measurement lines, NINA check-in wording; chart shades not-OK runs and gaps and paints, the panel fills every part, shown only on Live Monitoring and collapsible, the IMAGING tile alone is a link; page in the nav rail, the tile / Settings link / Open pointers navigate, the moved Roof Safety and Control API cards load and save the same `ml_models` / `output` keys, Image Processing no longer holds them (offscreen Qt) |

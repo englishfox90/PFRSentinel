@@ -136,6 +136,8 @@ PFR Sentinel can write the roof status to a text file watched by NINA's **Generi
 | **ASCOM Safety File** | Off | Write roof status to the file. |
 | **File Path** | `%LOCALAPPDATA%\PFRSentinel\RoofStatusFile.txt` | The file NINA monitors. Type a path or use **Browse**. |
 
+From the next release these two settings are in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab, labelled **ASCOM safety file** and **File path**; in 3.8.0 and earlier they are in the ML Models card on Image Processing.
+
 File format:
 
 ```
@@ -170,7 +172,7 @@ PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Alpaca Safety Monitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. |
+| **Alpaca SafetyMonitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. In the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab from the next release (the ML Models card on Image Processing in 3.8.0 and earlier). |
 
 By default it listens on **this computer only**, at `127.0.0.1:11111`. In a client on the same computer, add the server by hand as `127.0.0.1:11111`.
 

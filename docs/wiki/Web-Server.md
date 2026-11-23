@@ -15,8 +15,8 @@ The web server is set up in the **Web Server** card on the [Output Settings](Out
 | **Port** | 8080 | 1–65535 | TCP port. |
 | **Image Path** | /latest | — | URL path for the latest image. |
 | **API Docs** | — | — | **Open API Docs** opens the server's reference page in your browser. |
-| **Enable Capture Control API** | Off | — | Adds authenticated start/stop endpoints. See [Capture Control API](Capture-Control-API). |
-| **API Token** | — | — | Token the control endpoints require. See [Capture Control API](Capture-Control-API). |
+
+**Enable Capture Control API** and the **API Token** for the authenticated start/stop and `/conditions` endpoints are on the [NINA & ASCOM](NINA-and-ASCOM) tab from the next release (in this card in 3.8.0 and earlier); the card keeps a note with an **Open** button. See [Capture Control API](Capture-Control-API).
 
 **When the server runs:** if **Enable Web Server** is on, the server starts when PFR Sentinel launches, and again when you start capture if it isn't already running. It stays up after you stop capture. Turning **Enable Web Server** on or off takes effect straight away while capture is running or the server is already up. If you turn it on while idle with no server running, it starts the next time you start capture. Changes to **Host**, **Port** or **Image Path** take effect the next time the server starts. To apply them, turn the switch off and on again while capturing, or restart PFR Sentinel.
 

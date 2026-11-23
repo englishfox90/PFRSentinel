@@ -1,6 +1,6 @@
 # NINA Integration
 
-PFR Sentinel can work hand in hand with N.I.N.A. A small plugin, bundled with Sentinel and installed from the **Output** tab, adds a **PFR Sentinel** panel to NINA showing the live pier camera frame and Sentinel's health, plus two Advanced Sequencer instructions — **Start Sentinel Capture** and **Stop Sentinel Capture** — so capture follows your observing session automatically, and a trigger and a loop condition that pause imaging when the pier camera says the sky has turned bad. Everything runs through Sentinel's [Capture Control API](Capture-Control-API), and the plugin pairs itself with Sentinel: there is no address or token to type into NINA.
+PFR Sentinel can work hand in hand with N.I.N.A. A small plugin, bundled with Sentinel and installed from the **[NINA & ASCOM](NINA-and-ASCOM)** tab (the **Output** tab in 3.8.0 and earlier), adds a **PFR Sentinel** panel to NINA showing the live pier camera frame and Sentinel's health, plus two Advanced Sequencer instructions — **Start Sentinel Capture** and **Stop Sentinel Capture** — so capture follows your observing session automatically, and a trigger and a loop condition that pause imaging when the pier camera says the sky has turned bad. Everything runs through Sentinel's [Capture Control API](Capture-Control-API), and the plugin pairs itself with Sentinel: there is no address or token to type into NINA.
 
 ---
 
@@ -141,7 +141,7 @@ The marker is only drawn when the all-sky overlay is turned on and the lens is c
 | NINA | NINA 3.x. The plugin is built against and tested with NINA 3.2. |
 | Same machine | NINA and Sentinel must run on the same PC, under the same Windows user account. See [Sentinel on another machine](#sentinel-on-another-machine). |
 | Web server | **Enable Web Server** turned on in the **Web Server** card of the [Output Settings](Output-Settings) tab. |
-| Capture control | **Enable Capture Control API** turned on in the same card. The live frame and health work without it, but Start/Stop and the sequencer instructions need it. |
+| Capture control | **Enable Capture Control API** turned on in the **Control API** card of the [NINA & ASCOM](NINA-and-ASCOM) tab (the Output tab's **Web Server** card in 3.8.0 and earlier). The live frame and health work without it, but Start/Stop and the sequencer instructions need it. |
 | Pausing on bad conditions | A Sentinel newer than 3.8.0 (with [imaging conditions](Imaging-Conditions)) and plugin version 1.3.0.0 or later. Also needs capture control, as above: `/conditions` uses the same token. An older Sentinel gives no verdict, and the status line says to update it. |
 | Target on the all-sky overlay | Sentinel 3.7.9 or newer with plugin version 1.2.0.0 or later — the plugin bundled with that Sentinel. Also needs capture control, as above, and a calibrated [All-Sky Overlay](All-Sky-Overlay). An older Sentinel ignores the target and the plugin notes it once in NINA's log. |
 
@@ -149,18 +149,20 @@ The marker is only drawn when the all-sky overlay is turned on and the lens is c
 
 ## Setup
 
-1. In Sentinel, open the **Output** tab.
-2. In the **Web Server** card, turn on **Enable Web Server**.
-3. In the same card, turn on **Enable Capture Control API**. Sentinel generates an API token the first time. You do not need to copy it — the plugin reads it for you. If you enable control while the web server is off, Sentinel warns you: "Capture control needs the web server — enable it above."
+> **New in the next release** — not available in version 3.8.0 or earlier. Capture control and the NINA plugin card move to the **NINA & ASCOM** tab. In 3.8.0 and earlier both are on the **Output** tab, under and below the **Web Server** card.
+
+1. In Sentinel, open the **Output** tab. In the **Web Server** card, turn on **Enable Web Server**.
+2. Open the **NINA & ASCOM** tab (under **Automation** in the sidebar).
+3. In the **Control API** card, turn on **Enable Capture Control API**. Sentinel generates an API token the first time. You do not need to copy it — the plugin reads it for you. If you enable control while the web server is off, Sentinel warns you: "Capture control needs the web server — turn it on in Output → Web Server."
 4. Close NINA.
-5. In the **NINA Plugin** card (just below **Web Server**), click **Install Plugin**.
+5. In the **NINA Plugin** card, click **Install Plugin**.
 6. Start NINA. Open the **PFR Sentinel** panel from the Imaging tab, and look for the **PFR Sentinel** category in the Advanced Sequencer's instruction list.
 
 ---
 
 ## Installing, Updating and Removing
 
-The **NINA Plugin** card on the Output tab manages the plugin. Its **Status** line reports what Sentinel found:
+The **NINA Plugin** card on the [NINA & ASCOM](NINA-and-ASCOM) tab manages the plugin. Its **Status** line reports what Sentinel found:
 
 | Status | Meaning | Button |
 |--------|---------|--------|
@@ -244,9 +246,9 @@ Each call waits up to 30 seconds for capture to reach the requested state, is sa
 |-----------|---------|-----|
 | 0 | Success, including "already running" / "already stopped" | — |
 | 2 | Sentinel's settings file not found or unreadable | Sentinel is not installed for this Windows user |
-| 3 | Control API switched off or no token, or control not wired up | Enable **Enable Capture Control API** on the Output tab; if it is already on, restart Sentinel |
+| 3 | Control API switched off or no token, or control not wired up | Enable **Enable Capture Control API** on the NINA & ASCOM tab; if it is already on, restart Sentinel |
 | 4 | Sentinel not reachable | Check Sentinel is running with the web server enabled |
-| 5 | Token rejected, or request refused by the Host check | Regenerate the token on the Output tab; run the script on the same machine as Sentinel |
+| 5 | Token rejected, or request refused by the Host check | Regenerate the token on the NINA & ASCOM tab; run the script on the same machine as Sentinel |
 | 6 | Timed out waiting for the state | Camera slow to start — raise the timeout (see below) |
 | 7 | Capture reported a failure | Read the message in NINA's log; usually a camera fault |
 
@@ -286,7 +288,7 @@ The panel always explains why the buttons are disabled:
 
 | Message | Fix |
 |---------|-----|
-| …the capture control API is switched off in Sentinel. | Turn on **Enable Capture Control API** on Sentinel's Output tab, then click **Reconnect**. |
+| …the capture control API is switched off in Sentinel. | Turn on **Enable Capture Control API** on Sentinel's NINA & ASCOM tab, then click **Reconnect**. |
 | …Sentinel is running but capture control is not wired up. | Restart Sentinel. |
 | …Sentinel rejected the control token. | Click **Regenerate** next to **API Token** in Sentinel, then **Reconnect**. |
 | …no capture control token is configured. | Turn on **Enable Capture Control API** to generate one. |
@@ -297,9 +299,9 @@ The panel always explains why the buttons are disabled:
 
 | Issue | Fix |
 |-------|-----|
-| PFR Sentinel's capture control API is switched off. Enable it on Sentinel's Output tab. | Turn on **Enable Capture Control API**. |
+| PFR Sentinel's capture control API is switched off. Enable it on Sentinel's Output tab. | Turn on **Enable Capture Control API**. It is now on the NINA & ASCOM tab; the Output tab's **Web Server** card has an **Open** button that takes you there. |
 | PFR Sentinel is running but capture control is not wired up. Restart Sentinel. | Restart Sentinel. |
-| PFR Sentinel rejected the control token. Regenerate it on Sentinel's Output tab. | Click **Regenerate**. |
+| PFR Sentinel rejected the control token. Regenerate it on Sentinel's Output tab. | Click the regenerate button next to **API Token** (now on the NINA & ASCOM tab). |
 | …not reachable… Check Sentinel is running with its web server enabled, and that the host and port match. | Start Sentinel and turn on **Enable Web Server**. |
 | PFR Sentinel refused the request's Host header… | Capture control accepts calls from the same machine only. See [Capture Control API](Capture-Control-API#host-allow-list). |
 | PFR Sentinel did not answer in time. | Check Sentinel is running and not blocked by a firewall. |
@@ -320,6 +322,8 @@ The trigger's status line in the sequencer, and NINA's log (`PFR Sentinel: pause
 | "Not OK: the sky looks good again; Sentinel is waiting for a few good frames in a row" | Normal: Sentinel only says OK again after several good frames in a row. The trigger's **Settle (s)** time starts after that. |
 | "OK to image. latest frame: …" | The latest frame was bad, but Sentinel waits for a few bad frames in a row before saying "not OK", so imaging continues. Your own limits still apply to that frame's figures. |
 | "Not OK: …" | The sky is bad by Sentinel's rules or yours; the rest of the line names which. Loosen your limits on the item, or Sentinel's own on its [Imaging Conditions](Imaging-Conditions) settings. |
+| Pauses more or less often than you'd like | Pick a different **Sensitivity** (Relaxed / Balanced / Strict) on Sentinel's [Imaging Conditions](Imaging-Conditions#sensitivity) card, or adjust the numbers under **Advanced**. |
+| Not sure NINA is asking at all | On Sentinel's Live Monitoring page, the conditions panel (click the **IMAGING** tile) shows "NINA last checked … ago", or "NINA hasn't checked in yet". It turns amber when NINA's request was refused. *New in the next release.* |
 | Never pauses although the sky is bad | Check the trigger is on a container that holds the exposures. With **Only before exposures** on it checks only before NINA's own exposure instructions (Take Exposure, Take Many Exposures, Smart Exposure); an imaging instruction from another plugin may not count, so turn the setting off if you use one. A limit is skipped while its measurement is missing or while Sentinel is learning this sky — the line ends with a note saying so. |
 
 ### No target marker on the all-sky view
@@ -330,7 +334,7 @@ Work down the list:
 |-------|-----|
 | The all-sky overlay is off, or the **NINA Target** card's **Show NINA target** is off. | Turn them on on the All-Sky page. See [All-Sky Overlay](All-Sky-Overlay#nina-target). |
 | The lens is not calibrated. | The target is placed through the lens calibration like every other label. Calibrate first. |
-| **Enable Capture Control API** is off in Sentinel. | Turn it on on the Output tab. The plugin uses the same token as Start/Stop. |
+| **Enable Capture Control API** is off in Sentinel. | Turn it on on the NINA & ASCOM tab. The plugin uses the same token as Start/Stop. |
 | No target is running. | The marker follows the *running* target. A sequence that is built but not started, or is between targets, has none. The plugin also waits about 15 seconds after NINA starts before its first report. |
 | NINA stopped reporting. | Sentinel hides the marker about 2 minutes after the last report (**Hide after (s)** on the All-Sky page). Check NINA is still running the sequence. |
 | **Send the current sequencer target to Sentinel** is off. | Turn it on on the plugin's options page in NINA. |
@@ -364,7 +368,7 @@ Both show up as the same HTTP error (503), but they need opposite fixes, and Sen
 
 | Code | Meaning | What to do |
 |------|---------|------------|
-| `control_disabled` | The capture control API is turned off, so there is no token. | Turn on **Enable Capture Control API** on the Output tab. |
+| `control_disabled` | The capture control API is turned off, so there is no token. | Turn on **Enable Capture Control API** on the NINA & ASCOM tab. |
 | `control_unavailable` | Control is on and the token is fine, but Sentinel's capture controls aren't connected to the server (this shouldn't happen). | Restart Sentinel. If it persists, send a [Diagnostics Export](Diagnostics-Export). |
 
 The plugin and the script helpers read this code and show the right advice for each.

@@ -22,6 +22,10 @@
 - [Timelapse](Timelapse)
 - [Image Library](Image-Library)
 
+### Automation
+
+- [NINA & ASCOM](NINA-and-ASCOM)
+
 ### App
 
 - [Logs](Logs)
