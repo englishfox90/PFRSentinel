@@ -12,9 +12,11 @@ PFR Sentinel runs on Apple-silicon Macs (M1 and later) as a regular app, `PFR Se
 
 ## Installing
 
+> **New in the next release** — not available in version 3.8.0 or earlier: the disk image window shows these steps and carries a **Read me first** file with the Terminal command.
+
 1. Download `PFRSentinel-<version>-macos-arm64.dmg` from the [latest release](https://github.com/englishfox90/PFRSentinel/releases/latest).
-2. Open it and drag **PFR Sentinel** onto **Applications**.
-3. The first time you open it, macOS says it "cannot be opened" or "is damaged". Clear the download flag once in Terminal, then open the app normally:
+2. Open it. The window shows both steps: drag **PFR Sentinel** onto **Applications**.
+3. The first time you open it, macOS says it "cannot be opened" or "is damaged". Clear the download flag once in Terminal, then open the app normally. The command is also in **Read me first** in the disk image window, ready to copy:
 
    ```bash
    xattr -dr com.apple.quarantine "/Applications/PFR Sentinel.app"
