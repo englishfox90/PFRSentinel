@@ -150,6 +150,11 @@ def _natural_width(strip):
         strip.pill.fit_item('x').width()
 
 
+def _roomy(make_strip, fill):
+    """A width with room to spare on any platform's fonts (Windows' are wider)."""
+    return max(1500, _natural_width(make_strip(1500, fill)) + 80)
+
+
 def _assert_readable(tile, full):
     shown = tile.value.text()
     if shown == full:
@@ -161,7 +166,7 @@ def _assert_readable(tile, full):
 
 
 def test_wide_strip_is_unchanged(make_strip):
-    strip = make_strip(1500, _paused)
+    strip = make_strip(_roomy(make_strip, _paused), _paused)
     assert all(t.presentation == FULL for t in strip._tiles)
     assert strip.imaging_tile.value.text() == PAUSED
     assert strip.pill.value.text() == "Capturing · frame 1234"
@@ -218,7 +223,7 @@ def test_folded_tile_keeps_its_own_tooltip_too(make_strip):
 def test_widening_restores_the_full_layout(make_strip, qapp):
     strip = make_strip(960, _paused)
     assert strip.web_tile.presentation == COMPACT
-    strip.setFixedWidth(1500)
+    strip.setFixedWidth(_roomy(make_strip, _paused))
     qapp.processEvents()
     assert all(t.presentation == FULL for t in strip._tiles)
     assert strip.imaging_tile.toolTip() == "Show imaging conditions on Live Monitoring"
