@@ -160,8 +160,11 @@ def _assert_readable(tile, full):
     assert full in tile.toolTip()
 
 
-def test_wide_strip_is_unchanged(make_strip):
+def test_wide_strip_is_unchanged(make_strip, qapp):
     strip = make_strip(1500, _paused)
+    # Whatever the platform font, a strip wide enough for every tile is untouched.
+    strip.setFixedWidth(max(1500, _natural_width(strip) + 40))
+    qapp.processEvents()
     assert all(t.presentation == FULL for t in strip._tiles)
     assert strip.imaging_tile.value.text() == PAUSED
     assert strip.pill.value.text() == "Capturing · frame 1234"
@@ -218,7 +221,7 @@ def test_folded_tile_keeps_its_own_tooltip_too(make_strip):
 def test_widening_restores_the_full_layout(make_strip, qapp):
     strip = make_strip(960, _paused)
     assert strip.web_tile.presentation == COMPACT
-    strip.setFixedWidth(1500)
+    strip.setFixedWidth(max(1500, _natural_width(strip) + 40))
     qapp.processEvents()
     assert all(t.presentation == FULL for t in strip._tiles)
     assert strip.imaging_tile.toolTip() == "Show imaging conditions on Live Monitoring"

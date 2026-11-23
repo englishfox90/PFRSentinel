@@ -175,10 +175,10 @@ class ImagingConditionsCard(CollapsibleCard):
                               "Pause when stars are this much wider (FWHM) than "
                               "tonight's usual"))
         self.bad_spin = _spin(1, 20)
-        lay.addWidget(FormRow("Frames to pause", self.bad_spin,
+        lay.addWidget(FormRow("Pause after", self.bad_spin,
                               "Bad frames in a row before pausing"))
         self.good_spin = _spin(1, 20)
-        lay.addWidget(FormRow("Frames to resume", self.good_spin,
+        lay.addWidget(FormRow("Resume after", self.good_spin,
                               "Good frames in a row before resuming"))
         for spin in self._number_spins():
             spin.valueChanged.connect(self._on_number_edited)
