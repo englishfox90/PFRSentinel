@@ -16,7 +16,7 @@ import dataclasses
 from ..capabilities import ALPACA_STATIC, CameraCapabilities
 from ..capture_session_base import CaptureSessionBase
 from ..recovery_wording import NETWORK_WORDING
-from . import alpaca_capture_frame
+from . import alpaca_capture_frame, alpaca_stall_recovery
 from .alpaca_connection import AlpacaConnection, lan_session
 from .alpaca_discovery import cameras_on_server
 from .alpaca_frame_budget import frame_budget_s
@@ -77,6 +77,8 @@ class AlpacaCamera(CaptureSessionBase):
         self.last_download_s = None
         self.last_download_bytes = 0
         self.last_image_format = None
+        self.stalled_exposures = 0
+        self._last_driver_reopen = None
 
     # -- delegated state ----------------------------------------------------
     @property
@@ -247,9 +249,17 @@ class AlpacaCamera(CaptureSessionBase):
         return True
 
     def reconnect_camera_safe(self):
-        if not self._connection.reconnect_safe(self._settings()):
+        """Reconnect; after a stalled exposure also prove the camera finishes a
+        short one, and after repeated stalls reopen it in the driver
+        (``alpaca_stall_recovery``, issue #177)."""
+        stalled = self.stalled_exposures > 0
+        reopen = alpaca_stall_recovery.should_reopen(self)
+        if not self._connection.reconnect_safe(self._settings(), reopen=reopen):
             return False
         self._after_connect()
+        if stalled and not alpaca_stall_recovery.probe_exposure(self):
+            self._connection.disconnect()
+            return False
         return True
 
     def disconnect_camera(self):

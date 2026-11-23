@@ -62,7 +62,7 @@ def _settings(server, **extra):
     return settings
 
 
-def _capture(server, frames_wanted=3, **session_kwargs):
+def _capture(server, frames_wanted=3, timeout_s=60.0, **session_kwargs):
     frames, errors = [], []
     done = threading.Event()
 
@@ -77,7 +77,7 @@ def _capture(server, frames_wanted=3, **session_kwargs):
     session.set_capture_interval(1.0)
     assert session.start_capture(on_frame)
     try:
-        assert done.wait(60.0), f"only {len(frames)} frames; errors {errors}"
+        assert done.wait(timeout_s), f"only {len(frames)} frames; errors {errors}"
     finally:
         session.stop_capture()
         session.disconnect_camera()
@@ -118,3 +118,21 @@ def test_live_json_fallback_and_probe(sim_server):
     assert result.ok is True and result.message.startswith("Connected: PFR Alpaca Simulator 64×48")
     session, frames = _capture(server, frames_wanted=1, exposure_sec=0.01)
     assert session.last_image_format == "json"
+
+
+def test_live_issue_177_stalled_camera_recovers_without_stop_start(sim_server, monkeypatch):
+    """Issue #177 end to end over real HTTP: after one good frame the camera keeps
+    answering but never finishes an exposure (ZWO's ASCOM driver once NINA opened
+    another ZWO camera). The session reconnects, has the driver reopen the camera,
+    proves it with a short exposure and captures again — no Stop + Start."""
+    from services.camera.alpaca import alpaca_capture_frame, alpaca_stall_recovery
+    monkeypatch.setattr(alpaca_capture_frame, "EXPOSURE_GRACE_S", 1.0)
+    monkeypatch.setattr(alpaca_stall_recovery, "PROBE_GRACE_S", 1.0)
+    server = sim_server(width=64, height=48)
+    server.camera.faults.stall_after_exposures = 1
+    session, frames = _capture(server, frames_wanted=2, exposure_sec=0.2,
+                               wb_config={"mode": "manual"}, timeout_s=120.0)
+    connected = [p["Connected"] for m, name, p in server.camera.request_log
+                 if m == "PUT" and name == "connected"]
+    assert connected == ["True", "False", "True"]
+    assert session.stalled_exposures == 0

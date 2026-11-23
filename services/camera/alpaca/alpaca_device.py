@@ -52,6 +52,11 @@ CONNECT_POLL_S = 0.25
 IDLE_GRACE_S = 2.0
 START_GRACE_S = 10.0
 IMAGEBYTES_OFF = "imagebytes_off"
+IMAGEBYTES_FAILS = "imagebytes_decode_failures"
+# One undecodable payload can be a transfer glitch; a server that sends them
+# every time is broken. JSON for a big frame can exceed MAX_JSON_BYTES, so
+# giving up on ImageBytes after a single glitch could fail every later frame.
+IMAGEBYTES_OFF_AFTER = 2
 
 _ABSENT = (AlpacaNotImplementedError, AlpacaInvalidOperationError)
 _STARTING = "starting"
@@ -146,6 +151,30 @@ class AlpacaCameraDevice:
         if not self.is_connected():
             raise AlpacaNotConnectedError(None, "Device did not report Connected after Connect")
         return True
+
+    def reopen(self, timeout: float = 30.0) -> None:
+        """Make the driver let go of the camera and open it again.
+
+        V4 ``Disconnect`` + ``Connect``, else V3 ``Connected=false`` then
+        ``true``, whatever ``release_on_disconnect`` says. Only for a camera
+        that answers but no longer finishes exposures (``alpaca_stall_recovery``):
+        another client of the same camera on the server may see it drop.
+        """
+        if (self.interface_version or 0) >= 4:
+            try:
+                self.client.put("disconnect", timeout=max(self.client.request_timeout,
+                                                          float(timeout)))
+            except AlpacaNotImplementedError:
+                pass
+            else:
+                if self._connect_v4(timeout):
+                    return
+        self.client.put("connected", timeout=max(self.client.request_timeout, float(timeout)),
+                        Connected=False)
+        self.client.put("connected", timeout=max(self.client.request_timeout, float(timeout)),
+                        Connected=True)
+        if not self.is_connected():
+            raise AlpacaNotConnectedError(None, "Device did not report Connected after reopening")
 
     def disconnect(self) -> bool:
         """Release the device when ``release_on_disconnect``; True if a PUT was sent."""
@@ -342,14 +371,24 @@ class AlpacaCameraDevice:
                                               abort_event=abort_event)
             except AlpacaImageBytesError as exc:
                 # The image is still on the server until the next exposure: take
-                # it as JSON, and stay on JSON for the session (reconnects too).
-                self.use_imagebytes = False
-                self.warnings.state[IMAGEBYTES_OFF] = True
-                self.warnings.once("imagebytes-broken",
-                                   f"Alpaca server sent an ImageBytes image that cannot be "
-                                   f"decoded ({exc}); downloading as JSON for this session")
+                # it as JSON, and stay on JSON for the session (reconnects too)
+                # once the server has failed IMAGEBYTES_OFF_AFTER times running.
+                state = self.warnings.state
+                state[IMAGEBYTES_FAILS] = state.get(IMAGEBYTES_FAILS, 0) + 1
+                if state[IMAGEBYTES_FAILS] >= IMAGEBYTES_OFF_AFTER:
+                    self.use_imagebytes = False
+                    state[IMAGEBYTES_OFF] = True
+                    self.warnings.once("imagebytes-broken",
+                                       f"Alpaca server sent an ImageBytes image that cannot be "
+                                       f"decoded ({exc}); downloading as JSON for this session")
+                else:
+                    app_logger.info(f"Alpaca ImageBytes image could not be decoded ({exc}); "
+                                    f"taking this frame as JSON")
                 image = self.client.get_image(timeout=timeout, use_imagebytes=False,
                                               abort_event=abort_event)
+            else:
+                if self.use_imagebytes:
+                    self.warnings.state[IMAGEBYTES_FAILS] = 0
         finally:
             self._finished()
         fmt = self.client.last_image_format
@@ -381,6 +420,14 @@ class AlpacaCameraDevice:
             self.warnings.debug_once("temperature-read", f"Alpaca CCDTemperature read failed: {exc}")
             return None
         except (TypeError, ValueError):
+            return None
+
+    def percent_completed(self) -> Optional[int]:
+        """PercentCompleted, or None when the driver does not offer it (never raises)."""
+        try:
+            value = self._optional("percentcompleted")
+            return None if value is None else int(value)
+        except Exception:
             return None
 
     def last_exposure_duration(self) -> Optional[float]:

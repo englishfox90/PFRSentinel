@@ -28,6 +28,9 @@ CONNECTED_IDLE_LABEL = "Connected · idle"
 LINK_STATE_LABELS = {
     'reconnecting': "Reconnecting to camera…",
     'waiting': "Camera lost · retrying",
+    # Alpaca: the reconnect answered but no frame has arrived since (issue #177).
+    'unconfirmed': "Reconnected · waiting for a frame",
+    'stalled': "Camera not finishing exposures",
 }
 
 

@@ -189,6 +189,7 @@ def _put_connected(cam, p):
     cam.connecting_until = None
     if not value:
         cam.stop_exposure(abort=True)
+        cam.driver_reopened()
 
 
 def _put_connect(cam, p):
@@ -206,6 +207,7 @@ def _put_disconnect(cam, p):
     cam.connected = False
     cam.connecting_until = None
     cam.stop_exposure(abort=True)
+    cam.driver_reopened()
 
 
 def _roi_unlocked(cam):

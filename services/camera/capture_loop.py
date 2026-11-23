@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .capabilities import ZWO_TROUBLESHOOTING_HINTS
-from .errors import FrameSkipped
+from .errors import ExposureStalledError, FrameSkipped
 from .recovery_wording import wording_for
 from ..logger import app_logger
 from ..posthog_service import capture_error
@@ -70,6 +70,25 @@ def _wait_skipped_frame(camera, skip, last_skip_log):
         if camera.consume_immediate_capture():
             break
         time.sleep(0.2)
+
+
+def _stalled(camera, error=None) -> bool:
+    return (isinstance(error, ExposureStalledError)
+            or int(getattr(camera, 'stalled_exposures', 0) or 0) > 0)
+
+
+def _link_recovering(camera, wording, error):
+    """``link_state`` while recovering: 'stalled' once exposures stop finishing."""
+    if wording.errors_survive_reconnect and _stalled(camera, error):
+        return 'stalled'
+    return 'reconnecting'
+
+
+def _link_after_reconnect(camera, wording, error, current):
+    """``link_state`` once a reconnect answered but before a frame has arrived."""
+    if not wording.errors_survive_reconnect:
+        return current
+    return 'stalled' if _stalled(camera, error) else 'unconfirmed'
 
 
 def capture_loop(camera: "CaptureSession"):
@@ -399,7 +418,9 @@ def capture_loop(camera: "CaptureSession"):
                 if warmup_pending:
                     warmup_pending = False
                     reconnect_spent = True
-                    camera.link_state = 'reconnecting'
+                    if wording.errors_survive_reconnect:
+                        consecutive_errors += 1
+                    camera.link_state = _link_recovering(camera, wording, e)
                     camera.log(wording.cold_open_absorb.format(error=e))
                     try:
                         if camera.calibration_manager:
@@ -412,6 +433,8 @@ def capture_loop(camera: "CaptureSession"):
                         if camera.reconnect_camera_safe():
                             camera.log("✓ Camera reopened after scheduled-reconnect warm-up")
                             camera._last_frame_time = time.time()
+                            camera.link_state = _link_after_reconnect(
+                                camera, wording, e, camera.link_state)
                         else:
                             camera.log(
                                 "⚠ Warm-up reopen failed — normal recovery will handle it"
@@ -447,7 +470,7 @@ def capture_loop(camera: "CaptureSession"):
                         f"{consecutive_errors}/{max_reconnect_attempts}..."
                     )
                     reconnect_spent = True
-                    camera.link_state = 'reconnecting'
+                    camera.link_state = _link_recovering(camera, wording, e)
                     try:
                         # Abort any running calibration before disconnecting so it
                         # doesn't keep calling SDK methods on a dying camera handle.
@@ -471,7 +494,10 @@ def capture_loop(camera: "CaptureSession"):
 
                         if camera.reconnect_camera_safe():
                             camera.log("✓ Camera reconnected successfully")
-                            consecutive_errors = 0
+                            if not wording.errors_survive_reconnect:
+                                consecutive_errors = 0
+                            camera.link_state = _link_after_reconnect(
+                                camera, wording, e, camera.link_state)
                             # Absorb the cold-open quirk on the FIRST frame after
                             # this reopen (same as the scheduled-window path).
                             # Without this, that benign "Camera closed" counted

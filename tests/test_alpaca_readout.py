@@ -150,7 +150,7 @@ def test_indigos_header_sized_shortfall_keeps_imagebytes_and_zeroes_the_corner(
     assert sum("arrive 44 bytes short" in r.getMessage() for r in caplog.records) == 1
 
 
-def test_any_other_truncated_imagebytes_is_taken_as_json_for_the_rest_of_the_session(
+def test_a_server_that_keeps_sending_broken_imagebytes_is_taken_as_json_for_the_session(
         monkeypatch, caplog):
     rig = make_rig(monkeypatch, width=32, height=24, imagebytes_short_by=40)
     assert rig.session.connect_camera()
@@ -158,11 +158,29 @@ def test_any_other_truncated_imagebytes_is_taken_as_json_for_the_rest_of_the_ses
     _img, meta = rig.session.capture_single_frame()
     assert np.array_equal(_raw(meta) >> 4, rig.cam.image.astype(np.uint16))
     assert rig.session.last_image_format == "json"
+    rig.session.capture_single_frame()
     rig.session.reconnect_camera_safe()
     rig.session.capture_single_frame()
     accepts = [r.headers.get("Accept", "") for r in rig.net.member_requests("imagearray", "GET")]
-    assert ["imagebytes" in a for a in accepts] == [True, False, False]
-    assert sum("cannot be decoded" in r.getMessage() for r in caplog.records) == 1
+    assert ["imagebytes" in a for a in accepts] == [True, False, True, False, False]
+    assert sum("cannot be decoded" in r.getMessage() and "for this session" in r.getMessage()
+               for r in caplog.records) == 1
+
+
+def test_one_broken_imagebytes_payload_does_not_give_up_on_imagebytes(monkeypatch):
+    rig = make_rig(monkeypatch, width=32, height=24, imagebytes_short_by=40)
+    assert rig.session.connect_camera()
+    rig.session.is_capturing = True
+    rig.session.capture_single_frame()
+    assert rig.session.last_image_format == "json"
+    rig.cam.spec.imagebytes_short_by = 0
+    rig.session.capture_single_frame()
+    assert rig.session.last_image_format == "imagebytes"
+    rig.cam.spec.imagebytes_short_by = 40
+    rig.session.capture_single_frame()
+    rig.cam.spec.imagebytes_short_by = 0
+    rig.session.capture_single_frame()
+    assert rig.session.last_image_format == "imagebytes"
 
 
 def test_an_8_bit_only_server_is_warned_about_once(monkeypatch, caplog):
