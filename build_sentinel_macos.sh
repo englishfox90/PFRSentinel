@@ -41,15 +41,11 @@ fi
 version=$(python -c "import version; print(version.__version__)")
 dmg="dist/PFRSentinel-$version-macos-arm64.dmg"
 
-# A fresh staging folder each time: ditto merges into an existing one, which
-# would leave files from an older build inside the new image.
-staging="dist/dmg-staging"
-rm -rf "$staging"
-mkdir -p "$staging"
-ditto "$app" "$staging/PFR Sentinel.app"
-ln -s /Applications "$staging/Applications"
-hdiutil create -volname "PFR Sentinel" -srcfolder "$staging" -ov -format UDZO "$dmg"
-rm -rf "$staging"
+# The window that opens shows the install steps over a background:
+# drag onto Applications, then the one-time quarantine command (also in a
+# "Read me first" file on the disk, to copy). See scripts/ci/dmg_background.py.
+rm -f "$dmg"
+python scripts/ci/build_dmg_macos.py "$app" "$dmg"
 
 echo "Built $app"
 echo "Built $dmg"

@@ -300,7 +300,7 @@ executes the spec with the PyInstaller classes stubbed, which catches a
 Windows-only import or a one-OS `datas` entry in seconds. macOS gets a real
 dev build (`macOS dev build`, Apple-silicon runner) that runs
 `build_sentinel_macos.sh` — the same script a local Mac build uses — and
-uploads the `.dmg`. That script stages the ZWO SDK with
+uploads the `.dmg`. It lays the `.dmg` window out with `dmgbuild` (`scripts/ci/build_dmg_macos.py`: a background showing the drag and the one-time quarantine command, plus a "Read me first" file to copy it from — artwork in `dmg_background.py`). That script stages the ZWO SDK with
 `scripts/ci/stage_zwo_sdk_macos.py`: the arm64 slice of the committed universal
 `libASICamera2.dylib` (ZWO's official build, updated with
 `scripts/update_zwo_sdk.py`), with Homebrew's libusb beside it, its libusb
@@ -392,6 +392,7 @@ under the heading; the tag-time agent removes those notes once the feature ships
 | `test_system_tray_qt.py` | 10 | `SystemTrayQt` — native `QSystemTrayIcon` menu state, show/hide, capture gating, `TrayUnavailableError` leaves the window visible (offscreen Qt) |
 | `test_autostart_posix.py` | 25 | `autostart_macos` / `autostart_linux` / `launch_command` / POSIX `app_restart` — LaunchAgent plist relaunches on crash but not on a clean quit, written atomically, never calls `launchctl`, foreign/garbage plist reads as off; XDG entry and Exec quoting; dispatch per OS; the real `/bin/sh` waiter relaunches only after the PID exits (skipped on Windows) |
 | `test_stage_zwo_sdk_macos.py` | 7 | `scripts/ci/stage_zwo_sdk_macos.py` — finds ZWO's absolute Homebrew libusb reference (and an already-`@rpath` one) in `otool -L` output, never mistakes the library's own id line, reads every `LC_RPATH`, licence and source are in the repo, refuses to run off macOS |
+| `test_dmg_background.py` | 8 | `scripts/ci/dmg_background.py` + `build_dmg_macos.py` — the .dmg window's install steps: 1x/2x backgrounds cover the window with or without the title bar, icons and label plates inside it and clear of the command box, the command shown is the wiki's and the read-me's, dmgbuild settings (app, read-me, Applications link, positions, volume icon), refuses to build off macOS |
 | `test_reveal_in_file_manager.py` | 15 | `reveal_in_file_manager` — explorer / `open -R` / `xdg-open` argv per platform, missing path and launch failure never raise |
 | `test_zwo_sdk_library.py` | 35 | `zwo_sdk_library` — library name per OS, search order (bundled → per-user `sdk/` → system, multiarch first), versioned `.so`/`.dylib`, symlink stubs skipped, foreign-platform path detection, help text |
 | `test_zwo_sdk_loading.py` | 9 | `CameraConnection.initialize_sdk` always hands zwoasi an absolute path and falls back from a stale one; the Start Capture index resolver does the same; `Config` rewrites only another platform's SDK path |
