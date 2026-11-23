@@ -1,8 +1,9 @@
 """ImagingConditionsCard + ImagingConditionsController + the IMAGING tile:
-load is silent, edits emit once and values() carries the controlled keys,
-the controller saves them into the config block and refreshes the card and
-the status strip from the store, the learning line, and Reset baseline
-forgets the learned counts (offscreen Qt)."""
+load is silent, edits emit once and values() carries the controlled keys
+(the sensitivity preset with them), the controller saves them into the
+config block and refreshes the card and the status strip from the store,
+the learning line, and Reset baseline forgets the learned counts (offscreen
+Qt)."""
 import pytest
 
 pytest.importorskip("PySide6")
@@ -37,10 +38,12 @@ def test_load_is_silent_and_values_round_trip(card):
     hits = []
     card.changed.connect(lambda: hits.append(1))
     cfg = {'enabled': False, 'max_sun_alt_deg': -12.0, 'max_cloud_cover_pct': 35,
-           'min_star_ratio': 0.6, 'bad_frames': 5, 'good_frames': 2}
+           'min_star_ratio': 0.6, 'bad_frames': 5, 'good_frames': 2,
+           'star_drop_pct': 30, 'fwhm_rise_pct': 70}
     card.load(cfg)
     assert hits == []
-    assert card.values() == dict(cfg, max_cloud_cover_pct=35.0)
+    assert card.values() == dict(cfg, max_cloud_cover_pct=35.0, star_drop_pct=30.0,
+                                 fwhm_rise_pct=70.0, sensitivity='custom')
 
 
 def test_garbage_loads_as_defaults(card):
@@ -99,15 +102,16 @@ def test_controller_saves_refreshes_and_resets(card, tmp_path):
     controller = ImagingConditionsController(Window(), store=store, parent=card)
     controller.bind(card, strip)
     assert strip.seen == ("Idle", 'muted')
-    assert card.verdict_label.text() == "Imaging: Idle"
+    assert card.verdict_label.text() == "Now: Idle"
     Window.is_capturing = True
     controller.refresh()
     assert strip.seen == ("Warming up", 'info')
-    assert card.verdict_label.text() == "Imaging: Warming up"
+    assert card.verdict_label.text() == "Now: Warming up"
 
     card.cloud_spin.setValue(65)
     block = Config(str(tmp_path / 'config.json')).get('imaging_conditions')
     assert block['max_cloud_cover_pct'] == 65.0 and block['trend_frames'] == 10
+    assert block['min_star_ratio'] == 0.25 and block['sensitivity'] == 'custom'
 
     card.enabled_switch.set_checked(False)
     assert store.snapshot()['reasons'] == ['disabled']
@@ -200,13 +204,12 @@ def test_learning_line_hidden_in_daylight_and_without_a_star_index():
 def test_card_hides_empty_lines_and_explains_the_star_index(card):
     card.show_conditions(_snap(imaging_ok=True, cloud_cover_pct=5.0))
     assert card.reasons_label.isHidden() and card.reasons_label.text() == ""
-    assert not card.detail_label.isHidden()
-    assert "fixed 900 px plane" in card.detail_label.toolTip()
+    assert "Star index" in card.cloud_spin.toolTip()
     card.show_conditions(_snap(reasons=['cloud_cover_high', 'stars_dropping']))
     assert not card.reasons_label.isHidden()
     assert card.reasons_label.text() == "Also: Stars dropping"
     card.show_conditions({'enabled': False})
-    assert card.reasons_label.isHidden() and card.detail_label.isHidden()
+    assert card.reasons_label.isHidden()
 
 
 def test_row_labels_fit_their_column(card):

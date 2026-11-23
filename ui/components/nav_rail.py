@@ -215,6 +215,9 @@ class NavRail(QFrame):
                 ('filmstrip-box-multiple', "Timelapse", 'timelapse'),
                 ('image-multiple', "Library", 'library'),
             ]),
+            ("Automation", [
+                ('telescope', "NINA && ASCOM", 'nina'),  # && = a literal & on a button
+            ]),
         ]
 
         for gi, (title, items) in enumerate(groups):

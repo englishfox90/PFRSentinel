@@ -46,13 +46,13 @@ from ..controllers.allsky_controller import AllSkyController
 from ..controllers.meteor_controller import MeteorController
 from ..controllers.library_controller import LibraryController
 from ..controllers.output_crop_controller import OutputCropController
-from ..controllers.imaging_conditions_controller import ImagingConditionsController
 from ..controllers.diagnostics_controller import DiagnosticsController
 
 from .capture import _MainWindowCaptureMixin
 from .output import _MainWindowOutputMixin
 from .settings import _MainWindowSettingsMixin
 from .lifecycle import _MainWindowLifecycleMixin
+from .navigation import _MainWindowNavigationMixin
 from .appearance import apply_window_appearance
 
 
@@ -61,6 +61,7 @@ class MainWindow(
     _MainWindowOutputMixin,
     _MainWindowSettingsMixin,
     _MainWindowLifecycleMixin,
+    _MainWindowNavigationMixin,
     QMainWindow,
 ):
     # Signals for cross-component communication
@@ -309,6 +310,7 @@ class MainWindow(
         self.inspector_stack.addWidget(self.logs_panel)          # Index 7
         self.inspector_stack.addWidget(self.settings_panel)      # Index 8
         self.inspector_stack.addWidget(self.library_panel)       # Index 9
+        self._build_nina_page()                                  # Index 10
 
         # Defer splitter restoration until window is shown
         # This ensures we have accurate available width
@@ -394,9 +396,7 @@ class MainWindow(
         self.image_processor.preview_ready.connect(self._on_preview_ready)
 
         self.output_crop_controller.bind(self.image_processor, self.processing_panel.crop_card)
-        self.imaging_conditions_controller = ImagingConditionsController(self)
-        self.imaging_conditions_controller.bind(
-            self.processing_panel.ml_section.conditions_card, self.status_strip)
+        self._wire_nina_page()
         self.image_processor.error_occurred.connect(self._on_processing_error)
 
     def _apply_styles(self):
@@ -472,118 +472,6 @@ class MainWindow(
             "Running without Admin — USB recovery is limited. See logs.",
             "warning",
         )
-
-    # =========================================================================
-    # UI STATE MANAGEMENT
-    # =========================================================================
-
-    def _on_splitter_moved(self, pos, index):
-        sizes = self.splitter.sizes()
-        total = sum(sizes) if sizes else 1
-
-        if total > 0 and len(sizes) >= 2:
-            ratio = sizes[0] / total
-            self.config.set('splitter_sizes', sizes)
-            self.config.set('splitter_ratio', ratio)
-
-    def _restore_splitter_sizes(self):
-        """Restore splitter sizes after window is shown
-
-        Uses saved ratio as primary method, falls back to absolute sizes.
-        This prevents dramatic shifts when window size differs from saved state.
-        """
-        try:
-            available_width = self.splitter.width()
-            if available_width <= 0:
-                self.splitter.setSizes([400, 500])
-                return
-
-            saved_ratio = self.config.get('splitter_ratio', None)
-            if saved_ratio is not None and 0.1 <= saved_ratio <= 0.9:
-                left_size = int(available_width * saved_ratio)
-                right_size = available_width - left_size
-
-                left_size = max(250, left_size)
-                right_size = max(300, right_size)
-
-                self.splitter.setSizes([left_size, right_size])
-                app_logger.debug(f"Splitter restored via ratio: {saved_ratio:.2f} -> [{left_size}, {right_size}]")
-                return
-
-            saved_sizes = self.config.get('splitter_sizes', None)
-            if saved_sizes and isinstance(saved_sizes, list) and len(saved_sizes) >= 2:
-                if all(s >= 100 for s in saved_sizes[:2]):
-                    total_saved = sum(saved_sizes[:2])
-                    if total_saved > available_width * 1.5 or total_saved < available_width * 0.5:
-                        ratio = saved_sizes[0] / total_saved
-                        left_size = int(available_width * ratio)
-                        right_size = available_width - left_size
-                        self.splitter.setSizes([max(250, left_size), max(300, right_size)])
-                    else:
-                        self.splitter.setSizes(saved_sizes)
-                    return
-
-            left_size = int(available_width * 0.4)
-            right_size = available_width - left_size
-            self.splitter.setSizes([left_size, right_size])
-
-        except Exception as e:
-            app_logger.warning(f"Error restoring splitter sizes: {e}")
-            self.splitter.setSizes([400, 500])
-
-    # =========================================================================
-    # NAVIGATION
-    # =========================================================================
-
-    def _on_nav_changed(self, section: str):
-        section_map = {
-            'monitoring': -1,  # Special: hide inspector panel, show live panel
-            'capture': 0,
-            'output': 1,
-            'processing': 2,
-            'overlays': 3,
-            'timelapse': 4,
-            'allsky': 5,
-            'meteor': 6,
-            'logs': 7,
-            'settings': 8,
-            'library': 9,
-        }
-
-        index = section_map.get(section, 0)
-
-        if section == 'settings':
-            self.nav_rail.set_badge('settings', False)
-
-        if index == -1:
-            self.live_panel.show()
-            self.live_panel.set_preview_only(True)
-            self.inspector_stack.hide()
-            self.config.set('inspector_visible', False)
-            self.config.set('last_nav_section', section)
-            self.config.save()
-        elif section in ('overlays', 'settings', 'library'):
-            # Overlays/Settings/Library: hide live panel, show panel full width
-            self.live_panel.hide()
-            self.live_panel.set_preview_only(False)
-            self.inspector_stack.show()
-            self.inspector_stack.setCurrentIndex(index)
-            self.config.set('inspector_visible', True)
-            self.config.set('last_nav_section', section)
-            self.config.save()
-        else:
-            self.live_panel.show()
-            self.live_panel.set_preview_only(False)
-            self.inspector_stack.show()
-            self.inspector_stack.setCurrentIndex(index)
-            self.config.set('inspector_visible', True)
-            self.config.set('last_nav_section', section)
-            self.config.save()
-
-        app_logger.debug(f"Navigation: {section}")
-
-        from services.posthog_service import capture_event
-        capture_event('$pageview', {'$current_url': f'/app/{section}'})
 
     # =========================================================================
     # NOTIFICATIONS & TIMELAPSE CALLBACKS

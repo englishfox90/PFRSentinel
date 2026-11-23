@@ -10,7 +10,7 @@ window's 1 Hz status timer and per-frame handlers — this component never
 fetches anything itself.
 """
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 
 from services.observing_window import REASON_KEY as GATE_REASON_KEY
 
@@ -46,10 +46,15 @@ _STATIC_TOOLTIP = (
 
 
 class StatusTile(QFrame):
-    """Icon + uppercase eyebrow label + value, with a trailing separator."""
+    """Icon + uppercase eyebrow label + value, with a trailing separator.
+    ``set_clickable`` makes it a link: pointing cursor, hover shade, ``clicked``."""
+
+    clicked = Signal()
 
     def __init__(self, icon_name: str, label: str, parent=None):
         super().__init__(parent)
+        self._clickable = False
+        self._hover = False
         self._icon_name = icon_name
         self._text = "—"
         self._tone = 'muted'
@@ -127,7 +132,41 @@ class StatusTile(QFrame):
         self._render_key = None  # force a re-render after an accent change
         self._apply()
 
+    def set_clickable(self, clickable: bool, tooltip: str = ""):
+        self._clickable = bool(clickable)
+        self.setCursor(Qt.PointingHandCursor if clickable else Qt.ArrowCursor)
+        self.setToolTip(tooltip)
+
+    def enterEvent(self, event):
+        if self._clickable:
+            self._hover = True
+            self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self._hover:
+            self._hover = False
+            self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if self._clickable and event.button() == Qt.LeftButton:
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if (self._clickable and event.button() == Qt.LeftButton
+                and self.rect().contains(event.position().toPoint())):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
     def paintEvent(self, event):
+        if self._hover:
+            from PySide6.QtGui import QPainter, QColor
+            p = QPainter(self)
+            p.fillRect(self.rect().adjusted(0, 0, -1, -1), QColor(Colors.bg_hover))
+            p.end()
         super().paintEvent(event)
         w, h = self.width(), self.height()
         paint_border_lines(self, [
@@ -220,6 +259,9 @@ class StatePill(QFrame):
 class StatusStrip(QFrame):
     """Observatory telemetry band: tiles + capture/camera state pill."""
 
+    # The IMAGING tile opens the conditions panel on Live Monitoring.
+    imaging_clicked = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._capture_mode = 'idle'
@@ -242,6 +284,8 @@ class StatusStrip(QFrame):
         self.weather_tile = StatusTile('thermometer', "WEATHER")
         self.seeing_tile = StatusTile('star-four-points-outline', "SEEING")
         self.imaging_tile = StatusTile('telescope', "IMAGING")
+        self.imaging_tile.set_clickable(True, "Show imaging conditions on Live Monitoring")
+        self.imaging_tile.clicked.connect(self.imaging_clicked.emit)
         self._tiles = (self.web_tile, self.discord_tile, self.roof_tile,
                        self.sky_tile, self.weather_tile, self.seeing_tile, self.imaging_tile)
         for t in self._tiles:

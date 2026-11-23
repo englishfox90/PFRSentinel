@@ -1,6 +1,8 @@
 """
-Imaging Conditions controller — keeps the card and the status strip's
-IMAGING tile in step with the conditions store, and saves the card's edits.
+Imaging Conditions controller — keeps the card (NINA & ASCOM page), the status
+strip's IMAGING tile and Live Monitoring's conditions panel in step with the
+conditions store, its history and the NINA check-ins, and saves the card's
+edits.
 
 The verdict itself is computed on the image worker thread
 (``services/imaging_conditions/feed.py``); this only reads the thread-safe
@@ -8,17 +10,25 @@ store from a GUI-thread timer, so no widget is touched off the GUI thread.
 """
 from PySide6.QtCore import QObject, QTimer
 
+from datetime import datetime, timezone
+
 from services.imaging_conditions import CONFIG_KEY, get_conditions_store, read_settings
+from services.imaging_conditions.conditions_history import get_conditions_history
+from services.imaging_conditions.nina_checkin import get_nina_checkins
 from services.logger import app_logger
 
 REFRESH_MS = 2000
 
 
 class ImagingConditionsController(QObject):
-    def __init__(self, main_window, store=None, parent=None, capturing=None):
+    def __init__(self, main_window, store=None, parent=None, capturing=None,
+                 history=None, checkins=None):
         super().__init__(parent or main_window)
         self._main_window = main_window
         self._store = store
+        self._history = history
+        self._checkins = checkins
+        self._live = None
         self._capturing = capturing or (
             lambda: bool(getattr(self._main_window, 'is_capturing', False)))
         self._card = None
@@ -31,9 +41,18 @@ class ImagingConditionsController(QObject):
     def store(self):
         return self._store if self._store is not None else get_conditions_store()
 
-    def bind(self, card, strip=None) -> None:
+    @property
+    def history(self):
+        return self._history if self._history is not None else get_conditions_history()
+
+    @property
+    def checkins(self):
+        return self._checkins if self._checkins is not None else get_nina_checkins()
+
+    def bind(self, card, strip=None, live_panel=None) -> None:
         self._card = card
         self._strip = strip
+        self._live = live_panel
         card.changed.connect(self._on_card_changed)
         if hasattr(card, 'reset_baseline_requested'):
             card.reset_baseline_requested.connect(self.reset_baseline)
@@ -60,6 +79,19 @@ class ImagingConditionsController(QObject):
         if self._strip is not None and hasattr(self._strip, 'set_imaging'):
             from ..components.imaging_conditions_text import summarize_conditions
             self._strip.set_imaging(*summarize_conditions(snapshot, capturing))
+        if self._live is not None and self._live.isVisible():
+            self._refresh_live(snapshot, capturing)
+
+    def _refresh_live(self, snapshot, capturing) -> None:
+        try:
+            config = getattr(self._main_window, 'config', None)
+            good_needed = read_settings(config).good_frames if config is not None else None
+            self._live.set_view(
+                snapshot, capturing=capturing, good_needed=good_needed,
+                samples=self.history.samples(), events=self.history.events(),
+                checkins=self.checkins.last(), now=datetime.now(timezone.utc))
+        except Exception as e:
+            app_logger.debug(f"Imaging conditions live view refresh failed: {e}")
 
     def reset_baseline(self) -> None:
         """Forget the learned clear-sky star counts; learning starts again

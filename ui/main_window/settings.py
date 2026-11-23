@@ -82,7 +82,7 @@ class _MainWindowSettingsMixin:
 
     def _on_nina_plugin_status(self, status):
         self._maybe_nudge_nina_plugin_stale(status)
-        panel = getattr(self, 'output_panel', None)
+        panel = getattr(self, 'nina_panel', None)
         if panel is not None and hasattr(panel, 'set_nina_plugin_status'):
             panel.set_nina_plugin_status(status)
 
@@ -92,7 +92,7 @@ class _MainWindowSettingsMixin:
         self._notify(result.message, 'info' if result.ok else 'warning')
 
     def _on_nina_plugin_busy(self, busy):
-        panel = getattr(self, 'output_panel', None)
+        panel = getattr(self, 'nina_panel', None)
         if panel is not None and hasattr(panel, 'set_nina_plugin_busy'):
             panel.set_nina_plugin_busy(busy)
 
@@ -264,6 +264,7 @@ class _MainWindowSettingsMixin:
         try:
             self.capture_panel.load_from_config(self.config)
             self.output_panel.load_from_config(self.config)
+            self.nina_panel.load_from_config(self.config)
             self.processing_panel.load_from_config(self.config)
             self.overlay_panel.load_from_config(self.config)
             self.timelapse_panel.load_from_config(self.config)

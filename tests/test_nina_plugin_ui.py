@@ -2,7 +2,7 @@
 
 Three layers, all marker-free:
   * ``NinaPluginController`` — ordering, busy gating, crash containment.
-  * The real Output panel — status -> button state / label mapping.
+  * The real NINA & ASCOM panel — status -> button state / label mapping.
   * The window mixin — the once-per-session stale nudge.
 
 The controller takes an injectable service and runner, so nothing here touches
@@ -38,14 +38,14 @@ def pretend_windows():
     """The card is Windows-only (#37) and skipped elsewhere; these tests are
     about the card itself, so force the Windows branch on every runner."""
     import ui.main_window.settings as window_settings
-    import ui.panels.output_settings as output_settings
-    saved = (output_settings.IS_WINDOWS, window_settings.IS_WINDOWS)
-    output_settings.IS_WINDOWS = True
+    import ui.panels.nina_ascom_panel as nina_ascom_panel
+    saved = (nina_ascom_panel.IS_WINDOWS, window_settings.IS_WINDOWS)
+    nina_ascom_panel.IS_WINDOWS = True
     window_settings.IS_WINDOWS = True
     try:
         yield
     finally:
-        output_settings.IS_WINDOWS, window_settings.IS_WINDOWS = saved
+        nina_ascom_panel.IS_WINDOWS, window_settings.IS_WINDOWS = saved
 
 
 # --- helpers --------------------------------------------------------------
@@ -114,10 +114,10 @@ class _FakeConfig:
 
 def _build_panel(parent=None):
     from PySide6.QtWidgets import QWidget
-    from ui.panels.output_settings import OutputSettingsPanel
+    from ui.panels.nina_ascom_panel import NinaAscomPanel
     if parent is None:
         parent = QWidget()
-    panel = OutputSettingsPanel(parent)
+    panel = NinaAscomPanel(parent)
     # The C++ parent owns the panel. Keep the Python side of the parent alive
     # for as long as the panel is, or it is deleted the moment this returns
     # and takes the panel's C++ half with it.
@@ -127,7 +127,7 @@ def _build_panel(parent=None):
 
 @pytest.fixture(scope="module")
 def host(qapp):
-    """A MainWindow stand-in (real QWidget) with the real Output panel."""
+    """A MainWindow stand-in (real QWidget) with the real NINA & ASCOM panel."""
     from PySide6.QtWidgets import QWidget
 
     class _QtWindowImpl(_MainWindowSettingsMixin, QWidget):
@@ -141,7 +141,7 @@ def host(qapp):
             self.notes.append((category, message))
 
     win = _QtWindowImpl()
-    win.output_panel = _build_panel(win)
+    win.nina_panel = _build_panel(win)
     yield win
     # Tear the widget tree down here, deterministically, while the
     # QApplication is idle. Left to garbage collection it was deleted
@@ -164,15 +164,15 @@ def window(host):
     host.notes.clear()
     host._nina_plugin_nudged = False
     host._nina_plugin_controller = None
-    host.output_panel.set_nina_plugin_busy(False)
-    host.output_panel.set_nina_plugin_status(
+    host.nina_panel.set_nina_plugin_busy(False)
+    host.nina_panel.set_nina_plugin_status(
         status(STATUS_NOT_INSTALLED, "Not installed.", can_remove=False))
     return host
 
 
 @pytest.fixture
 def panel(window):
-    return window.output_panel
+    return window.nina_panel
 
 
 @pytest.fixture
@@ -361,7 +361,7 @@ def test_clicking_install_runs_the_service_and_reports_verbatim(window, monkeypa
         status_value=status(STATUS_INSTALLED, "Installed in NINA 3.0.0."),
         install=locked)
     _patch_service(monkeypatch, svc)
-    panel = window.output_panel
+    panel = window.nina_panel
 
     panel.nina_install_btn.click()
 
@@ -376,7 +376,7 @@ def test_clicking_remove_runs_the_remove_path(window, monkeypatch):
     svc = fake_service(status_value=status(STATUS_NOT_INSTALLED, "Not installed.",
                                            can_remove=False))
     _patch_service(monkeypatch, svc)
-    panel = window.output_panel
+    panel = window.nina_panel
     panel.set_nina_plugin_status(status(STATUS_INSTALLED))
 
     panel.nina_remove_btn.click()
@@ -393,7 +393,7 @@ def test_refresh_on_startup_populates_the_card(window, monkeypatch):
     assert window.refresh_nina_plugin_status() is True
 
     assert svc.calls == ['get_status']
-    assert window.output_panel.nina_status_label.text() == "Installed in NINA 3.0.0."
+    assert window.nina_panel.nina_status_label.text() == "Installed in NINA 3.0.0."
 
 
 def test_a_panel_without_a_window_does_not_crash(detached_panel):
@@ -408,7 +408,7 @@ class _NudgeWindow(_MainWindowSettingsMixin):
 
     def __init__(self):
         self.notes = []
-        self.output_panel = None
+        self.nina_panel = None
 
     def _notify(self, message, category='info'):
         self.notes.append((category, message))
@@ -449,12 +449,12 @@ def test_a_stale_install_still_reaches_the_panel(window, monkeypatch):
 
     window.refresh_nina_plugin_status()
 
-    assert window.output_panel.nina_install_btn.text() == "Reinstall Plugin"
+    assert window.nina_panel.nina_install_btn.text() == "Reinstall Plugin"
     assert len(window.notes) == 1
 
 
 def test_busy_reaches_the_panel(window):
-    panel = window.output_panel
+    panel = window.nina_panel
     panel.set_nina_plugin_status(status(STATUS_INSTALLED))
     window._on_nina_plugin_busy(True)
     assert panel.nina_install_btn.isEnabled() is False

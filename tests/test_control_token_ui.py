@@ -1,4 +1,5 @@
-"""Tests for the capture-control token lifecycle behind the Output panel.
+"""Tests for the capture-control token lifecycle behind the NINA & ASCOM page's
+Control API card (moved from Output → Web Server).
 
 The panel is layout-only, so the behaviour worth pinning lives on the window
 mixin: minting on enable, regenerating, and — the easy bug — pushing a changed
@@ -66,6 +67,9 @@ def _qt_window_cls():
 
         def _notify(self, message, category='info'):
             self.notes.append((category, message))
+
+        def _on_settings_changed(self):
+            self.config.save()
 
     return _QtWindowImpl
 
@@ -160,23 +164,29 @@ def test_panel_disarms_a_running_server_when_the_api_is_switched_off(qapp):
     POST /capture/start stays fully live until the app restarts.
     """
     from PySide6.QtCore import QEvent
-    from ui.panels.output_settings import OutputSettingsPanel
+    from ui.controllers.nina_ascom_controller import NinaAscomController
+    from ui.panels.nina_ascom_panel import NinaAscomPanel
 
     server = _FakeServer()
     cfg = enabled_config(api_token="live-token")
     win = _qt_window_cls()(cfg, web_server=server)
     try:
-        panel = OutputSettingsPanel(win)
+        panel = NinaAscomPanel(win)
         panel.load_from_config(cfg)
+        NinaAscomController(win).bind(panel)
 
-        assert panel.control_token_input.text() == "live-token"
+        assert panel.control_card.control_token_input.text() == "live-token"
 
-        panel.control_enabled_switch.set_checked(False)
-        panel._on_control_enabled_changed(False)
+        panel.control_card.control_enabled_switch.set_checked(False)
 
         assert cfg.data["output"]["webserver_control_enabled"] is False
         assert server.tokens[-1] == "", "running server still armed after disable"
-        assert panel.control_token_input.text() == ""
+        assert panel.control_card.control_token_input.text() == ""
+
+        panel.control_card.control_enabled_switch.set_checked(True)
+        assert panel.control_card.control_token_input.text() == "live-token"
+        assert server.tokens[-1] == "live-token"
+        assert any("web server" in m for _, m in win.notes)
     finally:
         # panel is parented to win, so closing/deleting win tears down both.
         win.close()
