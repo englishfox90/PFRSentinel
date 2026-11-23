@@ -117,6 +117,12 @@ public sealed class SentinelConfig
     /// </summary>
     public const string TargetPath = "/nina/target";
 
+    /// <summary>
+    /// Path of the imaging-conditions verdict (<c>api_conditions.CONDITIONS_PATH</c>).
+    /// Fixed like <see cref="TargetPath"/>; served behind the control-API auth.
+    /// </summary>
+    public const string ConditionsPath = "/conditions";
+
     // Bind addresses that name no reachable host. Mirrors _WILDCARD_BINDS in
     // services/api_auth.py — a wildcard is an address to listen on, never one to
     // connect to, and http://0.0.0.0:8080 simply does not resolve.
@@ -206,6 +212,9 @@ public sealed class SentinelConfig
 
     /// <summary>Absolute URI of <c>POST /nina/target</c>.</summary>
     public Uri TargetUri => new(BaseUrl + TargetPath);
+
+    /// <summary>Absolute URI of <c>GET /conditions</c>.</summary>
+    public Uri ConditionsUri => new(BaseUrl + ConditionsPath);
 
     /// <summary>The default location of Sentinel's config.json.</summary>
     public static string DefaultConfigPath => Path.Combine(
