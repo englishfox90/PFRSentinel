@@ -147,7 +147,7 @@
                 </ItemsControl>
 
                 <!--  What the plugin last sent to Sentinel's all-sky overlay (SentinelTargetRows).  -->
-                <StackPanel Width="280">
+                <StackPanel Width="280" Margin="0,0,16,6">
                     <ItemsControl ItemsSource="{Binding TargetRows}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -178,6 +178,61 @@
                         Text="{Binding TargetProblemText}"
                         TextWrapping="Wrap"
                         Visibility="{Binding TargetProblemVisibility}" />
+                </StackPanel>
+
+                <!--
+                    Sentinel's imaging-conditions verdict (SentinelConditionsRows), from the
+                    same cache the "pause on bad conditions" trigger reads.
+                -->
+                <StackPanel Width="280" Margin="0,0,0,6">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock
+                            FontSize="11"
+                            Foreground="#FF6E6E6E"
+                            Text="Conditions: " />
+                        <TextBlock
+                            FontSize="11"
+                            FontWeight="Bold"
+                            Foreground="{Binding ConditionsBrush}"
+                            Text="{Binding ConditionsHeadline}" />
+                    </StackPanel>
+                    <TextBlock
+                        Margin="0,1,0,2"
+                        FontSize="11"
+                        Foreground="{Binding ConditionsBrush}"
+                        Text="{Binding ConditionsReasons}"
+                        TextWrapping="Wrap"
+                        Visibility="{Binding ConditionsReasonsVisibility}" />
+                    <ItemsControl ItemsSource="{Binding ConditionsRows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,1,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="92" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        FontSize="11"
+                                        Foreground="#FF6E6E6E"
+                                        Text="{Binding Label}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        FontSize="11"
+                                        Foreground="#FF8A8A8A"
+                                        Text="{Binding Value}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock
+                        Margin="0,2,0,0"
+                        FontSize="11"
+                        Foreground="#FFFFB300"
+                        Text="{Binding ConditionsNote}"
+                        TextWrapping="Wrap"
+                        Visibility="{Binding ConditionsNoteVisibility}" />
                 </StackPanel>
             </WrapPanel>
 
