@@ -25,7 +25,7 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 
 **ZWO Camera** captures directly from a connected ZWO ASI camera via the ASI SDK. This mode supports auto-exposure, gain control, white balance, RAW16 mode, per-camera settings, automatic recovery when the camera drops off USB, and scheduled capture (from the next release, a schedule can also follow the timelapse window). See [Capture Settings](Capture-Settings).
 
-**Alpaca Camera** captures from a camera served over the network by an ASCOM Alpaca server, such as ASCOM Remote on the observatory PC. Auto-exposure, scheduled capture, outputs, timelapse and the all-sky overlay work as in ZWO Camera mode; the USB and SDK settings don't apply. New in the next release. It has been tested with a simulated camera and a ZWO ASI676MC served over a VPN, but not yet with ZWO's ASCOM driver through ASCOM Remote. See [Alpaca Camera](Alpaca-Camera).
+**Alpaca Camera** captures from a camera served over the network by an ASCOM Alpaca server, such as ASCOM Remote on the observatory PC. Auto-exposure, scheduled capture, outputs, timelapse and the all-sky overlay work as in ZWO Camera mode; the USB and SDK settings don't apply. New in the next release. It has been tested with a simulated camera, a ZWO ASI676MC served over a VPN, and an ASI676MC through ZWO's ASCOM driver in ASCOM Remote. See [Alpaca Camera](Alpaca-Camera).
 
 **Directory Watch** monitors a folder for new images written by other capture software (NINA, SharpCap, or anything else). PFR Sentinel detects each file as it lands, reads any metadata file saved alongside it, processes the image, and moves on.
 
