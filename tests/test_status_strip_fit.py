@@ -260,3 +260,33 @@ def test_an_unshown_strip_is_never_trimmed(qapp):
     assert all(t.presentation == FULL for t in strip._tiles)
     assert strip.imaging_tile.value.text() == PAUSED
     strip.deleteLater()
+
+
+def test_bottom_border_is_unbroken_under_the_app_stylesheet(qapp):
+    # The app stylesheet gives every QWidget the app background; a tile's text
+    # box must not paint it over the tile's 1 px bottom border (seen on 3.8.1-dev.4).
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    from ui.theme.styles import get_stylesheet
+    from ui.theme.tokens import Colors
+    host = QWidget()
+    host.setStyleSheet(get_stylesheet())
+    QVBoxLayout(host).setContentsMargins(0, 0, 0, 0)
+    strip = StatusStrip()
+    _paused(strip)
+    host.layout().addWidget(strip)
+    host.resize(1600, strip.height())
+    host.show()
+    qapp.processEvents()
+    try:
+        image = strip.grab().toImage()
+        border = QColor(Colors.border_subtle)
+        y = strip.height() - 1
+        for tile in strip._tiles:
+            box = tile._text_box.geometry()
+            x = tile.x() + box.center().x()
+            pixel = image.pixelColor(x * image.width() // strip.width(), image.height() - 1)
+            assert pixel == border, f"{tile.eyebrow.text()} at x={x}: {pixel.name()} not {border.name()} (y={y})"
+    finally:
+        host.close()
+        host.deleteLater()

@@ -89,6 +89,9 @@ class StatusTile(QFrame):
         # A widget, not a bare layout, so the compact form can hide it and
         # take the spacing with it.
         self._text_box = QWidget()
+        # The app stylesheet fills every QWidget with the app background, which
+        # would paint over this tile's bottom border and hover shade.
+        self._text_box.setStyleSheet("background: transparent;")
         col = QVBoxLayout(self._text_box)
         col.setSpacing(1)
         col.setContentsMargins(0, 0, 0, 0)
