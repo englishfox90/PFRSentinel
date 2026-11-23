@@ -77,6 +77,28 @@ def _allsky_buffer_dumps_in_tmp(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(app_config, "get_allsky_buffer_dir", _dump_dir)
 
 
+@pytest.fixture(autouse=True)
+def _imaging_conditions_isolated(tmp_path_factory, monkeypatch):
+    """A fresh imaging-conditions feed and store per test, with the learned
+    star baseline kept out of the developer's real app-data: every pipeline
+    test that processes a frame feeds the process-wide singleton."""
+    from services.imaging_conditions import (
+        reset_conditions_store, reset_imaging_conditions_feed, star_baseline)
+    holder = []
+
+    def _path():
+        if not holder:
+            holder.append(str(tmp_path_factory.mktemp("imaging_conditions") / "star_baseline.json"))
+        return holder[0]
+
+    monkeypatch.setattr(star_baseline, "default_baseline_path", _path)
+    reset_imaging_conditions_feed()
+    reset_conditions_store()
+    yield
+    reset_imaging_conditions_feed()
+    reset_conditions_store()
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files"""
