@@ -13,7 +13,8 @@ from PySide6.QtWidgets import QApplication
 from services.config import Config
 from services.imaging_conditions import ConditionsStore, get_imaging_conditions_feed
 from ui.components.imaging_conditions_text import (
-    baseline_learning_text, detail_lines, summarize_conditions)
+    as_of_text, baseline_learning_text, detail_lines, secondary_text, signed_pct,
+    summarize_conditions)
 from ui.controllers.imaging_conditions_controller import ImagingConditionsController
 from ui.panels.imaging_conditions_card import ImagingConditionsCard
 
@@ -61,20 +62,25 @@ def test_summaries():
     assert summarize_conditions({'enabled': False}) == ("Off", 'muted')
     assert summarize_conditions({'enabled': True, 'imaging_ok': True,
                                  'cloud_cover_pct': 12.0}) == ("OK · 12% cloud", 'ok')
-    assert summarize_conditions({'enabled': True, 'stale': True, 'reasons': ['stale']})[1] == 'muted'
+    assert summarize_conditions({'enabled': True, 'stale': True, 'reasons': ['stale']}) == \
+        ("Paused · No recent frames", 'warn')
     assert summarize_conditions({'enabled': True, 'reasons': ['warming_up']}) == ("Warming up", 'info')
     assert summarize_conditions({'enabled': True, 'reasons': ['cloud_cover_high']}) == \
         ("Paused · Cloud cover high", 'warn')
 
 
 def test_learning_line():
-    snap = {'enabled': True, 'baseline_status': {'state': 'learning', 'samples': 12,
+    snap = {'enabled': True, 'frames_considered': 12,
+            'baseline_status': {'state': 'learning', 'samples': 12,
                                                  'needed': 30, 'bin': 'moon_down'},
             'stars': {'count': 210, 'baseline': None, 'change_pct': -45.0, 'window_frames': 10},
             'roof': {'state': 'Open'}}
-    assert baseline_learning_text(snap).startswith("Learning your sky (12/30 clear frames")
+    assert baseline_learning_text(snap) == \
+        "Learning your sky: 12/30 clear frames (Moon down)"
+    snap['baseline_status']['bin'] = 'moon_up_25_50'
+    assert baseline_learning_text(snap).endswith("(Moon up, 25–50% lit)")
     text = detail_lines(snap)
-    assert "Stars: 210" in text and "-45%" in text and "Learning your sky" in text
+    assert "Star index: 210" in text and "-45%" in text and "Learning your sky" in text
     assert baseline_learning_text({'baseline_status': {'state': 'ready'}}) == ""
 
 
@@ -92,6 +98,10 @@ def test_controller_saves_refreshes_and_resets(card, tmp_path):
     strip = Strip()
     controller = ImagingConditionsController(Window(), store=store, parent=card)
     controller.bind(card, strip)
+    assert strip.seen == ("Idle", 'muted')
+    assert card.verdict_label.text() == "Imaging: Idle"
+    Window.is_capturing = True
+    controller.refresh()
     assert strip.seen == ("Warming up", 'info')
     assert card.verdict_label.text() == "Imaging: Warming up"
 
@@ -116,3 +126,95 @@ def test_status_strip_has_an_imaging_tile(qapp):
     strip.set_imaging("OK", 'ok')
     assert strip.imaging_tile.value.text() == "OK"
     strip.deleteLater()
+
+
+def _snap(**kw):
+    base = {'enabled': True, 'imaging_ok': False, 'reasons': [], 'stale': False,
+            'updated_at': '2026-11-23T02:24:19.000Z', 'age_s': 3.0, 'frames_considered': 40,
+            'good_streak': 0, 'stars': {'count': 300, 'baseline': 315.0, 'change_pct': 2.0},
+            'baseline_status': {'state': 'ready', 'samples': 40, 'needed': 30,
+                                'bin': 'moon_down'},
+            'roof': {'state': 'Open'}, 'sky': {'condition': 'Clear'}}
+    base.update(kw)
+    return base
+
+
+def test_change_that_rounds_to_zero_reads_plus_minus_zero():
+    assert signed_pct(-0.3) == "±0%" and signed_pct(0.4) == "±0%" and signed_pct(0) == "±0%"
+    assert signed_pct(-0.6) == "-1%" and signed_pct(12.4) == "+12%"
+    snap = _snap(stars={'count': 317, 'change_pct': -0.2},
+                 fwhm={'px': 2.4, 'night_median_px': 2.4, 'change_pct': -0.4})
+    text = detail_lines(snap)
+    assert "-0%" not in text and "+0%" not in text
+    assert "317, ±0% vs recent frames" in text and "(±0%)" in text
+
+
+def test_headline_reason_is_not_repeated():
+    snap = _snap(reasons=['cloud_cover_high', 'stars_dropping'])
+    assert summarize_conditions(snap)[0] == "Paused · Cloud cover high"
+    assert secondary_text(snap) == "Also: Stars dropping"
+    assert secondary_text(_snap(reasons=['cloud_cover_high'])) == ""
+    recovering = _snap(reasons=['recovering'], good_streak=2)
+    assert summarize_conditions(recovering) == ("Recovering", 'info')
+    assert "Recovering" not in secondary_text(recovering)
+    assert secondary_text(recovering).startswith("2 good frames in a row")
+    assert secondary_text(recovering, good_needed=3) == "2 of 3 good frames in a row to resume"
+    stale = _snap(stale=True, reasons=['stale'])
+    assert "No recent frames" not in secondary_text(stale)
+    assert secondary_text(_snap(imaging_ok=True)) == ""
+
+
+def test_stale_reads_not_ok_and_dates_the_measurements():
+    stale = _snap(stale=True, reasons=['stale'], age_s=150.0)
+    assert summarize_conditions(stale, capturing=True) == ("Paused · No recent frames", 'warn')
+    assert summarize_conditions(stale, capturing=False) == ("Paused · Capture stopped", 'muted')
+    note = as_of_text(stale)
+    assert note.startswith("From the last frame at ") and "(2 min ago)" in note
+    assert detail_lines(stale).splitlines()[0] == note
+    assert as_of_text(_snap()) == "" and not detail_lines(_snap()).startswith("From")
+
+
+def test_idle_until_capture_runs():
+    cold = {'enabled': True, 'imaging_ok': False, 'reasons': ['warming_up'], 'stale': False,
+            'updated_at': None, 'frames_considered': 0}
+    assert summarize_conditions(cold, capturing=False) == ("Idle", 'muted')
+    assert secondary_text(cold, capturing=False) == ""
+    assert detail_lines(cold) == ""
+    assert summarize_conditions(cold, capturing=True) == ("Warming up", 'info')
+    assert summarize_conditions(cold) == ("Warming up", 'info')
+    warming = dict(cold, frames_considered=2, updated_at='2026-11-23T02:24:19Z', good_streak=2)
+    assert summarize_conditions(warming, capturing=True) == ("Warming up", 'info')
+    assert secondary_text(warming, capturing=True).startswith("2 good frames")
+
+
+def test_learning_line_hidden_in_daylight_and_without_a_star_index():
+    learning = {'state': 'learning', 'samples': 0, 'needed': 30, 'bin': 'moon_down'}
+    day = _snap(reasons=['daylight', 'roof_not_open'], baseline_status=learning,
+                stars={'count': None})
+    assert baseline_learning_text(day) == "" and "Learning" not in detail_lines(day)
+    night_no_stars = _snap(baseline_status=learning, stars={'count': None})
+    assert baseline_learning_text(night_no_stars) == ""
+    assert baseline_learning_text(_snap(baseline_status=learning)) != ""
+
+
+def test_card_hides_empty_lines_and_explains_the_star_index(card):
+    card.show_conditions(_snap(imaging_ok=True, cloud_cover_pct=5.0))
+    assert card.reasons_label.isHidden() and card.reasons_label.text() == ""
+    assert not card.detail_label.isHidden()
+    assert "fixed 900 px plane" in card.detail_label.toolTip()
+    card.show_conditions(_snap(reasons=['cloud_cover_high', 'stars_dropping']))
+    assert not card.reasons_label.isHidden()
+    assert card.reasons_label.text() == "Also: Stars dropping"
+    card.show_conditions({'enabled': False})
+    assert card.reasons_label.isHidden() and card.detail_label.isHidden()
+
+
+def test_row_labels_fit_their_column(card):
+    from qfluentwidgets import BodyLabel
+    from ui.components.cards import FormRow
+    rows = card.findChildren(FormRow)
+    assert len(rows) >= 6
+    for row in rows:
+        label = row.findChild(BodyLabel)
+        width = label.fontMetrics().horizontalAdvance(label.text())
+        assert width <= label.width(), f"{label.text()!r} is {width}px in {label.width()}px"

@@ -15,10 +15,12 @@ REFRESH_MS = 2000
 
 
 class ImagingConditionsController(QObject):
-    def __init__(self, main_window, store=None, parent=None):
+    def __init__(self, main_window, store=None, parent=None, capturing=None):
         super().__init__(parent or main_window)
         self._main_window = main_window
         self._store = store
+        self._capturing = capturing or (
+            lambda: bool(getattr(self._main_window, 'is_capturing', False)))
         self._card = None
         self._strip = None
         self._timer = QTimer(self)
@@ -39,6 +41,10 @@ class ImagingConditionsController(QObject):
         if config is not None:
             card.load(config.get(CONFIG_KEY, {}) or {})
             self.store.set_enabled(read_settings(config).enabled)
+        for name in ('capture_started', 'capture_stopped'):
+            signal = getattr(self._main_window, name, None)
+            if hasattr(signal, 'connect'):
+                signal.connect(self.refresh)
         self.refresh()
         self._timer.start()
 
@@ -48,11 +54,12 @@ class ImagingConditionsController(QObject):
         except Exception as e:
             app_logger.debug(f"Imaging conditions refresh failed: {e}")
             return
+        capturing = self._capturing()
         if self._card is not None:
-            self._card.show_conditions(snapshot)
+            self._card.show_conditions(snapshot, capturing)
         if self._strip is not None and hasattr(self._strip, 'set_imaging'):
             from ..components.imaging_conditions_text import summarize_conditions
-            self._strip.set_imaging(*summarize_conditions(snapshot))
+            self._strip.set_imaging(*summarize_conditions(snapshot, capturing))
 
     def reset_baseline(self) -> None:
         """Forget the learned clear-sky star counts; learning starts again

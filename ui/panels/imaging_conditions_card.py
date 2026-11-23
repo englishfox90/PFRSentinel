@@ -11,7 +11,8 @@ from qfluentwidgets import CaptionLabel, ComboBox, PushButton, StrongBodyLabel
 
 from services.config_defaults import DEFAULT_CONFIG
 from ..components.cards import CollapsibleCard, SwitchRow
-from ..components.imaging_conditions_text import detail_lines, reason_text, summarize_conditions
+from ..components.imaging_conditions_text import (
+    STAR_INDEX_TOOLTIP, detail_lines, secondary_text, summarize_conditions)
 from ..components.scroll_safe_spinbox import DoubleSpinBox, SpinBox
 from ..theme.icons import mdi
 from ..theme.tokens import Colors
@@ -42,7 +43,7 @@ class ImagingConditionsCard(CollapsibleCard):
             "Tells the NINA plugin whether the sky is good enough to image, so a "
             "sequence can pause under cloud and resume when it clears. Judged on "
             "every frame from the roof and sky readings, this rig's own clear-sky "
-            "star count and the star sharpness. Served at /conditions with the "
+            "star index and the star sharpness. Served at /conditions with the "
             "control API token."
         )
         caption.setWordWrap(True)
@@ -52,10 +53,13 @@ class ImagingConditionsCard(CollapsibleCard):
         self.add_widget(self.verdict_label)
         self.reasons_label = CaptionLabel("")
         self.reasons_label.setWordWrap(True)
+        self.reasons_label.hide()
         self.add_widget(self.reasons_label)
         self.detail_label = CaptionLabel("")
         self.detail_label.setWordWrap(True)
         self.detail_label.setStyleSheet(f"color: {Colors.text_muted};")
+        self.detail_label.setToolTip(STAR_INDEX_TOOLTIP)
+        self.detail_label.hide()
         self.add_widget(self.detail_label)
 
         self.enabled_switch = SwitchRow("Evaluate imaging conditions",
@@ -73,25 +77,26 @@ class ImagingConditionsCard(CollapsibleCard):
         self.cloud_spin.setRange(0, 100)
         self.cloud_spin.setSuffix(" %")
         self.cloud_spin.valueChanged.connect(self._emit_changed)
-        self.add_row("Pause above cloud cover", self.cloud_spin)
+        self.add_row("Max cloud cover", self.cloud_spin,
+                     "Pause when the estimated cloud cover is above this")
 
         self.ratio_spin = DoubleSpinBox()
         self.ratio_spin.setRange(0.05, 1.0)
         self.ratio_spin.setSingleStep(0.05)
         self.ratio_spin.setDecimals(2)
         self.ratio_spin.valueChanged.connect(self._emit_changed)
-        self.add_row("Pause below star ratio", self.ratio_spin,
-                     "Fraction of this rig's clear-sky star count")
+        self.add_row("Min star ratio", self.ratio_spin,
+                     "Pause below this fraction of this rig's clear-sky star index")
 
         self.bad_spin = SpinBox()
         self.bad_spin.setRange(1, 20)
         self.bad_spin.valueChanged.connect(self._emit_changed)
-        self.add_row("Bad frames to pause", self.bad_spin)
+        self.add_row("Frames to pause", self.bad_spin, "Bad frames in a row before pausing")
 
         self.good_spin = SpinBox()
         self.good_spin.setRange(1, 20)
         self.good_spin.valueChanged.connect(self._emit_changed)
-        self.add_row("Good frames to resume", self.good_spin)
+        self.add_row("Frames to resume", self.good_spin, "Good frames in a row before resuming")
 
         self.reset_button = PushButton("Reset baseline")
         self.reset_button.clicked.connect(self.reset_baseline_requested.emit)
@@ -133,16 +138,22 @@ class ImagingConditionsCard(CollapsibleCard):
             'good_frames': int(self.good_spin.value()),
         }
 
-    def show_conditions(self, snapshot: dict) -> None:
-        text, tone = summarize_conditions(snapshot)
+    def show_conditions(self, snapshot: dict, capturing=None) -> None:
+        text, tone = summarize_conditions(snapshot, capturing)
         self.verdict_label.setText(f"Imaging: {text}")
         self.verdict_label.setStyleSheet(f"color: {_TONE_COLORS.get(tone, Colors.text_primary)};")
-        reasons = (snapshot or {}).get('reasons') or []
-        self.reasons_label.setText(", ".join(reason_text(r) for r in reasons))
-        self.detail_label.setText(detail_lines(snapshot) if (snapshot or {}).get('enabled') else "")
+        _set_optional(self.reasons_label,
+                      secondary_text(snapshot, capturing, self.good_spin.value()))
+        _set_optional(self.detail_label,
+                      detail_lines(snapshot) if (snapshot or {}).get('enabled') else "")
 
     def _emit_changed(self, *_):
         self.changed.emit()
+
+
+def _set_optional(label, text: str) -> None:
+    label.setText(text)
+    label.setVisible(bool(text))
 
 
 def _number(value, default):
