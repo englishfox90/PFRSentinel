@@ -146,9 +146,11 @@ class FormRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(Spacing.md)
         
-        # Label column (fixed width for alignment)
+        # Label column (fixed width for alignment). Wraps rather than clips:
+        # Windows' Segoe UI runs wider than the fonts the layout was sized on.
         label_widget = BodyLabel(label)
         label_widget.setFixedWidth(140)
+        label_widget.setWordWrap(True)
         label_widget.setStyleSheet(f"color: {Colors.text_secondary};")
         layout.addWidget(label_widget)
         

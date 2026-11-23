@@ -4,7 +4,7 @@ Settings for file output, web server, and Discord
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame,
-    QFileDialog, QSizePolicy, QApplication
+    QFileDialog, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal
 from qfluentwidgets import (
@@ -22,11 +22,9 @@ from ..theme.tokens import Colors, Typography, Spacing, Layout
 from ..theme.icons import mdi
 from ..components.cards import SettingsCard, SwitchRow, CollapsibleCard
 from ._integration_cards import IntegrationCardsMixin
-from ._nina_plugin_card import NinaPluginCardMixin
-from services.host_platform import IS_WINDOWS
 
 
-class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollArea):
+class OutputSettingsPanel(IntegrationCardsMixin, QScrollArea):
     """
     Output settings panel with:
     - File output (directory, format, naming)
@@ -37,6 +35,7 @@ class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollAre
     settings_changed = Signal()
     test_discord_requested = Signal()
     test_hermes_requested = Signal()
+    open_nina_requested = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -143,57 +142,24 @@ class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollAre
                          "Interactive reference for /latest, /status, /openapi.json")
         self._update_api_docs_url()
 
-        # --- Capture control API ---
-        # Mutating routes, so opt-in and token-gated. Lets NINA (or curl, or a
-        # phone bookmark) start and stop capture.
-        self.control_enabled_switch = SwitchRow(
-            "Enable Capture Control API",
-            "Let NINA and other local tools start/stop capture"
-        )
-        self.control_enabled_switch.toggled.connect(self._on_control_enabled_changed)
-        web_card.add_widget(self.control_enabled_switch)
-
-        token_row = QHBoxLayout()
-        token_row.setSpacing(Spacing.sm)
-
-        # Read-only: the token is generated, never typed. Masked by default so
-        # it can't be shoulder-surfed off a screenshot of the settings page.
-        self.control_token_input = LineEdit()
-        self.control_token_input.setReadOnly(True)
-        self.control_token_input.setEchoMode(LineEdit.Password)
-        self.control_token_input.setPlaceholderText("Enable the control API to generate a token")
-        token_row.addWidget(self.control_token_input, 1)
-
-        self.show_token_btn = PushButton("Show")
-        self.show_token_btn.setCheckable(True)
-        self.show_token_btn.clicked.connect(self._toggle_token_visibility)
-        token_row.addWidget(self.show_token_btn)
-
-        self.copy_token_btn = PushButton("Copy")
-        self.copy_token_btn.setIcon(mdi('content-copy'))
-        self.copy_token_btn.clicked.connect(self._copy_control_token)
-        token_row.addWidget(self.copy_token_btn)
-
-        self.regen_token_btn = PushButton("Regenerate")
-        self.regen_token_btn.setIcon(mdi('refresh'))
-        self.regen_token_btn.clicked.connect(self._regenerate_control_token)
-        token_row.addWidget(self.regen_token_btn)
-
-        token_widget = QWidget()
-        token_widget.setLayout(token_row)
-        web_card.add_row("API Token", token_widget,
-                         "The bundled NINA scripts read this automatically — "
-                         "you only need to copy it for other tools")
+        # Capture control + its token, and the NINA plugin, moved to the NINA &
+        # ASCOM page (same output.* keys). Point there from where people looked.
+        pointer_row = QHBoxLayout()
+        pointer_row.setContentsMargins(0, 0, 0, 0)
+        pointer_row.setSpacing(Spacing.sm)
+        pointer = BodyLabel("Capture control, the API token and the NINA plugin are "
+                            "on the NINA & ASCOM page.")
+        pointer.setWordWrap(True)
+        pointer.setStyleSheet(f"color: {Colors.text_muted};")
+        pointer_row.addWidget(pointer, 1)
+        self.open_nina_btn = PushButton("Open")
+        self.open_nina_btn.clicked.connect(self.open_nina_requested.emit)
+        pointer_row.addWidget(self.open_nina_btn)
+        pointer_widget = QWidget()
+        pointer_widget.setLayout(pointer_row)
+        web_card.add_widget(pointer_widget)
 
         layout.addWidget(web_card)
-
-        # === NINA PLUGIN ===
-        # Built by NinaPluginCardMixin (ui/panels/_nina_plugin_card.py) — sits
-        # next to the control API it pairs with. NINA itself is Windows-only
-        # (the plugin DLL and its install service both target the Windows PE
-        # format), so the card is skipped elsewhere.
-        if IS_WINDOWS:
-            self._build_nina_plugin_card(layout)
 
         # === DISCORD + HERMES ===
         # Built by IntegrationCardsMixin (ui/panels/_integration_cards.py) —
@@ -332,77 +298,6 @@ class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollAre
             self.main_window.config.set('output', output)
             self.settings_changed.emit()
 
-    # === CAPTURE CONTROL API ===
-
-    def _on_control_enabled_changed(self, checked):
-        if self._loading_config:
-            return
-        if not (self.main_window and hasattr(self.main_window, 'config')):
-            return
-        output = self.main_window.config.get('output', {})
-        output['webserver_control_enabled'] = checked
-        self.main_window.config.set('output', output)
-        # Persist + reconcile the server first, then resolve the token — the
-        # resolve reads the flag we just wrote. This runs on BOTH edges: on
-        # disable it pushes an empty token, which is what actually disarms a
-        # server that is already up (server reconciliation only watches
-        # webserver_enabled, so without this the routes stay live until
-        # restart).
-        self.settings_changed.emit()
-        self._sync_control_token()
-
-        if checked and not self.web_enabled_switch.is_checked():
-            # The control routes ride on the web server; enabling one without
-            # the other silently does nothing.
-            self._notify_main_window(
-                "Capture control needs the web server — enable it above.", "warning"
-            )
-
-    def _toggle_token_visibility(self):
-        if self.show_token_btn.isChecked():
-            self.control_token_input.setEchoMode(LineEdit.Normal)
-            self.show_token_btn.setText("Hide")
-        else:
-            self.control_token_input.setEchoMode(LineEdit.Password)
-            self.show_token_btn.setText("Show")
-
-    def _copy_control_token(self):
-        token = self.control_token_input.text()
-        if not token:
-            self._notify_main_window(
-                "No token yet — enable the capture control API first.", "warning"
-            )
-            return
-        QApplication.clipboard().setText(token)
-        self._notify_main_window("API token copied to clipboard")
-
-    def _regenerate_control_token(self):
-        """Mint a fresh token, invalidating the old one."""
-        if not (self.main_window and hasattr(self.main_window, 'regenerate_control_token')):
-            return
-        self.main_window.regenerate_control_token()
-        self._sync_control_token()
-        self._notify_main_window(
-            "New API token generated — any tool using the old one must be updated."
-        )
-
-    def _sync_control_token(self):
-        """Resolve the token through the window, then reflect it in the field.
-
-        Always resolves, on enable and disable alike: ensure_control_token()
-        mints when the API is on and returns "" when it is off, and either way
-        pushes the result to a running server. Panels stay layout-only, so the
-        minting and the push belong to the window, not here.
-        """
-        token = ''
-        if self.main_window and hasattr(self.main_window, 'ensure_control_token'):
-            # Shows the token the server would actually accept: "" while the API
-            # is off, so a disabled field can never be mistaken for a working
-            # credential. The value itself stays in config, so re-enabling
-            # restores it and anything already holding it keeps working.
-            token = self.main_window.ensure_control_token() or ''
-        self.control_token_input.setText(token)
-
     def _notify_main_window(self, message, category='info'):
         if self.main_window and hasattr(self.main_window, '_notify'):
             self.main_window._notify(message, category)
@@ -469,11 +364,6 @@ class OutputSettingsPanel(IntegrationCardsMixin, NinaPluginCardMixin, QScrollAre
             self.web_host_input.setText(output.get('webserver_host', '127.0.0.1'))
             self.web_port_spin.setValue(output.get('webserver_port', 8080))
             self.web_path_input.setText(output.get('webserver_path', '/latest'))
-            control_on = output.get('webserver_control_enabled', False)
-            self.control_enabled_switch.set_checked(control_on)
-            # Same rule as _sync_control_token: only show a live credential.
-            self.control_token_input.setText(
-                (output.get('api_token', '') or '') if control_on else '')
             self._update_api_docs_url()
 
             # Discord

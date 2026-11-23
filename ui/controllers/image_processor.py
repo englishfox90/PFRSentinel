@@ -22,6 +22,7 @@ from services.output_crop import METADATA_KEY as CROP_METADATA_KEY, apply_output
 from services.processor import add_overlays, auto_stretch_image
 from services.sharpening import apply_unsharp_mask
 from services.sky_evidence import compute_sky_evidence
+from services.imaging_conditions import observe_imaging_conditions
 from services.ml_service import get_ml_service, analyze_image_for_tokens
 from services.allsky.overlay_renderer import render_allsky_for_preview as _render_allsky_for_preview
 from .dev_mode_utils import dev_mode_saver, collect_ml_contribution_sample
@@ -434,6 +435,7 @@ class ImageProcessorWorker(QThread):
                     metadata.update({'STAR_COUNT': 'N/A', 'FWHM': 'N/A', 'SEEING': 'N/A'})
             except Exception as e:
                 app_logger.debug(f"Star detection skipped: {e}")
+            observe_imaging_conditions(metadata, config, (raw_array.shape[1], raw_array.shape[0]))
 
             del raw_array  # Last use above — release the 76 MB numpy array before overlay rendering
 

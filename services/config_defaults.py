@@ -237,6 +237,34 @@ DEFAULT_CONFIG = {
         }
     },
 
+    # Imaging conditions (services/imaging_conditions/): a per-frame "is the sky
+    # good enough to image?" verdict served at GET /conditions for the NINA
+    # plugin's pause/resume trigger. Reads the ML roof/sky results and the
+    # star evidence the pipeline already measures; costs no extra image pass.
+    "imaging_conditions": {
+        "enabled": True,
+        # Relaxed / balanced / strict / custom: which preset the thresholds
+        # below were set from (imaging_conditions/presets.py). Display only —
+        # the threshold keys are authoritative; balanced = these defaults.
+        "sensitivity": "balanced",
+        "bad_frames": 3,           # consecutive bad frames before imaging_ok turns false
+        "good_frames": 3,          # consecutive good frames before it turns true again
+        "max_sun_alt_deg": -18.0,  # -18 astronomical night; -12 accepts nautical twilight
+        "require_roof_open": True,  # off for a roofless rig without the roof classifier
+        "min_roof_confidence": 0.7,
+        "min_sky_confidence": 0.6,  # an ML sky class below this is not used
+        "max_cloud_cover_pct": 50.0,
+        "min_star_ratio": 0.4,     # star count / this rig's clear-sky baseline
+        # Every star threshold is RELATIVE to this installation's own sky: the
+        # clear-sky baseline is learned on each rig (no shipped star counts).
+        "star_drop_pct": 40.0,     # % drop vs the median of the last trend_frames frames
+        "trend_frames": 10,
+        "fwhm_rise_pct": 50.0,     # % above tonight's median FWHM is bad
+        "min_stars_for_fwhm": 10,  # fewer detections than this: no FWHM reading
+        "baseline_min_samples": 30,  # clear frames per moon bin before the baseline is ready
+        "stale_after_s": 0,        # 0 = auto: 3x the measured frame interval, at least 120 s
+    },
+
     # Resource reporting (services/resource_monitor.py). No UI: edit config.json.
     "diagnostics": {
         "resource_log_interval_s": 300,  # How often memory/CPU is sampled

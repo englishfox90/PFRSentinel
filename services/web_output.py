@@ -200,6 +200,9 @@ class ImageHTTPHandler(BaseHTTPRequestHandler):
             self._serve_docs()
         elif clean_path == control_path:
             web_control.serve_capture_state(self)
+        elif clean_path.rstrip('/') == '/conditions':
+            from . import web_conditions
+            web_conditions.serve_conditions(self)
         elif clean_path == library_path + '/image' and self._library_api_enabled():
             web_library.serve_image(self, self._library(), query_params)
         elif clean_path == library_path and self._library_api_enabled():
@@ -207,7 +210,7 @@ class ImageHTTPHandler(BaseHTTPRequestHandler):
         else:
             available = ", ".join([config_path, status_path, openapi_path, docs_path])
             if getattr(self.server, 'control_token', ''):
-                available += f", {control_path}"
+                available += f", {control_path}, /conditions"
             if self._library_api_enabled():
                 available += f", {library_path}, {library_path}/image"
             self.send_error(404, f"Path not found. Available: {available}")
@@ -329,6 +332,11 @@ class ImageHTTPHandler(BaseHTTPRequestHandler):
             status["health"] = view["health"]
         except Exception as e:
             app_logger.error(f"Error deriving capture status: {e}")
+        try:
+            from .imaging_conditions import get_conditions_store
+            status["conditions"] = get_conditions_store().compact()
+        except Exception as e:
+            app_logger.debug(f"Imaging conditions left out of /status: {e}")
 
         return status
 

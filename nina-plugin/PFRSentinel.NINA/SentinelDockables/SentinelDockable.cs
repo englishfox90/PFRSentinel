@@ -3,6 +3,7 @@ using NINA.Core.Utility;
 using NINA.Equipment.Interfaces.ViewModel;
 using NINA.Profile.Interfaces;
 using NINA.WPF.Base.ViewModel;
+using PFRSentinel.NINA.SentinelSequenceItems;
 using PFRSentinel.NINA.SentinelTarget;
 using System;
 using System.Collections.Generic;
@@ -156,6 +157,8 @@ namespace PFRSentinel.NINA.SentinelDockables {
             TargetProblemText = problem;
             TargetProblemVisibility = problem.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
+            ApplyConditions();
+
             ApplyLinkNotice(snapshot);
 
             // An override is normal context, not an error — but it has to be visible, or
@@ -170,6 +173,36 @@ namespace PFRSentinel.NINA.SentinelDockables {
             controlAvailable = SentinelCommandAvailability.CanIssue(snapshot.Control);
             controlDetail = Without(Join(snapshot.ControlMessage, snapshot.ControlAdvice), LinkNoticeText);
             UpdateCommandAvailability();
+        }
+
+        /// <summary>
+        /// Shows the shared imaging-conditions reading, refreshing it in the background.
+        /// </summary>
+        /// <remarks>
+        /// Read from <see cref="SentinelConditionsSource"/>, the same cache the trigger and
+        /// condition use, so the panel and the sequencer always show the same verdict and
+        /// an open panel costs at most one extra request every few seconds. Never blocks:
+        /// this runs on the UI thread, once per poll, which also means a hidden panel
+        /// causes no conditions traffic.
+        /// </remarks>
+        private void ApplyConditions() {
+            SentinelSequenceLink.Instance.ApplyEndpointOverride(
+                SentinelPluginOptions.ReadBaseUrlOverride(pluginSettings));
+
+            SentinelConditionsView view = SentinelConditionsRows.Build(
+                SentinelConditionsSource.Instance.GetCached(), DateTime.UtcNow);
+
+            ConditionsHeadline = view.Headline;
+            ConditionsBrush = view.State switch {
+                SentinelConditionsState.Ok => OkBrush,
+                SentinelConditionsState.Bad => ErrorBrush,
+                _ => WarnBrush,
+            };
+            ConditionsReasons = view.Reasons;
+            ConditionsReasonsVisibility = view.Reasons.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            ConditionsRows = view.Rows;
+            ConditionsNote = view.Note;
+            ConditionsNoteVisibility = view.Note.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         /// <summary>

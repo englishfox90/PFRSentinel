@@ -22,6 +22,10 @@
 - [Timelapse](Timelapse)
 - [Image Library](Image-Library)
 
+### Automation
+
+- [NINA & ASCOM](NINA-and-ASCOM)
+
 ### App
 
 - [Logs](Logs)
@@ -39,6 +43,7 @@
 ### Integrations
 
 - [NINA Integration](NINA-Integration)
+- [Imaging Conditions](Imaging-Conditions)
 - [Capture Control API](Capture-Control-API)
 - [Web Server API](Web-Server)
 - [Discord Integration](Discord-Integration)

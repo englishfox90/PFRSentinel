@@ -20,7 +20,7 @@ Usage:
     # Results include:
     # - roof_status: "Open" | "Closed" | "N/A"
     # - roof_confidence: 0.0-1.0
-    # - sky_condition: "Clear" | "Mostly Clear" | "Partly Cloudy" | etc | "N/A"
+    # - sky_condition: "Clear" | "Partly Cloudy" | "Overcast" | "N/A"
     # - sky_confidence: 0.0-1.0
     # - stars_visible: True | False | None
     # - star_density: 0.0-1.0 | None
@@ -208,7 +208,7 @@ class MLService:
             {
                 'roof_status': str,  # "Open", "Closed", or "N/A"
                 'roof_confidence': float,  # 0.0-1.0 or None
-                'sky_condition': str,  # "Clear", "Mostly Clear", etc. or "N/A"
+                'sky_condition': str,  # "Clear", "Partly Cloudy", "Overcast" or "N/A"
                 'sky_confidence': float,  # 0.0-1.0 or None
                 'stars_visible': bool or None,
                 'star_density': float or None,  # 0.0-1.0

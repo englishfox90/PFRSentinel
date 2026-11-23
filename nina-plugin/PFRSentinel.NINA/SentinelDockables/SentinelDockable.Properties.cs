@@ -60,6 +60,13 @@ namespace PFRSentinel.NINA.SentinelDockables {
         private Brush commandMessageBrush = MutedBrush;
         private bool canIssueCommands;
         private string endpointText = string.Empty;
+        private string conditionsHeadline = "NO VERDICT";
+        private Brush conditionsBrush = MutedBrush;
+        private string conditionsReasons = string.Empty;
+        private Visibility conditionsReasonsVisibility = Visibility.Collapsed;
+        private IReadOnlyList<SentinelStat> conditionsRows = Array.Empty<SentinelStat>();
+        private string conditionsNote = string.Empty;
+        private Visibility conditionsNoteVisibility = Visibility.Collapsed;
         private Brush endpointBrush = MutedBrush;
 
         /// <summary>The latest frame from <c>/latest</c>, always frozen. Null when there is none.</summary>
@@ -249,6 +256,48 @@ namespace PFRSentinel.NINA.SentinelDockables {
         public Brush EndpointBrush {
             get => endpointBrush;
             private set => Set(ref endpointBrush, value);
+        }
+
+        /// <summary>Sentinel's imaging-conditions verdict: "OK TO IMAGE", "NOT OK" or "NO VERDICT".</summary>
+        public string ConditionsHeadline {
+            get => conditionsHeadline;
+            private set => Set(ref conditionsHeadline, value);
+        }
+
+        /// <summary>Green, red, or amber for no verdict.</summary>
+        public Brush ConditionsBrush {
+            get => conditionsBrush;
+            private set => Set(ref conditionsBrush, value);
+        }
+
+        /// <summary>Why the verdict is not OK, in plain words.</summary>
+        public string ConditionsReasons {
+            get => conditionsReasons;
+            private set => Set(ref conditionsReasons, value);
+        }
+
+        /// <summary>Whether <see cref="ConditionsReasons"/> is shown.</summary>
+        public Visibility ConditionsReasonsVisibility {
+            get => conditionsReasonsVisibility;
+            private set => Set(ref conditionsReasonsVisibility, value);
+        }
+
+        /// <summary>Roof, sky, stars, change %, cloud, FWHM, sun, baseline and age rows.</summary>
+        public IReadOnlyList<SentinelStat> ConditionsRows {
+            get => conditionsRows;
+            private set => Set(ref conditionsRows, value);
+        }
+
+        /// <summary>"Sentinel is learning this sky (12/30 clear frames); ..." or empty.</summary>
+        public string ConditionsNote {
+            get => conditionsNote;
+            private set => Set(ref conditionsNote, value);
+        }
+
+        /// <summary>Whether <see cref="ConditionsNote"/> is shown.</summary>
+        public Visibility ConditionsNoteVisibility {
+            get => conditionsNoteVisibility;
+            private set => Set(ref conditionsNoteVisibility, value);
         }
 
         private static SolidColorBrush Frozen(byte a, byte r, byte g, byte b) {

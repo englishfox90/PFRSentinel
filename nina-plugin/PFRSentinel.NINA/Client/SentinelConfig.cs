@@ -117,6 +117,12 @@ public sealed class SentinelConfig
     /// </summary>
     public const string TargetPath = "/nina/target";
 
+    /// <summary>
+    /// Path of the imaging-conditions verdict (<c>api_conditions.CONDITIONS_PATH</c>).
+    /// Fixed like <see cref="TargetPath"/>; served behind the control-API auth.
+    /// </summary>
+    public const string ConditionsPath = "/conditions";
+
     // Bind addresses that name no reachable host. Mirrors _WILDCARD_BINDS in
     // services/api_auth.py — a wildcard is an address to listen on, never one to
     // connect to, and http://0.0.0.0:8080 simply does not resolve.
@@ -207,6 +213,9 @@ public sealed class SentinelConfig
     /// <summary>Absolute URI of <c>POST /nina/target</c>.</summary>
     public Uri TargetUri => new(BaseUrl + TargetPath);
 
+    /// <summary>Absolute URI of <c>GET /conditions</c>.</summary>
+    public Uri ConditionsUri => new(BaseUrl + ConditionsPath);
+
     /// <summary>The default location of Sentinel's config.json.</summary>
     public static string DefaultConfigPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -223,9 +232,9 @@ public sealed class SentinelConfig
         SentinelConfigStatus.ConfigUnreadable =>
             $"Sentinel configuration at {ConfigPath} could not be read.",
         SentinelConfigStatus.ControlDisabled =>
-            "The capture control API is switched off in Sentinel. Enable it on the Output tab, then retry.",
+            "The capture control API is switched off in Sentinel. Enable it on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier), then retry.",
         SentinelConfigStatus.NoToken =>
-            "No control API token is configured in Sentinel. Enable the control API on the Output tab to mint one.",
+            "No control API token is configured in Sentinel. Enable the control API on Sentinel's NINA & ASCOM page (the Output tab in Sentinel 3.8 and earlier) to mint one.",
         _ => "Sentinel control API is unavailable.",
     };
 

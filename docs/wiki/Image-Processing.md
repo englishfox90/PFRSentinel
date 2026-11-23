@@ -62,7 +62,7 @@ Only the outputs are cropped. The camera still captures the full sensor, and the
 |--------------------|----------------------|
 | Saved image files | [Auto-Exposure](Auto-Exposure) |
 | Web server image (`/latest`) | [Auto Stretch](Auto-Stretch) |
-| [Image Library](Image-Library) | [ML Models](ML-Models) and the ASCOM safety file |
+| [Image Library](Image-Library) | [ML Models](ML-Models), the ASCOM safety file and the Alpaca SafetyMonitor |
 | [Discord](Discord-Integration) and [Hermes](Hermes-Notifications) image posts | [All-Sky Overlay](All-Sky-Overlay) calibration |
 | [Timelapse](Timelapse) video | [Meteor Detection](Meteor-Detection) |
 | The live preview | The crop editor thumbnail on this card |
@@ -120,15 +120,14 @@ Two on-device models classify each captured frame: a **Roof Classifier** (open o
 |---------|---------|-------------|
 | **Enable ML Analysis** | Off | Loads the models and runs them on every frame. The status line underneath reports what loaded: "✓ Both models loaded", "✓ Roof model only", "✓ Sky model only", or an error marked with ✗. |
 | **Skip Sky Features When Roof Closed** | On | While the roof classifier reports Closed, star detection and the [All-Sky Overlay](All-Sky-Overlay) (including its background calibration) are paused. Turn this off if you have no roof, such as an open-air all-sky camera, so a mistaken "Closed" reading can't switch those features off. |
-| **ASCOM Safety File** | Off | Writes the roof status to a text file for NINA's GenericFile safety monitor. See below. |
-| **File Path** | `%LOCALAPPDATA%\PFRSentinel\RoofStatusFile.txt` | Where the safety file is written. Type a path or use **Browse**. |
-| **Alpaca Safety Monitor** | Off | Serves the same fail-safe roof status as an ASCOM Alpaca SafetyMonitor on port 11111. See [ML Models](ML-Models#alpaca-safety-monitor). |
+
+> **New in the next release** — not available in version 3.8.0 or earlier. **ASCOM Safety File**, its **File Path** and **Alpaca Safety Monitor** have moved to the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab, with **Imaging Conditions** beside them. Their settings carry over; this card keeps a note with an **Open** button. In 3.8.0 and earlier they are in this card.
 
 When ML is enabled, the tokens `{ROOF_STATUS}`, `{SKY_CONDITION}`, `{STARS_VISIBLE}` and `{STAR_DENSITY}` can be used in text overlays. See [Overlay Tokens](Overlay-Tokens).
 
 ### ASCOM Safety File
 
-Point NINA's **GenericFile** safety monitor at the file and configure it with:
+Set up in the **Roof Safety Monitor** card on the [NINA & ASCOM](NINA-and-ASCOM) tab (this card in 3.8.0 and earlier). Point NINA's **GenericFile** safety monitor at the file and configure it with:
 
 - Preamble: `Roof Status:`
 - Safe trigger: `OPEN`

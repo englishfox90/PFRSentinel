@@ -77,6 +77,41 @@ def _allsky_buffer_dumps_in_tmp(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(app_config, "get_allsky_buffer_dir", _dump_dir)
 
 
+@pytest.fixture(autouse=True)
+def _imaging_conditions_isolated(tmp_path_factory, monkeypatch):
+    """A fresh imaging-conditions feed and store per test, with the learned
+    star baseline kept out of the developer's real app-data: every pipeline
+    test that processes a frame feeds the process-wide singleton."""
+    from services.imaging_conditions import (
+        conditions_history, reset_conditions_store, reset_imaging_conditions_feed,
+        star_baseline)
+    from services.imaging_conditions.nina_checkin import reset_nina_checkins
+    holder = []
+    events_dir = []
+
+    def _events_path():
+        if not events_dir:
+            events_dir.append(str(tmp_path_factory.mktemp("imaging_conditions_events")))
+        return os.path.join(events_dir[0], "events.json")
+
+    def _path():
+        if not holder:
+            holder.append(str(tmp_path_factory.mktemp("imaging_conditions") / "star_baseline.json"))
+        return holder[0]
+
+    monkeypatch.setattr(star_baseline, "default_baseline_path", _path)
+    monkeypatch.setattr(conditions_history, "default_events_path", _events_path)
+    reset_imaging_conditions_feed()
+    reset_conditions_store()
+    conditions_history.reset_conditions_history()
+    reset_nina_checkins()
+    yield
+    reset_imaging_conditions_feed()
+    reset_conditions_store()
+    conditions_history.reset_conditions_history()
+    reset_nina_checkins()
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files"""

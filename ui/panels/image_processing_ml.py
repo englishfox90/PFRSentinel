@@ -2,16 +2,15 @@
 ML Models + Community Data Contribution sections of the Image Processing panel.
 Extracted from image_processing.py to keep the main panel under the size cap.
 """
-import os
 import webbrowser
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QFileDialog, QMessageBox
+    QMessageBox
 )
 from PySide6.QtCore import Signal, QTimer
 from qfluentwidgets import (
-    CaptionLabel, PushButton, LineEdit, PrimaryPushButton
+    CaptionLabel, PushButton, PrimaryPushButton
 )
 
 from ..theme.tokens import Colors, Spacing
@@ -21,7 +20,6 @@ from services.logger import app_logger
 from services.ml_service import get_ml_service
 from services.ml_data_collector import get_ml_collector, UPLOAD_FORM_URL
 from services.reveal_in_file_manager import reveal_path
-from services.utils_paths import get_app_data_dir
 
 
 class ImageProcessingMLSection(QWidget):
@@ -30,11 +28,12 @@ class ImageProcessingMLSection(QWidget):
 
     Owns:
     - ML enable toggle + status label
-    - ASCOM safety file output (enable, path, browse)
+    - a pointer to the NINA & ASCOM page (roof safety, imaging conditions)
     - ML data contribution toggle + status + export/upload/clear buttons
     """
 
     settings_changed = Signal()
+    open_nina_requested = Signal()
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
@@ -88,53 +87,23 @@ class ImageProcessingMLSection(QWidget):
         self.roof_gates_sky_switch.toggled.connect(self._on_roof_gates_sky_changed)
         ml_card.add_widget(self.roof_gates_sky_switch)
 
-        self.ascom_safety_switch = SwitchRow(
-            "ASCOM Safety File",
-            "Write roof status to file for NINA GenericFile safety monitor"
-        )
-        self.ascom_safety_switch.toggled.connect(self._on_ascom_safety_changed)
-        ml_card.add_widget(self.ascom_safety_switch)
-
-        ascom_path_row = QHBoxLayout()
-        ascom_path_row.setSpacing(Spacing.sm)
-
-        self.ascom_file_path = LineEdit()
-        self.ascom_file_path.setPlaceholderText(
-            os.path.join(get_app_data_dir(), 'RoofStatusFile.txt')
-        )
-        self.ascom_file_path.editingFinished.connect(self._on_ascom_path_changed)
-        ascom_path_row.addWidget(self.ascom_file_path, 1)
-
-        self.ascom_browse_btn = PushButton("Browse")
-        self.ascom_browse_btn.setFixedWidth(70)
-        self.ascom_browse_btn.clicked.connect(self._browse_ascom_path)
-        ascom_path_row.addWidget(self.ascom_browse_btn)
-
-        ascom_path_widget = QWidget()
-        ascom_path_widget.setLayout(ascom_path_row)
-        ml_card.add_row("File Path", ascom_path_widget, "Path where NINA monitors for status")
-
-        ascom_info = CaptionLabel(
-            "Configure NINA GenericFile with:\n"
-            "• Preamble: \"Roof Status:\"\n"
-            "• Safe trigger: \"OPEN\"\n"
-            "• Unsafe trigger: \"CLOSED\""
-        )
-        ascom_info.setStyleSheet(f"color: {Colors.text_muted}; padding: 8px;")
-        ascom_info.setWordWrap(True)
-        ml_card.add_widget(ascom_info)
-
-        self.alpaca_safety_switch = SwitchRow(
-            "Alpaca Safety Monitor",
-            "Serve roof safety as an ASCOM Alpaca SafetyMonitor (NINA, INDIGO A1, any Alpaca client)"
-        )
-        self.alpaca_safety_switch.toggled.connect(self._on_alpaca_safety_changed)
-        ml_card.add_widget(self.alpaca_safety_switch)
-
-        self.alpaca_safety_info = CaptionLabel("")
-        self.alpaca_safety_info.setStyleSheet(f"color: {Colors.text_muted}; padding: 8px;")
-        self.alpaca_safety_info.setWordWrap(True)
-        ml_card.add_widget(self.alpaca_safety_info)
+        # Roof safety for NINA (Alpaca SafetyMonitor, safety file) moved to
+        # the NINA & ASCOM page; same ml_models keys.
+        pointer_row = QHBoxLayout()
+        pointer_row.setContentsMargins(0, 0, 0, 0)
+        pointer_row.setSpacing(Spacing.sm)
+        pointer = CaptionLabel(
+            "Roof safety for NINA (Alpaca SafetyMonitor and the ASCOM safety file) "
+            "and Imaging Conditions are on the NINA & ASCOM page.")
+        pointer.setWordWrap(True)
+        pointer.setStyleSheet(f"color: {Colors.text_muted};")
+        pointer_row.addWidget(pointer, 1)
+        self.open_nina_btn = PushButton("Open")
+        self.open_nina_btn.clicked.connect(self.open_nina_requested.emit)
+        pointer_row.addWidget(self.open_nina_btn)
+        pointer_widget = QWidget()
+        pointer_widget.setLayout(pointer_row)
+        ml_card.add_widget(pointer_widget)
 
         layout.addWidget(ml_card)
 
@@ -278,69 +247,6 @@ class ImageProcessingMLSection(QWidget):
             else:
                 app_logger.info("Roof-closed gating of sky features disabled (no-roof/all-sky rig)")
 
-    def _on_ascom_safety_changed(self, checked):
-        if self._loading_config:
-            return
-        if self.main_window and hasattr(self.main_window, 'config'):
-            ml_config = self.main_window.config.get('ml_models', {})
-            ascom_config = ml_config.get('ascom_safety_file', {})
-            ascom_config['enabled'] = checked
-            ml_config['ascom_safety_file'] = ascom_config
-            self.main_window.config.set('ml_models', ml_config)
-            self.main_window.config.save()
-            self.settings_changed.emit()
-
-            if checked:
-                path = ascom_config.get('file_path', '')
-                app_logger.info(f"ASCOM Safety file output enabled: {path or '(no path set)'}")
-            else:
-                app_logger.info("ASCOM Safety file output disabled")
-
-    def _on_alpaca_safety_changed(self, checked):
-        if self._loading_config:
-            return
-        if self.main_window and hasattr(self.main_window, 'config'):
-            ml_config = self.main_window.config.get('ml_models', {})
-            alpaca_config = ml_config.get('alpaca_safety_monitor', {})
-            alpaca_config['enabled'] = checked
-            ml_config['alpaca_safety_monitor'] = alpaca_config
-            self.main_window.config.set('ml_models', ml_config)
-            self.main_window.config.save()
-            self._show_alpaca_safety_info(alpaca_config)
-            self.settings_changed.emit()
-
-    def _show_alpaca_safety_info(self, alpaca_config):
-        address = f"{alpaca_config.get('bind', '127.0.0.1')}:{alpaca_config.get('port', 11111)}"
-        self.alpaca_safety_info.setText(
-            f"Listening on {address}. Add \"PFR Sentinel Roof\" as an Alpaca "
-            "SafetyMonitor. Safe only after two confident Open frames; unsafe on Closed, "
-            "on uncertain frames, or when no frame has arrived for "
-            f"{alpaca_config.get('stale_after_seconds', 600) // 60} min."
-        )
-
-    def _on_ascom_path_changed(self):
-        if self._loading_config:
-            return
-        if self.main_window and hasattr(self.main_window, 'config'):
-            ml_config = self.main_window.config.get('ml_models', {})
-            ascom_config = ml_config.get('ascom_safety_file', {})
-            ascom_config['file_path'] = self.ascom_file_path.text().strip()
-            ml_config['ascom_safety_file'] = ascom_config
-            self.main_window.config.set('ml_models', ml_config)
-            self.main_window.config.save()
-            self.settings_changed.emit()
-
-    def _browse_ascom_path(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Select ASCOM Safety File Location",
-            self.ascom_file_path.text() or "",
-            "Text Files (*.txt);;All Files (*.*)"
-        )
-        if path:
-            self.ascom_file_path.setText(path)
-            self._on_ascom_path_changed()
-
     # === ML DATA CONTRIBUTION HANDLERS ===
 
     def _on_ml_contrib_changed(self, checked):
@@ -441,14 +347,6 @@ class ImageProcessingMLSection(QWidget):
             ml_config = config.get('ml_models', {})
             self.ml_enabled_switch.set_checked(ml_config.get('enabled', False))
             self.roof_gates_sky_switch.set_checked(ml_config.get('roof_gates_sky_features', True))
-
-            ascom_config = ml_config.get('ascom_safety_file', {})
-            self.ascom_safety_switch.set_checked(ascom_config.get('enabled', False))
-            self.ascom_file_path.setText(ascom_config.get('file_path', ''))
-
-            alpaca_config = ml_config.get('alpaca_safety_monitor', {})
-            self.alpaca_safety_switch.set_checked(alpaca_config.get('enabled', False))
-            self._show_alpaca_safety_info(alpaca_config)
 
             if ml_config.get('enabled', False):
                 self._initialize_ml_service()

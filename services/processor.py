@@ -236,6 +236,9 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None, 
                 metadata.update({'STAR_COUNT': 'N/A', 'FWHM': 'N/A', 'SEEING': 'N/A'})
         except Exception as e:
             app_logger.debug(f"Star detection skipped: {e}")
+        # Directory Watch frames feed GET /conditions too; FWHM is in raw_img's pixels.
+        from .imaging_conditions import observe_imaging_conditions
+        observe_imaging_conditions(metadata, config, raw_img.size)
 
         # The pre-resize, pre-crop frame is what a watch-mode reprocess and
         # Calibrate Now must start from — resizing or cropping it twice would

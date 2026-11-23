@@ -6,25 +6,25 @@ The Capture Control API lets other programs on the observatory PC start and stop
 
 ## Enabling It
 
-Both switches are in the **Web Server** card of the [Output Settings](Output-Settings) tab:
+> **New in the next release** — not available in version 3.8.0 or earlier. **Enable Capture Control API** and the **API Token** move to the **Control API** card of the [NINA & ASCOM](NINA-and-ASCOM) tab. In 3.8.0 and earlier both switches are in the **Web Server** card of the Output tab.
 
-1. Turn on **Enable Web Server**.
-2. Turn on **Enable Capture Control API**.
+1. Turn on **Enable Web Server** in the **Web Server** card of the [Output Settings](Output-Settings) tab.
+2. Turn on **Enable Capture Control API** in the **Control API** card of the [NINA & ASCOM](NINA-and-ASCOM) tab.
 
-The control routes only work while the web server is running. If you turn control on with the web server off, Sentinel warns: "Capture control needs the web server — enable it above." Changes take effect immediately on a running server; no restart is needed.
+The control routes only work while the web server is running. If you turn control on with the web server off, Sentinel warns: "Capture control needs the web server — turn it on in Output → Web Server.", and the Control API card says so until you do. Changes take effect immediately on a running server; no restart is needed.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Enable Capture Control API** | Off | Turns the control routes on. With it off, every control request is refused with `control_disabled`. |
 | **API Token** | (empty until first enabled) | The bearer token clients must send. Generated automatically the first time you enable the API. |
 
-When control is on, the API reference served by Sentinel at `/docs` (the **Open API Docs** link in the same card) and the machine-readable spec at `/openapi.json` include the control routes. When it is off, they are left out.
+When control is on, the API reference served by Sentinel at `/docs` (the **Open API Docs** link in the Web Server card) and the machine-readable spec at `/openapi.json` include the control routes. When it is off, they are left out.
 
 ---
 
 ## The API Token
 
-The **API Token** row shows the token masked, with three buttons:
+The **API Token** row shows the token masked, with three buttons (from the next release, Copy and Regenerate are icon buttons; hover for their names):
 
 | Button | What it does |
 |--------|--------------|
@@ -323,7 +323,7 @@ Rejected requests return JSON with a machine-readable `code`. Branch on `code`, 
 | 413 | `body_too_large` | Body larger than 4096 bytes. | Send only the documented fields. |
 | 401 | `unauthorized` | Token missing, malformed (not `Bearer <token>`) or wrong. | Copy the current token from the Output tab. |
 | 403 | `host_not_allowed` | `Host` header not on the allow-list. | Call from the same machine, or see [Host allow-list](#host-allow-list). |
-| 503 | `control_disabled` | **Enable Capture Control API** is off. | Turn it on in the Output tab. |
+| 503 | `control_disabled` | **Enable Capture Control API** is off. | Turn it on in the NINA & ASCOM tab (the Output tab in 3.8.0 and earlier). |
 | 503 | `control_unavailable` | Control is on and the token is valid, but Sentinel's capture controls aren't connected to the server (this shouldn't happen). Capture commands only; `/nina/target` never returns it. | Restart Sentinel. |
 | 500 | `internal_error` | Unexpected error inside Sentinel. | Check Sentinel's [Logs](Logs). |
 

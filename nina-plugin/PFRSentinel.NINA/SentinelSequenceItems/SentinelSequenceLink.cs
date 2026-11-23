@@ -66,6 +66,12 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         /// <summary>The shared link used by the sequence items.</summary>
         public static SentinelSequenceLink Instance => LazyInstance.Value;
 
+        /// <summary>
+        /// Raised after <see cref="ApplyEndpointOverride"/> re-points the link, so a cache
+        /// that describes the old address can drop it.
+        /// </summary>
+        public event Action? EndpointChanged;
+
         /// <summary>The base URL override currently in force, or empty for none.</summary>
         public string AppliedOverride {
             get { lock (gate) { return appliedOverride; } }
@@ -107,6 +113,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
             // A cached answer describes the old address and would be actively
             // misleading about the new one.
             readiness = SentinelReadiness.Unknown;
+            EndpointChanged?.Invoke();
         }
 
         /// <summary>
@@ -300,6 +307,34 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                 }
 
                 return await current.Client.PostTargetAsync(report, cancellationToken).ConfigureAwait(false);
+            } finally {
+                Release();
+            }
+        }
+
+        /// <summary>Reads <c>GET /conditions</c> over the shared client.</summary>
+        /// <param name="reloadConfiguration">
+        /// Re-read Sentinel's config.json first. Asked for only after a failure, for the
+        /// same reason as <see cref="PostTargetAsync"/>.
+        /// </param>
+        /// <param name="cancellationToken">Caller cancellation.</param>
+        /// <remarks>
+        /// Bracketed like the other calls so an endpoint swap never disposes the client
+        /// under it. Leaves the cached readiness alone: the route proves the token but not
+        /// that capture control is wired. Callers go through
+        /// <see cref="SentinelConditionsSource"/>, which throttles; nothing else should
+        /// call this directly.
+        /// </remarks>
+        public async Task<SentinelConditions> GetConditionsAsync(bool reloadConfiguration, CancellationToken cancellationToken) {
+            Endpoint current = Current();
+            Interlocked.Increment(ref inFlight);
+
+            try {
+                if (reloadConfiguration) {
+                    current.Client.ReloadConfiguration();
+                }
+
+                return await current.Client.GetConditionsAsync(cancellationToken).ConfigureAwait(false);
             } finally {
                 Release();
             }

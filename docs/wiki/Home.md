@@ -42,6 +42,7 @@ All outputs run simultaneously, and the pipeline runs unattended for days at a t
 | [Image Library](Image-Library) | A browsable archive of recent nights with a scrubber and a condition band |
 | [Timelapse](Timelapse) | Nightly H.264 video via ffmpeg, with optional [YouTube upload](YouTube-Uploads) |
 | [NINA](NINA-Integration) | A plugin that shows the pier camera inside NINA and adds Start/Stop Sentinel Capture sequencer instructions |
+| [Imaging Conditions](Imaging-Conditions) | A live "good enough to image?" verdict for the NINA plugin to pause and resume a sequence on (new in the next release) |
 | [Capture Control API](Capture-Control-API) | Token-protected HTTP endpoints to start and stop capture from scripts |
 
 ---
@@ -62,12 +63,13 @@ The navigation rail groups the pages:
 | Monitor | [Live Monitoring](Live-Monitoring) | Live preview with zoom, histogram, recent activity, and performance |
 | Monitor | [Meteor Tracker](Meteor-Detection) | Automatic meteor trail detection with thumbnails and confirmation (beta) |
 | Image | [Capture](Capture-Settings) | Capture mode, camera settings, and scheduled capture |
-| Image | [Image Processing](Image-Processing) | Resize, auto-stretch (MTF), brightness and saturation, ML models, the ASCOM safety file, and Output Framing (next release) |
+| Image | [Image Processing](Image-Processing) | Resize, auto-stretch (MTF), brightness and saturation, ML models, and Output Framing (next release) |
 | Image | [Overlays](Overlay-Settings) | Text, image, and compass overlays with live preview |
 | Image | [All-Sky](All-Sky-Overlay) | Constellations, stars, deep-sky objects and planets on a fisheye frame, with automatic and guided calibration |
-| Publish | [Output](Output-Settings) | File output, web server, capture control API, NINA plugin, Discord, Hermes, and Image Library settings |
+| Publish | [Output](Output-Settings) | File output, web server, Discord, Hermes, and Image Library settings |
 | Publish | [Timelapse](Timelapse) | Nightly timelapse recording and YouTube upload |
 | Publish | [Library](Image-Library) | Browse past nights frame by frame |
+| Automation | [NINA & ASCOM](NINA-and-ASCOM) | NINA plugin, capture control API token, imaging conditions, and the roof safety monitor and safety file (next release; on Output and Image Processing in 3.8.0) |
 | — | [Logs](Logs) | Application log viewer, and [Diagnostics Export](Diagnostics-Export) from the next release |
 | — | [Settings](Settings) | Theme, start at login, system tray, weather API and coordinates, analytics, and updates |
 

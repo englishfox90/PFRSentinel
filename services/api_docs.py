@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import html as _html
 
-from . import api_target
+from . import api_conditions, api_target
 from .api_control import CONTROL_RESULT_FIELDS, CONTROL_ROUTES
 from .api_status import CAPTURE_FIELDS
 
@@ -389,6 +389,18 @@ def build_openapi_spec(*, image_path: str = "/latest", status_path: str = "/stat
                                 "reasons": {"type": "array", "items": {"type": "string"}},
                             },
                         },
+                        "conditions": {
+                            "type": "object",
+                            "description": "Compact imaging-conditions verdict; the full "
+                                           "payload is GET /conditions (bearer token).",
+                            "properties": {
+                                "imaging_ok": {"type": "boolean"},
+                                "reasons": {"type": "array", "items": {"type": "string"}},
+                                "changed_at": {"type": "string", "format": "date-time",
+                                               "nullable": True},
+                                "stale": {"type": "boolean"},
+                            },
+                        },
                     },
                 }
             }
@@ -404,6 +416,8 @@ def build_openapi_spec(*, image_path: str = "/latest", status_path: str = "/stat
         spec["components"]["schemas"].update(_control_schemas())
         spec["paths"].update(api_target.openapi_paths())
         spec["components"]["schemas"].update(api_target.openapi_schemas())
+        spec["paths"].update(api_conditions.openapi_paths())
+        spec["components"]["schemas"].update(api_conditions.openapi_schemas())
         spec["components"].setdefault("securitySchemes", {})["bearerAuth"] = {
             "type": "http", "scheme": "bearer",
             "description": (
@@ -587,6 +601,23 @@ identical regardless of destination.</p>
 """
 
 
+def _render_conditions_section(spec: dict) -> str:
+    """Reason codes of GET /conditions, shown only when the route is served."""
+    if api_conditions.CONDITIONS_PATH not in spec.get("paths", {}):
+        return ""
+    field_rows = [
+        f"<tr><td class='path'>{_esc(name)}</td><td class='type'>{_esc(typ)}</td>"
+        f"<td>{_esc(desc)}</td></tr>"
+        for name, typ, desc in api_conditions.field_rows()
+    ]
+    rows = [f"<tr><td class='path'>{_esc(code)}</td><td>{_esc(text)}</td></tr>"
+            for code, text in api_conditions.REASON_CODES]
+    return ("<h2><code>/conditions</code> fields</h2>"
+            + _html_table(["Field", "Type", "Description"], field_rows)
+            + "<h2><code>/conditions</code> &rarr; <code>reasons</code> values</h2>"
+            + _html_table(["Code", "Meaning"], rows))
+
+
 def render_docs_html(spec: dict) -> str:
     """Render the OpenAPI spec to a self-contained HTML reference page."""
     info = spec.get("info", {})
@@ -651,5 +682,6 @@ def render_docs_html(spec: dict) -> str:
 <h2>Example <code>/status</code> response</h2>
 <pre>{_esc(_EXAMPLE_STATUS)}</pre>
 
+{_render_conditions_section(spec)}
 {_render_webhook_section(spec)}
 </body></html>"""
