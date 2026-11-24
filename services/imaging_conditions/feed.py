@@ -314,8 +314,15 @@ def reset_imaging_conditions_feed() -> None:
 
 def observe_imaging_conditions(metadata: dict, config, frame_size=None) -> None:
     """The pipelines' one-line hook. Never raises: conditions are advisory to
-    the capture path and must not cost it a frame."""
+    the capture path and must not cost it a frame. Leaves the frame's grade
+    on ``metadata`` for the image library (``frame_grade.GRADE_KEY``)."""
+    record = None
     try:
-        get_imaging_conditions_feed().observe(metadata, config, frame_size)
+        record = get_imaging_conditions_feed().observe(metadata, config, frame_size)
     except Exception as e:
         app_logger.debug(f"Imaging conditions update skipped: {e}")
+    try:
+        from .frame_grade import stamp_frame_grade
+        stamp_frame_grade(metadata, record)
+    except Exception as e:
+        app_logger.debug(f"Imaging conditions grade not recorded: {e}")

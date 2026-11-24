@@ -131,9 +131,28 @@ To the right of the preview, the **CURRENT FRAME** panel shows a condition badge
 
 Fields with no data show "—".
 
+### Imaging Conditions Grade
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+Under the frame details, **IMAGING CONDITIONS** shows what [Imaging Conditions](Imaging-Conditions) reported to NINA when that frame was taken. Scrub to a time to see why imaging was paused then.
+
+| Line | Description |
+|------|-------------|
+| Verdict | **OK** (green) or **Not OK** followed by the main reason, e.g. "Not OK · Cloud cover high" (amber). "Not OK · Warming up" and "Not OK · Recovering" (blue) mean the sky was being checked or imaging was waiting for a run of good frames. The reasons use the same words as the IMAGING tile on Live Monitoring. |
+| Also | Any further reasons for the same frame. |
+| This frame alone | Shown when the frame's own result differed from the verdict: one bad frame does not pause imaging, and one good frame does not resume it. |
+| Stars at N% of clear sky | The frame's star index against the clear-sky baseline learned for your camera, with the Moon state that baseline was read for. Left out while the baseline was still being learned. |
+
+The grade is stored with the frame when it is captured and never recalculated, so changing the sensitivity later does not change what past frames show. A frame shows "—" when it was not graded: Imaging Conditions was off, the frame was archived in headless mode or by version 3.8.0 or earlier. A frame reprocessed after a settings change keeps the grade of the capture it came from.
+
+The night's header, and its card in the session list, show the share of graded frames that were OK and the most common reason for the rest, e.g. "Imaging OK on 82% of 1,400 graded frames · mostly Cloud cover high". Nights with no graded frames show nothing.
+
+The `/library` web manifest carries the same values per image: `imaging_ok` and `frame_ok` (1, 0, or null when not graded), `imaging_reasons` (comma-separated reason codes, as in `/conditions`), `clear_sky_ratio` and `moon_bin`.
+
 ### Events Tonight
 
-Below the frame details, **EVENTS TONIGHT** lists what happened during the night in time order:
+Below the frame details and the imaging-conditions grade, **EVENTS TONIGHT** lists what happened during the night in time order:
 
 | Event | Description |
 |-------|-------------|

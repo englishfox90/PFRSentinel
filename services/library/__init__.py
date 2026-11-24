@@ -20,6 +20,7 @@ from datetime import datetime
 
 from ..logger import app_logger
 from ..image_resize import downscale_to_jpeg
+from ..imaging_conditions.frame_grade import grade_columns
 from .store import LibraryStore, get_library_root
 from .index import LibraryIndex
 from . import retention
@@ -374,4 +375,7 @@ class ImageLibrary:
             "star_count": _parse_int(m.get("STAR_COUNT")),
             "seeing": _clean_na(m.get("SEEING")),
             "fwhm": _clean_na(m.get("FWHM")),
+            # The imaging-conditions grade given at capture; NULLs when the
+            # frame was not graded (conditions off, headless, older builds).
+            **grade_columns(m),
         }

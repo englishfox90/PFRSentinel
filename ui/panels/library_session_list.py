@@ -20,6 +20,7 @@ from ..theme.tokens import Colors, Spacing, Layout
 from ..theme.icons import mdi
 from .library_band import ConditionBand
 from .library_format import fmt_clock, fmt_temp_c, fmt_gap
+from ..components.library_grade_text import night_grade_text
 
 COVER_SIZE = 84  # px — square cover thumbnail on each session card
 
@@ -233,6 +234,9 @@ class _SessionCard(CardWidget):
         seeing = self._session.get("best_seeing")
         if seeing:
             parts.append(f"sky quality {seeing}")
+        graded = night_grade_text(self._session, short=True)
+        if graded:
+            parts.append(graded)
         clear_pct = self._session.get("clear_pct")
         stats = CaptionLabel("      ".join(parts))
         stats.setStyleSheet(f"color: {Colors.text_muted};")

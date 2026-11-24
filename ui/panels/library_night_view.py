@@ -19,12 +19,15 @@ from qfluentwidgets import PushButton, CaptionLabel, BodyLabel, StrongBodyLabel
 
 from services.library import sessions as S
 from services.library import events as E
+from services.library.grade_summary import summarize_grades
 from ..theme.tokens import Colors, Spacing, Layout
 from ..theme.icons import mdi
 from .library_band import (
     STATUS_COLORS, STATUS_SHORT, EVENT_LABELS, EVENT_TEXT_COLORS
 )
 from .library_scrubber import Scrubber
+from .library_grade_block import FrameGradeBlock
+from ..components.library_grade_text import night_grade_text
 from .library_format import (
     fmt_clock, fmt_gap, fmt_exposure, fmt_clouds, fmt_count_suffix
 )
@@ -97,6 +100,10 @@ class NightView(QWidget):
         self.issue_badge = CaptionLabel("")
         self.issue_badge.setVisible(False)
         row.addWidget(self.issue_badge)
+
+        self.grade_label = CaptionLabel("")
+        self.grade_label.setStyleSheet(f"color: {Colors.text_secondary};")
+        row.addWidget(self.grade_label)
         row.addStretch()
         return row
 
@@ -173,6 +180,9 @@ class NightView(QWidget):
             self.meta_grid.addWidget(host, i // 2, i % 2)
             self._meta_values[key] = val
         v.addLayout(self.meta_grid)
+
+        self.grade_block = FrameGradeBlock()
+        v.addWidget(self.grade_block)
 
         divider = QFrame()
         divider.setFixedHeight(1)
@@ -254,6 +264,7 @@ class NightView(QWidget):
         self._pending_live = {}
         self.title_label.setText(f"Night · {session.get('key', '')}")
         self._update_issue_badge(session)
+        self.grade_label.setText(night_grade_text(session))
         self.hero_image.setText("Loading night…")
         self.hero_image.setStyleSheet(f"color: {Colors.text_muted};")
         self.overlay_label.setText("")
@@ -268,6 +279,7 @@ class NightView(QWidget):
         self._id_index = {row["id"]: i for i, row in enumerate(self._frames)}
         self._meteors = payload.get("meteors", [])
 
+        self.grade_label.setText(night_grade_text(summarize_grades(self._frames)))
         if not self._frames:
             self.hero_image.setText("No frames archived for this night.")
             # Frames can be pruned between listing and clicking the card. Clear
@@ -333,6 +345,7 @@ class NightView(QWidget):
         events = E.build_timeline(self._frames, gaps, self._meteors)
         self.scrubber.update_data(self._frames, events)
         self._render_event_list(events)
+        self.grade_label.setText(night_grade_text(summarize_grades(self._frames)))
 
         if following:
             idx = len(self._frames) - 1
@@ -471,6 +484,7 @@ class NightView(QWidget):
         self._set_meta("camera", str(frame.get("camera") or "—"))
         w, h = frame.get("width"), frame.get("height")
         self._set_meta("res", f"{w}×{h}" if w and h else "—")
+        self.grade_block.set_frame(frame)
 
         self.cond_badge.setText(STATUS_SHORT.get(status, "Unknown"))
         color = STATUS_COLORS.get(status, Colors.gray_6)
