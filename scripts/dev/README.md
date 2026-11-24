@@ -9,6 +9,7 @@ Subdirectories:
 Also here:
 - `test_usb_reset.py` — interactive USB reset test, requires a physical camera. Not part of the pytest suite.
 - `alpaca_camera_sim.py` (+ `alpaca_sim/`) — an ASCOM Alpaca camera simulator: a real HTTP Alpaca server, the Management API and UDP discovery on 32227, serving a night-sky scene whose brightness follows Duration × Gain, in ImageBytes or JSON. Use it to try Alpaca Camera mode (issue #43) without hardware. See below.
+- `render_library_grade.py` — screenshots of the Library's imaging-conditions views: builds a synthetic night (clear → cloudy → clear, a few ungraded frames, drawn thumbnails) in a temporary library, opens the real Library panel with the app theme, and writes `night_clear.png`, `night_cloudy.png`, `night_ungraded.png` and `session_list.png` at 2x. Offscreen; never touches the real app-data folder. `python scripts/dev/render_library_grade.py --out <dir>`
 
 ## Testing Alpaca Camera mode with the simulator
 
