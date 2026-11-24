@@ -86,7 +86,7 @@ def test_learning_and_measurements():
     assert learning_progress(learning) == (
         "Learning your clear sky with the Moon up, 25–50% lit — 12 of 30 clear frames", 12, 30)
     assert learning_progress(snap())[0] == \
-        "Clear-sky baseline learned with the Moon down: star index 315"
+        "Clear-sky baseline learned with the Moon down: 315 stars"
     assert learning_progress({'enabled': True, 'frames_considered': 0}) is None
     assert measurements_line(snap()) == "Stars 131/315 · Cloud 58% · FWHM 2.9 px"
     assert measurements_line({'enabled': True}) == ""
@@ -161,7 +161,8 @@ def test_live_panel_fills_every_part(qapp):
     assert len(shown) == 2 and shown[0][2].full_text() == "Paused — cloud moving in"
     assert shown[1][3].text() == "40 min"
     assert panel.no_events_label.isHidden()
-    assert "Star index" in panel.measurements_label.toolTip()
+    tip = panel.measurements_label.toolTip()
+    assert "Stars: " in tip and "SEEING tile" in tip and "index" not in tip.lower()
     _dispose(qapp, panel)
 
 

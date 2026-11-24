@@ -82,7 +82,6 @@ def get(**kw):
 def published_snapshot():
     from services.imaging_conditions import ImagingConditionsFeed
     from services.imaging_conditions.star_baseline import StarBaseline
-    from services.sky_evidence import EVIDENCE_KEY
     import tempfile
     import os
     store = ConditionsStore()
@@ -91,7 +90,7 @@ def published_snapshot():
                                  sun_alt_fn=lambda c: -30.0,
                                  moon_fn=lambda: {'moon_is_up': False, 'illumination_pct': 1})
     feed.observe({'_ML_RESULTS': {'roof_status': 'Open', 'roof_confidence': 0.9},
-                  EVIDENCE_KEY: {'star_count': 10}}, {}, (100, 100))
+                  'STAR_COUNT': '10'}, {}, (100, 100))
     return store.snapshot()
 
 

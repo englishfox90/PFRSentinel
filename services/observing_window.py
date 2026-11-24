@@ -329,8 +329,9 @@ def _no_star_evidence(metadata, signals, evidence, allsky_cfg, feature) -> bool:
         blocked = _no_stars_streak.observe(no_stars, strong)
     if blocked:
         app_logger.debug(
-            f"{feature} suppressed: roof reads Open but {star_count} stars detected "
-            f"(floor {floor})")
+            f"{feature} suppressed: roof reads Open but the gate's evidence scan "
+            f"found {star_count} sources on its reduced plane (floor {floor}; "
+            f"internal measure, not the frame's star count)")
     return blocked
 
 
