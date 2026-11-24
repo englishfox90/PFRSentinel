@@ -50,7 +50,7 @@ class NinaAscomPanel(NinaPluginCardMixin, QScrollArea):
         layout.addWidget(self.control_card)
 
         self.conditions_card = ImagingConditionsCard()
-        self.conditions_card._toggle_expanded(None)
+        self.conditions_card.set_expanded(True)
         layout.addWidget(self.conditions_card)
 
         self.safety_card = RoofSafetyCard()

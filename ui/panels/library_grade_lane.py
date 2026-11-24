@@ -2,9 +2,11 @@
 Library — the imaging-conditions lane of the night scrubber (painting only).
 
 Drawn by ``Scrubber`` under its condition band, on the same frame-index
-axis: each frame tinted OK / not OK / not graded, a solid strip of the same
-colours along the bottom, and the clear-sky ratio as a line where it was
-known. The lane is rendered once into a pixmap per night and width; moving
+axis: a strip along the bottom coloured OK / not OK / not graded, and the
+clear-sky ratio as a line above it where it was known. The area behind the
+line is left neutral: the condition band directly above uses the same green
+and amber for the sky class, and a second tinted block under it read as one
+doubled band. The lane is rendered once into a pixmap per night and width; moving
 the playhead only blits it and draws the marker.
 """
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -18,7 +20,6 @@ from .library_format import fmt_clock
 LANE_H = 40
 _STRIP_H = 5
 _TRACE_PAD = 4
-_TINT_ALPHA = 46
 
 
 def lane_colors():
@@ -116,11 +117,8 @@ class GradeLane:
         for frac0, frac1, state in self._timeline['segments']:
             x0, x1 = frac0 * w, frac1 * w
             rect_w = max(1.0, x1 - x0)
-            color = QColor(colors[state])
-            p.fillRect(QRectF(x0, LANE_H - _STRIP_H, rect_w, _STRIP_H), color)
-            if state != GT.GRADE_UNGRADED:
-                color.setAlpha(_TINT_ALPHA)
-                p.fillRect(QRectF(x0, 0, rect_w, LANE_H - _STRIP_H), color)
+            p.fillRect(QRectF(x0, LANE_H - _STRIP_H, rect_w, _STRIP_H),
+                       QColor(colors[state]))
 
         # 100 % of clear sky, as a guide for the trace.
         guide = QPen(QColor(Colors.gray_8), 1, Qt.DotLine)

@@ -15,7 +15,7 @@ REASON_TEXT = {
     'stars_dropping': "Stars dropping",
     'fwhm_high': "Stars soft (FWHM)",
     'stale': "No recent frames",
-    'warming_up': "Warming up",
+    'warming_up': "Waiting for first frame",
     'recovering': "Recovering",
     'disabled': "Off",
 }
@@ -62,9 +62,13 @@ def summarize_conditions(snapshot: dict, capturing=None):
     """``(text, tone)`` for a one-line verdict; tones are the status strip's.
 
     ``capturing`` is whether capture is running (None = not known). With
-    capture stopped there is nothing to warm up, so a store that never saw
-    a frame reads as idle, and a stale one says capture stopped rather than
-    implying frames went missing.
+    capture stopped there is no first frame to wait for, so a store that
+    never saw a frame reads as idle, and a stale one says capture stopped
+    rather than implying frames went missing.
+
+    ``warming_up`` means only "no frame judged yet since the start": the
+    first good frame sets OK (``verdict_hysteresis``), so there is no
+    good-frame count to show for it.
     """
     if not isinstance(snapshot, dict) or not snapshot.get('enabled', False):
         return "Off", 'muted'
@@ -73,7 +77,7 @@ def summarize_conditions(snapshot: dict, capturing=None):
         cloud = snapshot.get('cloud_cover_pct')
         return ("OK" if cloud is None else f"OK · {cloud:.0f}% cloud"), 'ok'
     if capturing is False:
-        if _never_judged(snapshot):
+        if _never_judged(snapshot) or reasons[:1] == ['warming_up']:
             return "Idle", 'muted'
         if snapshot.get('stale'):
             return "Paused · Capture stopped", 'muted'
@@ -95,14 +99,14 @@ def secondary_text(snapshot: dict, capturing=None, good_needed=None) -> str:
     if snapshot.get('imaging_ok'):
         return ""
     if snapshot.get('stale'):
-        return "Reported to NINA as not OK until frames arrive again"
+        return "NINA gets no verdict until frames arrive again"
     reasons = list(snapshot.get('reasons') or [])
     if not reasons:
         return ""
     if reasons[0] == 'warming_up':
-        if capturing is False and _never_judged(snapshot):
+        if capturing is False:
             return ""
-        return f"{_good_so_far(snapshot, good_needed)} before imaging is OK"
+        return "No frame judged yet, so NINA is not held back"
     if reasons[0] == 'recovering':
         return f"{_good_so_far(snapshot, good_needed)} to resume"
     rest = [reason_text(r) for r in reasons[1:]]

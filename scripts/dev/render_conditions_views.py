@@ -8,6 +8,7 @@ stylesheet, saved at 2x:
                               learned, target near a bright high Moon
     live_panel_learning.png   the same while this Moon bin is still learning
     live_panel_far.png        the same with the target well away from the Moon
+    live_panel_collapsed.png  the panel collapsed to its rail
     conditions_card.png       the NINA & ASCOM Imaging Conditions card,
                               expanded with Advanced open
 
@@ -155,9 +156,16 @@ def render(out_dir):
                        now=NOW)
         shoot(panel, name, height=640)
 
+    rail = ConditionsLivePanel()
+    samples, events = history()
+    rail.set_view(snapshot(), capturing=True, good_needed=3, samples=samples, events=events,
+                  checkins=checkins, now=NOW)
+    rail.set_collapsed(True)
+    shoot(rail, "live_panel_collapsed.png", height=640)
+
     card = ImagingConditionsCard()
     card.load(dict(DEFAULT_CONFIG['imaging_conditions'], enabled=True))
-    card._toggle_expanded(None)
+    card.set_expanded(True)
     card.set_advanced_open(True)
     card.show_conditions(snapshot(), capturing=True)
     shoot(card, "conditions_card.png", width=900)

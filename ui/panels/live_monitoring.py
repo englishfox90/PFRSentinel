@@ -8,16 +8,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer, Slot, QSize
 from PySide6.QtGui import QFont, QPainter, QColor, QPen
-from qfluentwidgets import (CardWidget, SubtitleLabel, BodyLabel, CaptionLabel, ProgressBar,
-                            TransparentPushButton)
+from qfluentwidgets import SubtitleLabel, BodyLabel, CaptionLabel, ProgressBar
 
 from PIL import Image
 import numpy as np
 from datetime import datetime
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
-from ..components.cards import MonitoringCard
-from ..theme.icons import mdi
+from ..components.cards import MonitoringCard, StaticCard
 from .conditions_live_panel import ConditionsLivePanel
 from .preview_widget import PreviewWidget  # re-exported for existing callers
 
@@ -296,7 +294,7 @@ class LiveMonitoringPanel(QScrollArea):
         layout.setSpacing(Spacing.card_gap)
         
         # === PREVIEW CARD ===
-        preview_card = CardWidget()
+        preview_card = StaticCard()
         preview_layout = QVBoxLayout(preview_card)
         preview_layout.setContentsMargins(Spacing.card_padding, Spacing.card_padding, 
                                          Spacing.card_padding, Spacing.card_padding)
@@ -311,12 +309,6 @@ class LiveMonitoringPanel(QScrollArea):
         header_layout.addWidget(preview_header)
         
         header_layout.addStretch()
-
-        self.conditions_button = TransparentPushButton(mdi('telescope'), "Conditions")
-        self.conditions_button.setToolTip("Show imaging conditions")
-        self.conditions_button.clicked.connect(lambda: self.set_conditions_open(True, emit=True))
-        self.conditions_button.hide()
-        header_layout.addWidget(self.conditions_button)
 
         # Countdown label - uses retainSizeWhenHidden to prevent layout shift
         self.countdown_label = BodyLabel("")
@@ -359,12 +351,14 @@ class LiveMonitoringPanel(QScrollArea):
         self.conditions_panel = ConditionsLivePanel()
         self.conditions_panel.collapse_requested.connect(
             lambda: self.set_conditions_open(False, emit=True))
+        self.conditions_panel.expand_requested.connect(
+            lambda: self.set_conditions_open(True, emit=True))
         self.conditions_panel.hide()
         preview_row.addWidget(self.conditions_panel)
         layout.addLayout(preview_row, 3)  # Larger stretch
         
         # === HISTOGRAM CARD ===
-        self.hist_card = CardWidget()
+        self.hist_card = StaticCard()
         hist_layout = QVBoxLayout(self.hist_card)
         hist_layout.setContentsMargins(Spacing.card_padding, Spacing.card_padding,
                                        Spacing.card_padding, Spacing.card_padding)
@@ -380,7 +374,7 @@ class LiveMonitoringPanel(QScrollArea):
         layout.addWidget(self.hist_card)
         
         # === ACTIVITY LOG CARD ===
-        self.log_card = CardWidget()
+        self.log_card = StaticCard()
         log_layout = QVBoxLayout(self.log_card)
         log_layout.setContentsMargins(Spacing.card_padding, Spacing.card_padding,
                                       Spacing.card_padding, Spacing.card_padding)
@@ -472,8 +466,19 @@ class LiveMonitoringPanel(QScrollArea):
         return self._conditions_open
 
     def _apply_conditions_visibility(self):
-        self.conditions_panel.setVisible(self._preview_only and self._conditions_open)
-        self.conditions_button.setVisible(self._preview_only and not self._conditions_open)
+        # Collapsed, the panel stays as a rail that still shows the verdict.
+        self.conditions_panel.set_collapsed(not self._conditions_open)
+        self.conditions_panel.setVisible(self._preview_only)
+        self._fit_conditions_width()
+
+    def _fit_conditions_width(self):
+        # The preview keeps at least as much room as the panel takes.
+        self.conditions_panel.set_expanded_width(
+            (self.viewport().width() - 2 * Spacing.base - Spacing.card_gap) // 2)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_conditions_width()
     
     def update_exposure_progress(self, total_sec: float, remaining_sec: float):
         """Update exposure progress in preview card header"""

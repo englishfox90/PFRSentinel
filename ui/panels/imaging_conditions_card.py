@@ -111,7 +111,8 @@ class ImagingConditionsCard(CollapsibleCard):
 
         self.enabled_switch = SwitchRow(
             "Judge imaging conditions",
-            "Off: NINA is always told not to image (reason: disabled)")
+            "Off: NINA gets no verdict (reason: disabled). The plugin's “No verdict "
+            "= bad” setting decides whether a sequence then waits or carries on")
         self.enabled_switch.toggled.connect(self._emit_changed)
         self.add_widget(self.enabled_switch)
 

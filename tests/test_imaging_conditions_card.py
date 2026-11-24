@@ -69,7 +69,8 @@ def test_summaries():
                                  'cloud_cover_pct': 12.0}) == ("OK · 12% cloud", 'ok')
     assert summarize_conditions({'enabled': True, 'stale': True, 'reasons': ['stale']}) == \
         ("Paused · No recent frames", 'warn')
-    assert summarize_conditions({'enabled': True, 'reasons': ['warming_up']}) == ("Warming up", 'info')
+    assert summarize_conditions({'enabled': True, 'reasons': ['warming_up']}) == (
+        "Waiting for first frame", 'info')
     assert summarize_conditions({'enabled': True, 'reasons': ['cloud_cover_high']}) == \
         ("Paused · Cloud cover high", 'warn')
 
@@ -107,8 +108,10 @@ def test_controller_saves_refreshes_and_resets(card, tmp_path):
     assert card.verdict_label.text() == "Now: Idle"
     Window.is_capturing = True
     controller.refresh()
-    assert strip.seen == ("Warming up", 'info')
-    assert card.verdict_label.text() == "Now: Warming up"
+    assert strip.seen == ("Waiting for first frame", 'info')
+    assert card.verdict_label.text() == "Now: Waiting for first frame"
+    # No good-frame count: the first good frame is enough at a start.
+    assert card.reasons_label.text() == "No frame judged yet, so NINA is not held back"
 
     card.cloud_spin.setValue(65)
     block = Config(str(tmp_path / 'config.json')).get('imaging_conditions')
@@ -190,11 +193,29 @@ def test_idle_until_capture_runs():
     assert summarize_conditions(cold, capturing=False) == ("Idle", 'muted')
     assert secondary_text(cold, capturing=False) == ""
     assert detail_lines(cold) == ""
-    assert summarize_conditions(cold, capturing=True) == ("Warming up", 'info')
-    assert summarize_conditions(cold) == ("Warming up", 'info')
-    warming = dict(cold, frames_considered=2, updated_at='2026-11-23T02:24:19Z', good_streak=2)
-    assert summarize_conditions(warming, capturing=True) == ("Warming up", 'info')
-    assert secondary_text(warming, capturing=True).startswith("2 good frames")
+    assert summarize_conditions(cold, capturing=True) == ("Waiting for first frame", 'info')
+    assert summarize_conditions(cold) == ("Waiting for first frame", 'info')
+    for text in (secondary_text(cold, capturing=True), secondary_text(cold)):
+        assert text == "No frame judged yet, so NINA is not held back"
+        assert "good frame" not in text
+    # A start under a bad sky is `recovering`, and that keeps its count.
+    recovering = dict(cold, reasons=['recovering'], frames_considered=2, good_streak=2,
+                      updated_at='2026-11-23T02:24:19Z')
+    assert summarize_conditions(recovering, capturing=True) == ("Recovering", 'info')
+    assert secondary_text(recovering, True, 3) == "2 of 3 good frames in a row to resume"
+
+
+def test_off_and_stale_are_no_verdict_for_nina_not_a_refusal(qapp):
+    """The plugin reads `disabled` and `stale` as no verdict, which its own
+    "No verdict = bad" setting decides — never "told not to image"."""
+    card = ImagingConditionsCard()
+    from qfluentwidgets import CaptionLabel
+    texts = " ".join(label.text() for label in card.findChildren(CaptionLabel))
+    assert "NINA gets no verdict (reason: disabled)" in texts and "No verdict = bad" in texts
+    assert "told not to image" not in texts
+    stale = _snap(stale=True, reasons=['stale'])
+    assert secondary_text(stale) == "NINA gets no verdict until frames arrive again"
+    card.deleteLater()
 
 
 def test_learning_line_hidden_in_daylight_and_without_a_star_count():

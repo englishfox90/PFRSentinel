@@ -22,7 +22,7 @@ CAUSE_TEXT = {
     'sky_unknown': "no sky reading",
     'stale': "no new frames",
     'restarted': "Sentinel restarted",
-    'warming_up': "checking the sky",
+    'warming_up': "no frame judged yet",
     'recovering': "waiting for steady clear frames",
 }
 
@@ -69,8 +69,8 @@ def verdict_sentence(snapshot: dict, capturing=None, good_needed=None, events=No
     """``(sentence, tone)``. ``events`` newest first, as the history gives them."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     if not snapshot.get('enabled', False):
-        return ("Off — NINA is told not to image. Turn Imaging Conditions on in "
-                "NINA & ASCOM."), 'muted'
+        return ("Off — Sentinel is not judging the sky, so NINA gets no verdict. "
+                "Turn Imaging Conditions on in NINA & ASCOM."), 'muted'
     never = not snapshot.get('updated_at') and not snapshot.get('frames_considered')
     reasons = list(snapshot.get('reasons') or [])
     since = local_clock(snapshot.get('changed_at'))
@@ -82,13 +82,16 @@ def verdict_sentence(snapshot: dict, capturing=None, good_needed=None, events=No
         last = local_clock(snapshot.get('updated_at'))
         at = f" since {last}" if last else ""
         if capturing is False:
-            return (f"Capture stopped — no frames{at}, so NINA is told not to "
-                    "image."), 'muted'
-        return f"No new frames{at} — NINA is told to pause.", 'warn'
+            return f"Capture stopped — no frames{at}, so NINA gets no verdict.", 'muted'
+        return f"No new frames{at} — NINA gets no verdict until they resume.", 'warn'
     head = reasons[0] if reasons else ''
     if head == 'warming_up':
-        return (f"Checking the sky — {_good_needed_text(snapshot, good_needed)} "
-                "before imaging is OK."), 'info'
+        # No frame has been judged since the start: nothing has said the sky
+        # is bad, and the first good frame is enough (verdict_hysteresis).
+        if capturing is False:
+            return "Idle — start capture to judge the sky.", 'muted'
+        return ("Waiting for the first frame — nothing judged yet, so NINA is "
+                "not held back."), 'info'
     if head == 'daylight':
         sun = snapshot.get('sun_altitude_deg')
         where = f" (sun at {sun:.0f}°)" if isinstance(sun, (int, float)) else ""

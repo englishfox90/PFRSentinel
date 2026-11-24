@@ -240,6 +240,12 @@ class _SessionCard(CardWidget):
         clear_pct = self._session.get("clear_pct")
         stats = CaptionLabel("      ".join(parts))
         stats.setStyleSheet(f"color: {Colors.text_muted};")
+        if graded:
+            stats.setToolTip(
+                "imaging OK: the share of graded frames on which Imaging Conditions "
+                "told NINA it was OK to image.\nIt also counts the roof, twilight, "
+                "soft stars and the frames needed to resume after a pause, so it is "
+                "not the same figure as the share of frames with a clear sky.")
 
         wrap = QHBoxLayout()
         # Small left indent so the stats line isn't flush against the card edge.
@@ -247,8 +253,12 @@ class _SessionCard(CardWidget):
         wrap.setSpacing(Spacing.base)
         wrap.addWidget(stats)
         if clear_pct is not None:
-            clear = CaptionLabel(f"{clear_pct}% clear")
+            # Named for what it measures: beside "imaging OK 64%" a bare
+            # "60% clear" read as a second, disagreeing verdict.
+            clear = CaptionLabel(f"sky clear {clear_pct}%")
             clear.setStyleSheet(f"color: {Colors.success_text};")
+            clear.setToolTip("The share of this night's frames shown green on the "
+                             "condition band: a clear sky with the roof open or unknown")
             wrap.addWidget(clear)
         wrap.addStretch()
         host = QWidget()

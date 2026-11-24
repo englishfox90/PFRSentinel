@@ -153,6 +153,12 @@ def test_lane_colours_ok_not_ok_and_ungraded(qt_app, make_widget):
     assert near(pixel(scrubber, x_of(15, 100), strip_y), Colors.success_default)
     assert near(pixel(scrubber, x_of(50, 100), strip_y), Colors.warning_default)
     assert near(pixel(scrubber, x_of(96, 100), strip_y), Colors.gray_6)
+    # Above the strip the lane is neutral, not a second green / amber band
+    # under the condition band.
+    for index in (15, 50):
+        for y in range(SC._LANE_TOP + 1, SC._LANE_TOP + LANE_H - 7, 3):
+            c = pixel(scrubber, x_of(index, 100) + 3, y)
+            assert max(c.red(), c.green(), c.blue()) - min(c.red(), c.green(), c.blue()) <= 8
     for index in range(1, 100, 3):  # a pause is never painted as an error
         assert not near(pixel(scrubber, x_of(index, 100), strip_y), Colors.error_default, 25)
 

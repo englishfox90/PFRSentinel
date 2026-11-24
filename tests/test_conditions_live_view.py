@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 
@@ -51,8 +52,17 @@ def test_verdict_sentences():
             'frames_considered': 0}
     assert verdict_sentence(cold, capturing=False) == \
         ("Idle — start capture to judge the sky.", 'muted')
-    assert verdict_sentence(snap(reasons=['warming_up'], good_streak=1), True, 3)[0] == \
-        "Checking the sky — 1 of 3 good frames before imaging is OK."
+    waiting = ("Waiting for the first frame — nothing judged yet, so NINA is not held back.",
+               'info')
+    assert verdict_sentence(dict(cold), capturing=True, good_needed=3) == waiting
+    assert verdict_sentence(dict(cold), good_needed=3) == waiting
+    assert "good frame" not in waiting[0]
+    assert verdict_sentence(snap(reasons=['recovering'], good_streak=0), True, 3)[0].endswith(
+        "0 of 3 good frames to resume.")
+    assert "no verdict" in verdict_sentence({'enabled': False})[0]
+    for capturing in (True, False):
+        text = verdict_sentence(snap(stale=True, reasons=['stale']), capturing)[0]
+        assert "no verdict" in text and "told" not in text
     stale = verdict_sentence(snap(stale=True, reasons=['stale']), True)
     assert stale[0].startswith("No new frames since ") and stale[1] == 'warn'
     assert verdict_sentence(snap(stale=True, reasons=['stale']), False)[1] == 'muted'
@@ -174,19 +184,146 @@ def test_live_panel_fills_every_part(qapp):
 
 
 def test_panel_only_on_live_monitoring_and_collapsible(qapp):
+    from ui.panels.conditions_live_panel import PANEL_WIDTH
+    from ui.components.conditions_rail import RAIL_WIDTH
     from ui.panels.live_monitoring import LiveMonitoringPanel
     live = LiveMonitoringPanel()
+    live.resize(1300, 800)
+    live.show()
+    qapp.processEvents()
+    panel = live.conditions_panel
     toggles = []
     live.conditions_toggled.connect(toggles.append)
     live.set_preview_only(False)
-    assert live.conditions_panel.isHidden() and live.conditions_button.isHidden()
+    assert panel.isHidden()
     live.set_preview_only(True)
-    assert not live.conditions_panel.isHidden()
-    live.conditions_panel.collapse_button.click()
-    assert live.conditions_panel.isHidden() and not live.conditions_button.isHidden()
-    live.conditions_button.click()
-    assert not live.conditions_panel.isHidden()
+    qapp.processEvents()
+    assert not panel.isHidden() and not panel.is_collapsed()
+    assert panel.rail.isHidden() and panel.width() == PANEL_WIDTH
+
+    # The whole header row collapses it, not only the chevron: a click on
+    # the title, far from the chevron, is enough.
+    header = panel.collapse_button
+    assert header is panel.header and header.width() > PANEL_WIDTH - 20
+    assert header.cursor().shape() == Qt.PointingHandCursor and header.toolTip()
+    assert header.focusPolicy() & Qt.TabFocus
+    assert header.chevron_name() == 'chevron-right'
+    QTest.mouseClick(header, Qt.LeftButton, Qt.NoModifier, QPoint(60, header.height() // 2))
+    qapp.processEvents()
+
+    # Collapsed: still there as a rail (not a button in the preview header),
+    # anchored beside the preview at the panel's height, and it opens again.
+    assert not panel.isHidden() and panel.is_collapsed()
+    assert panel.body.isHidden() and not panel.rail.isHidden()
+    assert panel.width() == RAIL_WIDTH and panel.rail.height() > 300
+    assert not hasattr(live, 'conditions_button')
+    rail = panel.rail
+    assert rail.cursor().shape() == Qt.PointingHandCursor
+    assert rail.toolTip().startswith("Show the imaging conditions panel")
+    QTest.mouseClick(rail, Qt.LeftButton, Qt.NoModifier, QPoint(10, rail.height() - 30))
+    qapp.processEvents()
+    assert not panel.is_collapsed() and panel.rail.isHidden() and not panel.body.isHidden()
     assert toggles == [False, True]
+
+    # Keyboard: Space on the header, Enter on the rail; focus follows the
+    # control so the same key toggles back.
+    header.setFocus(Qt.TabFocusReason)
+    QTest.keyClick(header, Qt.Key_Space)
+    qapp.processEvents()
+    assert panel.is_collapsed() and rail.hasFocus()
+    QTest.keyClick(rail, Qt.Key_Return)
+    qapp.processEvents()
+    assert not panel.is_collapsed() and header.hasFocus()
+    assert toggles == [False, True, False, True]
+    _dispose(qapp, live)
+
+
+def test_collapsed_rail_keeps_the_verdict_in_sight(qapp):
+    from ui.panels.conditions_live_panel import ConditionsLivePanel
+    from ui.theme.tokens import Colors
+    panel = ConditionsLivePanel()
+    panel.set_collapsed(True)
+    panel.resize(panel.width(), 600)
+    panel.show()
+    panel.set_view(snap(reasons=['cloud_cover_high']), capturing=True, good_needed=3)
+    rail = panel.rail
+    assert rail.status_text() == "Paused · Cloud cover high"
+    assert rail.status_color() == Colors.warning_text
+    assert "Imaging paused at" in rail.toolTip()
+    panel.set_view(snap(imaging_ok=True, cloud_cover_pct=8.0), capturing=True)
+    assert rail.status_text() == "OK · 8% cloud" and rail.status_color() == Colors.success_text
+    # The dot is painted in the verdict's colour.
+    qapp.processEvents()
+    image = rail.grab().toImage()
+    want = QColor(Colors.success_text)
+    greens = sum(
+        1 for y in range(0, min(140, image.height())) for x in range(image.width())
+        if abs(image.pixelColor(x, y).green() - want.green()) < 30
+        and abs(image.pixelColor(x, y).red() - want.red()) < 30)
+    assert greens > 10
+    _dispose(qapp, panel)
+
+
+def test_live_panel_narrows_beside_a_small_preview(qapp):
+    from ui.panels.conditions_live_panel import PANEL_MIN_WIDTH, PANEL_WIDTH
+    from ui.panels.live_monitoring import LiveMonitoringPanel
+    live = LiveMonitoringPanel()
+    live.set_preview_only(True)
+    live.resize(1300, 800)
+    live.show()
+    qapp.processEvents()
+    assert live.conditions_panel.width() == PANEL_WIDTH
+    live.resize(660, 800)
+    qapp.processEvents()
+    assert PANEL_MIN_WIDTH <= live.conditions_panel.width() < PANEL_WIDTH
+    live.resize(300, 800)
+    qapp.processEvents()
+    assert live.conditions_panel.width() == PANEL_MIN_WIDTH
+    _dispose(qapp, live)
+
+
+def test_live_cards_are_one_family_with_or_without_the_pointer(qapp):
+    """The owner's screenshot: the conditions panel had a lighter fill and a
+    pale border because qfluentwidgets' CardWidget lights up under the
+    pointer. Both cards are surfaces now, painted the same in every state."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QEnterEvent
+    from ui.components.cards import StaticCard
+    from ui.panels.conditions_live_panel import ConditionsLivePanel
+    from ui.panels.live_monitoring import LiveMonitoringPanel
+    from ui.theme.tokens import Spacing
+    live = LiveMonitoringPanel()
+    live.set_preview_only(True)
+    live.resize(1300, 800)
+    live.show()
+    qapp.processEvents()
+    panel = live.conditions_panel
+    preview_card = live.preview.parentWidget()
+    assert isinstance(panel, StaticCard) and isinstance(preview_card, StaticCard)
+    assert isinstance(panel, ConditionsLivePanel)
+    assert panel.borderRadius == preview_card.borderRadius
+
+    def fill_and_edge(card):
+        image = card.grab().toImage()
+        y = card.height() - 6
+        return image.pixelColor(card.width() // 2, y).name(), image.pixelColor(1, y).name()
+
+    rest = fill_and_edge(panel)
+    assert rest == fill_and_edge(preview_card)
+    centre = QPointF(panel.width() / 2, panel.height() - 6)
+    qapp.sendEvent(panel, QEnterEvent(centre, centre, centre))
+    QTest.qWait(250)
+    assert fill_and_edge(panel) == rest
+
+    # Same padding and the same header type as the card beside it.
+    margins = preview_card.layout().contentsMargins()
+    assert margins.left() == margins.top() == Spacing.card_padding
+    assert panel.header.layout().contentsMargins().left() == Spacing.card_padding
+    preview_title = next(w for w in preview_card.findChildren(type(panel.header.title_label))
+                         if w.text() == "Preview")
+    assert type(preview_title) is type(panel.header.title_label)
+    title_y = panel.header.title_label.mapTo(live, QPoint(0, 0)).y()
+    assert abs(title_y - preview_title.mapTo(live, QPoint(0, 0)).y()) <= 3
     _dispose(qapp, live)
 
 

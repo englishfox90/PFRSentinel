@@ -73,7 +73,7 @@ Each card shows:
 | Status badge | **clean** (green) when nothing notable happened; **roof closed** (red) when the roof never opened all night; or the length of the longest capture gap, e.g. "1h 12m gap" (red). A gap takes priority over roof closed. |
 | Condition band | The whole night as a coloured bar (see [Condition Band](#condition-band)). |
 | Stats | Frame count, the lowest sensor temperature, the peak star count, and the best sky quality (seeing) of the night. Star and seeing figures only appear on nights where star detection ran. |
-| Percent clear | The share of the night's frames coloured green on the condition band: clear with the roof open, or clear with the roof state unknown. Shown in green. |
+| Percent clear | The share of the night's frames coloured green on the condition band: clear with the roof open, or clear with the roof state unknown. Shown in green as "sky clear N%" (version 3.8.0 and earlier show "N% clear"). It is not the same figure as "imaging OK N%" beside it, which is the share of graded frames on which [Imaging Conditions](Imaging-Conditions) told NINA it was OK to image and also counts twilight, soft stars and the good frames needed to resume after a pause. |
 
 Click a card to open that night.
 
@@ -153,7 +153,7 @@ The block follows the frame shown however you get there: the scrubber, Previous 
 
 On a night with graded frames the [scrubber](#scrubber) gains a lane under the condition band, on the same axis as the filmstrip, so you can watch the sky get better or worse as you drag:
 
-- **Colour** per frame: green for imaging OK, amber for not OK, grey for not graded. A pause is never shown in red. The same colours run as a solid strip along the bottom of the lane.
+- **Colour** per frame: green for imaging OK, amber for not OK, grey for not graded. A pause is never shown in red. They run as a solid strip along the bottom of the lane; the area behind the line is left plain, so the lane is not mistaken for a second condition band.
 - **Line**: the stars at that frame as a share of your clear-sky baseline. High means clear; a dip is cloud or haze moving in. The dotted guide is 100%, and the line breaks where the share was not known (baseline still being learned, roof closed, daylight).
 - **Marker**: the playhead runs through the lane, with a dot on the line at the frame shown.
 

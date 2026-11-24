@@ -22,7 +22,7 @@ The settings are on the **[NINA & ASCOM](NINA-and-ASCOM)** tab, in the **Imaging
 
 | Row | What it sets |
 |---|---|
-| **Judge imaging conditions** | On by default. Off: NINA is always told not to image (reason: disabled) |
+| **Judge imaging conditions** | On by default. Off: Sentinel gives NINA no verdict (reason: disabled), and the plugin's **No verdict = bad** setting decides whether a sequence then waits or carries on; see [NINA Integration](NINA-Integration) |
 | **Image only in** | **Astronomical night (sun below -18°)** (the default) or **Nautical twilight (sun below -12°)** |
 | **Sensitivity** | **Relaxed**, **Balanced** (the default), **Strict** or **Custom**, with a line saying what the choice does. See [Sensitivity](#sensitivity) |
 | **Advanced — the exact numbers** | Opens **Cloud limit**, **Stars fading**, **Stars softer**, **Pause after** and **Resume after** |
@@ -35,7 +35,7 @@ The status strip at the top of the window has an **IMAGING** tile with the same 
 | Tile reads | Meaning |
 |---|---|
 | **Idle** | Capture is stopped and no frame has been judged yet |
-| **Warming up** | Capture is running, but no frame has been judged yet. NINA is not held back by this |
+| **Waiting for first frame** | Capture is running, but no frame has been judged yet. NINA is not held back by this, and the first good frame is enough for **OK** |
 | **OK · 12% cloud** | Imaging is OK. The cloud figure is left out when there is none |
 | **Paused · Cloud cover high** (or another reason) | Imaging is not OK; the first reason is named. See [When imaging is paused](#when-imaging-is-paused) |
 | **Recovering** | The sky looks good again, and Sentinel is counting good frames before it says OK |
@@ -47,9 +47,9 @@ On a narrow window this tile is the last to be shortened, and the whole text is 
 
 ### The conditions panel on Live Monitoring
 
-On the **Live Monitoring** page a narrow panel sits beside the preview. Hide it with the arrow at its top right, and bring it back with **Conditions** in the preview's header; Sentinel remembers which you chose. It shows, from the top:
+On the **Live Monitoring** page a narrow panel sits beside the preview. Click anywhere on its header row to collapse it to a narrow rail at the edge of the page (Tab to the header and press Space or Enter works too). The rail keeps the verdict in sight, as a coloured dot and the IMAGING tile's short text, and a click on it opens the panel again; Sentinel remembers which you chose. It shows, from the top:
 
-- **The verdict in one sentence**, for example "Imaging paused at 23:14 — cloud moving in. 2 of 3 good frames to resume.", "OK to image since 21:02.", "Waiting for dark — imaging starts once the sun is low enough." or "Idle — start capture to judge the sky."
+- **The verdict in one sentence**, for example "Imaging paused at 23:14 — cloud moving in. 2 of 3 good frames to resume.", "OK to image since 21:02.", "Waiting for the first frame — nothing judged yet, so NINA is not held back.", "Waiting for dark — imaging starts once the sun is low enough." or "Idle — start capture to judge the sky."
 - **The latest numbers**: stars against your clear-sky figure (for example "Stars 131/315"), cloud cover and FWHM. Hover for the full measurements.
 - **The target and the Moon**, when NINA is imaging a target and the Moon is up: for example "Target M 15 is 18° from an 87% Moon". See [Your target and the Moon](#your-target-and-the-moon).
 - **NINA last checked**: when NINA last asked for the verdict, for example "NINA last checked 4 s ago". It reads "NINA hasn't checked in yet" until it does, and turns amber if NINA's request was refused (check the control API) or if it has not asked for over 15 minutes while you capture. Sentinel tells NINA apart from other tools by the name the plugin sends with each request.
@@ -104,7 +104,7 @@ A frame counts as **bad** when any of these is true:
 
 One bad frame does not pause imaging. With Balanced it takes **3 bad frames in a row** to pause, and **3 good frames in a row** to resume, so a single passing cloud or a single clear gap does not stop and restart a sequence. A start is the exception: when PFR Sentinel starts, the **first good frame** is enough, because nothing has said the sky is bad. If the first frames are bad (roof closed, cloud), the usual 3 good frames in a row are needed. A restart in the middle of a night carries on from where it stopped, as long as the last frame is no older than the stale limit below.
 
-If frames stop arriving, for example because the camera disconnected, the verdict goes **stale** and reads as not OK: the tile shows **Paused · No recent frames**, or **Paused · Capture stopped** if you stopped capture yourself, and the conditions panel says since when no frames have arrived. By default this happens after three frame intervals, and never sooner than 2 minutes. When frames resume, it starts over as it does at a start: the first good frame is enough.
+If frames stop arriving, for example because the camera disconnected, the verdict goes **stale** and reads as not OK (the NINA plugin treats a stale verdict as no verdict): the tile shows **Paused · No recent frames**, or **Paused · Capture stopped** if you stopped capture yourself, and the conditions panel says since when no frames have arrived. By default this happens after three frame intervals, and never sooner than 2 minutes. When frames resume, it starts over as it does at a start: the first good frame is enough.
 
 ## Sensitivity
 
@@ -133,7 +133,7 @@ The card holds the main settings (the card row for each key is given below). Eve
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `enabled` | `true` | **Judge imaging conditions**. Off: the verdict reads "disabled" and is never OK |
+| `enabled` | `true` | **Judge imaging conditions**. Off: the verdict reads "disabled" and is never OK; the NINA plugin treats that as no verdict |
 | `sensitivity` | `balanced` | `relaxed`, `balanced`, `strict` or `custom`: the preset last chosen on the card. Display only |
 | `bad_frames` / `good_frames` | `3` / `3` | **Pause after** / **Resume after**: frames in a row to pause / resume |
 | `max_sun_alt_deg` | `-18` | **Image only in**: `-18` for astronomical night, `-12` to allow nautical twilight |

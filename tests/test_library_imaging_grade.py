@@ -407,6 +407,12 @@ def test_headline_uses_the_live_reason_wording():
     assert T.frame_grade_headline(graded(1)) == ("OK", 'ok')
     for code, words in REASON_TEXT.items():
         text, _ = T.frame_grade_headline(graded(1, ok=False, reasons=code))
+        if code == 'warming_up':
+            # Only rows stored before the first good frame was enough carry
+            # it on a judged frame; "waiting for the first frame" would be
+            # nonsense beside a frame, so they keep the old words.
+            assert text == "Not OK · Warming up"
+            continue
         assert text == f"Not OK · {words}"
     assert T.frame_grade_headline(graded(1, ok=False, reasons='recovering'))[1] == 'info'
     assert T.frame_grade_headline(graded(1, ok=False, reasons='stars_low'))[1] == 'warn'
@@ -530,3 +536,8 @@ def test_session_card_states_the_share_only_when_frames_were_graded(qt_app, make
     assert "imaging" not in stats_text({**base, 'graded_count': 0, 'ok_pct': None,
                                         'top_reason': None}).lower()
     assert "imaging" not in stats_text(base).lower()
+    # The two shares are named for what they measure, so 82% beside 60%
+    # does not read as two verdicts that disagree.
+    both = stats_text({**base, 'graded_count': 100, 'ok_pct': 82, 'top_reason': None,
+                       'clear_pct': 60})
+    assert "imaging OK 82%" in both and "sky clear 60%" in both and "60% clear" not in both

@@ -11,6 +11,13 @@ from .target_moon_text import stored_separation_text
 
 _HOLDING = ('warming_up', 'recovering')
 NOT_GRADED = "—"
+# Rows stored before the first good frame was enough at a start can carry
+# warming_up on a judged frame; they keep the wording they were saved under.
+_STORED_TEXT = {'warming_up': "Warming up"}
+
+
+def _reason(code) -> str:
+    return _STORED_TEXT.get(code) or reason_text(code)
 
 
 def frame_grade_headline(row):
@@ -25,7 +32,7 @@ def frame_grade_headline(row):
     if not reasons:
         return "Not OK", 'warn'
     tone = 'info' if reasons[0] in _HOLDING else 'warn'
-    return f"Not OK · {reason_text(reasons[0])}", tone
+    return f"Not OK · {_reason(reasons[0])}", tone
 
 
 def frame_grade_details(row) -> list:
@@ -38,10 +45,10 @@ def frame_grade_details(row) -> list:
     if ok:
         if frame_ok is not None and not frame_ok:
             # The verdict holds through a short run of bad frames.
-            why = ", ".join(reason_text(r) for r in reasons)
+            why = ", ".join(_reason(r) for r in reasons)
             lines.append("This frame alone was not OK" + (f": {why}" if why else ""))
     else:
-        rest = [reason_text(r) for r in reasons[1:]]
+        rest = [_reason(r) for r in reasons[1:]]
         if rest:
             lines.append("Also: " + ", ".join(rest))
         if frame_ok:
@@ -82,5 +89,5 @@ def night_grade_text(summary, short=False) -> str:
                 f"frame{'' if graded == 1 else 's'}")
     top = summary.get('top_reason')
     if top:
-        text += f" · mostly {reason_text(top)}"
+        text += f" · mostly {_reason(top)}"
     return text
