@@ -114,6 +114,14 @@ def test_header_shows_hover_and_focus_feedback(qapp):
     pressed = shade()
     header.setDown(False)
     assert pressed != rest
+    # On macOS the window is not yet active at show(), so Qt defers the focus
+    # and delivers it with ActiveWindowFocusReason, which draws no ring. Make
+    # the window active and clear focus first so the Tab reason is the one the
+    # widget sees.
+    host.activateWindow()
+    qapp.processEvents()
+    header.clearFocus()
+    qapp.processEvents()
     header.setFocus(Qt.TabFocusReason)
     qapp.processEvents()
     ring = pixel(4)
