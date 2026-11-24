@@ -2,8 +2,9 @@
 Library — night scrubber track (custom-painted, interactive).
 
 A draggable timeline across one night: a sampled filmstrip, the condition band,
-event pins (capture gaps, roof open/close, meteor hits), a playhead, and time
-ticks. Dragging (or clicking) moves the playhead and emits ``index_changed``
+the imaging-conditions lane (``library_grade_lane``; only on nights with graded
+frames), event pins (capture gaps, roof open/close, meteor hits), a playhead,
+and time ticks. Dragging (or clicking) moves the playhead and emits ``index_changed``
 with the frame index under it — the night view loads that frame into the hero
 preview.
 
@@ -27,6 +28,7 @@ from services.library import events as E
 from ..theme.tokens import Colors
 from .library_band import status_color, EVENT_LABELS, EVENT_PIN_COLORS
 from .library_format import fmt_clock, fmt_gap, fmt_count_suffix
+from .library_grade_lane import GradeLane, LANE_H, lane_tooltip
 
 _PIN_HOVER_PX = 7         # cursor-to-pin x distance that triggers the tooltip
 
@@ -45,6 +47,8 @@ _BAND_TOP = _STRIP_TOP + _STRIP_H + 4
 _BAND_H = 9
 _TRACK_BOTTOM = _BAND_TOP + _BAND_H
 _TOTAL_H = _TRACK_BOTTOM + 20
+_LANE_TOP = _TRACK_BOTTOM + 5
+_LANE_EXTRA = 5 + LANE_H   # added to the widget's height when the lane shows
 
 
 class Scrubber(QWidget):
@@ -64,6 +68,8 @@ class Scrubber(QWidget):
         self._id_index = {}    # image id -> frame index (pin click-to-seek)
         self._index = 0
         self._dragging = False
+        self._lane = GradeLane()
+        self.setFocusPolicy(Qt.StrongFocus)  # arrow keys step frame by frame
         self.setFixedHeight(_TOTAL_H)
         self.setMinimumWidth(120)
         self.setMouseTracking(True)  # hover tooltips on event pins
@@ -157,6 +163,8 @@ class Scrubber(QWidget):
         self._frames = frames or []
         self._id_index = {row["id"]: i for i, row in enumerate(self._frames)}
         self._band = self._build_band()
+        self._lane.set_rows(self._frames)
+        self.setFixedHeight(_TOTAL_H + self._lane_extra())
         # Pins sit in frame-index space at the frame the event belongs to, so
         # they line up with the thumbnail above rather than a clock position.
         self._pins = []
@@ -205,6 +213,12 @@ class Scrubber(QWidget):
     def frame_count(self):
         return len(self._frames)
 
+    def grade_lane(self):
+        return self._lane
+
+    def _lane_extra(self):
+        return _LANE_EXTRA if self._lane.has_grades() else 0
+
     # -- interaction -------------------------------------------------------
 
     def mousePressEvent(self, event):
@@ -215,19 +229,43 @@ class Scrubber(QWidget):
             self._seek_to_id(ev.get("image_id"))  # clicking a pin jumps to its frame
             return
         self._dragging = True
+        self.setFocus(Qt.MouseFocusReason)
         self._seek_to_x(event.position().x())
 
     def mouseMoveEvent(self, event):
         if self._dragging:
             self._seek_to_x(event.position().x())
             return
-        ev = self._pin_at_x(event.position().x())
+        pos = event.position()
+        ev = self._pin_at_x(pos.x())
         if ev is not None:
             QToolTip.showText(
                 event.globalPosition().toPoint(), _pin_tooltip(ev), self
             )
+        elif self._in_lane(pos.y()) and self._frames:
+            row = self._frames[self._index_at_x(pos.x())]
+            QToolTip.showText(event.globalPosition().toPoint(), lane_tooltip(row), self)
         else:
             QToolTip.hideText()
+
+    def keyPressEvent(self, event):
+        step = {Qt.Key_Left: -1, Qt.Key_Right: 1}.get(event.key())
+        if step is None and event.key() in (Qt.Key_Home, Qt.Key_End):
+            step = -len(self._frames) if event.key() == Qt.Key_Home else len(self._frames)
+        if step is None or not self._frames:
+            super().keyPressEvent(event)
+            return
+        index = max(0, min(len(self._frames) - 1, self._index + step))
+        if index != self._index:
+            self._index = index
+            self.update()
+            self.index_changed.emit(index)
+
+    def _in_lane(self, y):
+        return self._lane.has_grades() and _LANE_TOP <= y <= _LANE_TOP + LANE_H
+
+    def _index_at_x(self, x):
+        return round(self._x_to_frac(x) * (len(self._frames) - 1))
 
     def mouseReleaseEvent(self, event):
         self._dragging = False
@@ -252,8 +290,7 @@ class Scrubber(QWidget):
         self.index_changed.emit(index)
 
     def _seek_to_x(self, x):
-        frac = self._x_to_frac(x)
-        index = round(frac * (len(self._frames) - 1))
+        index = self._index_at_x(x)
         if index != self._index:
             self._index = index
             self.update()
@@ -288,6 +325,8 @@ class Scrubber(QWidget):
 
         self._paint_filmstrip(painter, w)
         self._paint_band(painter, w)
+        if self._lane.has_grades():
+            self._lane.paint(painter, _PAD_X, _LANE_TOP, w, self.devicePixelRatioF())
         self._paint_pins(painter)
         self._paint_playhead(painter)
         self._paint_ticks(painter, w)
@@ -338,10 +377,16 @@ class Scrubber(QWidget):
             return
         x = self._frac_to_x(self._current_frac())
         painter.setPen(QPen(QColor(Colors.accent_text), 2))
-        painter.drawLine(int(x), _STRIP_TOP - 2, int(x), _TRACK_BOTTOM + 2)
+        painter.drawLine(int(x), _STRIP_TOP - 2, int(x),
+                         _TRACK_BOTTOM + 2 + self._lane_extra())
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(Colors.accent_text))
         painter.drawEllipse(QRectF(x - 5, _STRIP_TOP - 7, 10, 10))
+        marker_y = self._lane.marker_y(self._index) if self._lane.has_grades() else None
+        if marker_y is not None:
+            # Where the shown frame sits on the clear-sky trace.
+            painter.setPen(QPen(QColor(Colors.gray_1), 1.5))
+            painter.drawEllipse(QPointF(x, _LANE_TOP + marker_y), 4, 4)
 
     def _paint_ticks(self, painter, w):
         if not self._frames:
@@ -351,7 +396,7 @@ class Scrubber(QWidget):
         font.setPointSize(7)
         painter.setFont(font)
         painter.setPen(QColor(Colors.text_muted))
-        y = _TRACK_BOTTOM + 14
+        y = _TRACK_BOTTOM + 14 + self._lane_extra()
         for i in range(5):
             frac = i / 4
             # Index-space axis: label each tick with the time of the frame that

@@ -146,6 +146,18 @@ Under the frame details, **IMAGING CONDITIONS** shows what [Imaging Conditions](
 
 The grade is stored with the frame when it is captured and never recalculated, so changing the sensitivity later does not change what past frames show. A frame shows "—" when it was not graded: Imaging Conditions was off, the frame was archived in headless mode or by version 3.8.0 or earlier. A frame reprocessed after a settings change keeps the grade of the capture it came from.
 
+The block follows the frame shown however you get there: the scrubber, Previous / Next, playback, the arrow keys, an event pin or the events list. While a night is loading, and on a frame that was not graded, it shows "—" rather than the previous frame's grade.
+
+#### Imaging lane on the scrubber
+
+On a night with graded frames the [scrubber](#scrubber) gains a lane under the condition band, on the same axis as the filmstrip, so you can watch the sky get better or worse as you drag:
+
+- **Colour** per frame: green for imaging OK, amber for not OK, grey for not graded. A pause is never shown in red. The same colours run as a solid strip along the bottom of the lane.
+- **Line**: the stars at that frame as a share of your clear-sky baseline. High means clear; a dip is cloud or haze moving in. The dotted guide is 100%, and the line breaks where the share was not known (baseline still being learned, roof closed, daylight).
+- **Marker**: the playhead runs through the lane, with a dot on the line at the frame shown.
+
+Click or drag in the lane to go to that frame, exactly as on the filmstrip. Hover it to read a frame's time, verdict and clear-sky share without moving the playhead. The legend beside the speed buttons names the colours. Nights with no graded frames have no lane.
+
 The night's header, and its card in the session list, show the share of graded frames that were OK and the most common reason for the rest, e.g. "Imaging OK on 82% of 1,400 graded frames · mostly Cloud cover high". Nights with no graded frames show nothing.
 
 The `/library` web manifest carries the same values per image: `imaging_ok` and `frame_ok` (1, 0, or null when not graded), `imaging_reasons` (comma-separated reason codes, as in `/conditions`), `clear_sky_ratio` and `moon_bin`.
@@ -183,6 +195,7 @@ Click anywhere on the scrubber, or drag along it, to move the playhead; the prev
 | Control | Description |
 |---------|-------------|
 | Previous / Next | Step back or forward one frame. |
+| Left / Right arrow keys | Step one frame once the scrubber has been clicked; Home and End jump to the first and last frame. New in the next release. |
 | **Play** / **Pause** | Play through the night from the playhead. Playback stops at the last frame. |
 | **1×**, **8×**, **30×** | Playback speed: how many frames each step advances. The selected speed is highlighted. |
 | Frame counter | Position in the night, e.g. "frame 1,204 / 3,880 · drag to scrub". |

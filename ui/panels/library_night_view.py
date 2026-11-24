@@ -27,6 +27,7 @@ from .library_band import (
 )
 from .library_scrubber import Scrubber
 from .library_grade_block import FrameGradeBlock
+from .library_grade_lane import lane_legend_html
 from ..components.library_grade_text import night_grade_text
 from .library_format import (
     fmt_clock, fmt_gap, fmt_exposure, fmt_clouds, fmt_count_suffix
@@ -245,6 +246,13 @@ class NightView(QWidget):
             self._speed_btns.append((speed, btn))
         self._set_speed(self._speed)
 
+        row.addSpacing(Spacing.md)
+        self.lane_legend = CaptionLabel("")
+        self.lane_legend.setTextFormat(Qt.RichText)
+        self.lane_legend.setStyleSheet(f"color: {Colors.text_muted};")
+        self.lane_legend.setVisible(False)
+        row.addWidget(self.lane_legend)
+
         row.addStretch()
         self.counter_label = CaptionLabel("")
         self.counter_label.setStyleSheet(f"color: {Colors.text_muted};")
@@ -265,6 +273,7 @@ class NightView(QWidget):
         self.title_label.setText(f"Night · {session.get('key', '')}")
         self._update_issue_badge(session)
         self.grade_label.setText(night_grade_text(session))
+        self.grade_block.set_frame(None)  # never the previous night's frame
         self.hero_image.setText("Loading night…")
         self.hero_image.setStyleSheet(f"color: {Colors.text_muted};")
         self.overlay_label.setText("")
@@ -279,14 +288,15 @@ class NightView(QWidget):
         self._id_index = {row["id"]: i for i, row in enumerate(self._frames)}
         self._meteors = payload.get("meteors", [])
 
-        self.grade_label.setText(night_grade_text(summarize_grades(self._frames)))
         if not self._frames:
             self.hero_image.setText("No frames archived for this night.")
             # Frames can be pruned between listing and clicking the card. Clear
             # the previous night's filmstrip/band/pins and event list rather
             # than leaving them visible and interactive over an empty night.
             self.scrubber.set_data([], [], [])
+            self._refresh_night_grade()
             self._render_event_list([])
+            self.grade_block.set_frame(None)
             self._pending_live = {}
             return
 
@@ -294,9 +304,17 @@ class NightView(QWidget):
             self._frames, self._session.get("gaps", []), self._meteors
         )
         self.scrubber.set_data(self._frames, payload.get("filmstrip", []), events)
+        self._refresh_night_grade()
         self._render_event_list(events)
         self._on_index_changed(self.scrubber.current_index())
         self._flush_pending_live()
+
+    def _refresh_night_grade(self):
+        self.grade_label.setText(night_grade_text(summarize_grades(self._frames)))
+        graded = self.scrubber.grade_lane().has_grades()
+        if graded:
+            self.lane_legend.setText(lane_legend_html())
+        self.lane_legend.setVisible(graded)
 
     def _flush_pending_live(self):
         """Replay frames archived while this night's load was in flight.
@@ -345,7 +363,7 @@ class NightView(QWidget):
         events = E.build_timeline(self._frames, gaps, self._meteors)
         self.scrubber.update_data(self._frames, events)
         self._render_event_list(events)
-        self.grade_label.setText(night_grade_text(summarize_grades(self._frames)))
+        self._refresh_night_grade()
 
         if following:
             idx = len(self._frames) - 1
