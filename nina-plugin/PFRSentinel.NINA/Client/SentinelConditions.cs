@@ -160,6 +160,36 @@ public sealed class SentinelConditionsFwhm
     public double? ChangePct { get; init; }
 }
 
+/// <summary>The <c>moon</c> block of <c>GET /conditions</c>.</summary>
+public sealed class SentinelConditionsMoon
+{
+    /// <summary>Whether the Moon is above the horizon, or null without a site in Sentinel.</summary>
+    public bool? Up { get; init; }
+
+    /// <summary>Illuminated fraction, 0-100, or null.</summary>
+    public double? IlluminationPct { get; init; }
+
+    /// <summary>Moon altitude in degrees, or null without a site.</summary>
+    /// <remarks>Null on a Sentinel that predates the field.</remarks>
+    public double? AltitudeDeg { get; init; }
+}
+
+/// <summary>
+/// The <c>target</c> block of <c>GET /conditions</c>: the target this plugin reported
+/// to Sentinel, and how far it is from the Moon.
+/// </summary>
+public sealed class SentinelConditionsTarget
+{
+    /// <summary>The target's name.</summary>
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>Angular distance between the target and the Moon, degrees, or null.</summary>
+    public double? MoonSeparationDeg { get; init; }
+
+    /// <summary>The target's altitude in degrees, or null without a site.</summary>
+    public double? AltitudeDeg { get; init; }
+}
+
 /// <summary>
 /// The body of <c>GET /conditions</c>: Sentinel's verdict on whether the sky is good
 /// enough to image, and the measurements behind it.
@@ -231,6 +261,15 @@ public sealed class SentinelConditions
     /// <summary>Sun altitude at the frame, degrees, or null.</summary>
     public double? SunAltitudeDeg { get; init; }
 
+    /// <summary>The Moon. Every field null on a Sentinel that predates the block.</summary>
+    public SentinelConditionsMoon Moon { get; init; } = new();
+
+    /// <summary>
+    /// The reported target and its distance from the Moon; null when Sentinel has no
+    /// fresh target, and on a Sentinel that predates the block.
+    /// </summary>
+    public SentinelConditionsTarget? Target { get; init; }
+
     /// <summary>Clear-sky baseline learning state, or null on a Sentinel that predates it.</summary>
     public SentinelBaselineStatus? BaselineStatus { get; init; }
 
@@ -298,6 +337,8 @@ public sealed class SentinelConditions
             JsonElement stars = Child(root, "stars");
             JsonElement fwhm = Child(root, "fwhm");
             JsonElement baseline = Child(root, "baseline_status");
+            JsonElement moon = Child(root, "moon");
+            JsonElement target = Child(root, "target");
 
 
             return new SentinelConditions
@@ -343,6 +384,20 @@ public sealed class SentinelConditions
                     ChangePct = Number(fwhm, "change_pct"),
                 },
                 SunAltitudeDeg = Number(root, "sun_altitude_deg"),
+                Moon = new SentinelConditionsMoon
+                {
+                    Up = Bool(moon, "up"),
+                    IlluminationPct = Number(moon, "illumination_pct"),
+                    AltitudeDeg = Number(moon, "altitude_deg"),
+                },
+                Target = target.ValueKind == JsonValueKind.Object
+                    ? new SentinelConditionsTarget
+                    {
+                        Name = Text(target, "name") ?? string.Empty,
+                        MoonSeparationDeg = Number(target, "moon_separation_deg"),
+                        AltitudeDeg = Number(target, "altitude_deg"),
+                    }
+                    : null,
                 BaselineStatus = baseline.ValueKind == JsonValueKind.Object
                     ? new SentinelBaselineStatus
                     {

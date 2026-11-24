@@ -5,8 +5,9 @@ The star count depends on the lens, the sensor, the exposure and the light
 pollution, so no fixed number can say "clear". Frames the feed is confident
 about — roof Open, astronomical night, ML Clear, not sensor noise
 (``frame_rules.is_baseline_frame``) — teach it. The bins split by the Moon
-(down, or up in an illumination quarter) because a bright Moon washes out
-most of the faint stars a moonless sky shows.
+(``moon_bins``: down, or up in an illumination quarter, and a bright Moon
+by its altitude too) because a bright Moon washes out most of the faint
+stars a moonless sky shows.
 
 What is kept is a store of NIGHTS, not frames (``night_series``): per Moon
 bin, one entry per clear night — the night's median count, how many clear
@@ -33,7 +34,10 @@ the last save: written atomically (temp file + ``os.replace``), at most
 every SAVE_INTERVAL_S plus ``save_now`` at capture stop and shutdown,
 bounded in size, and read back tolerantly — a truncated, oversized, foreign
 or older-version file loads as "no baseline yet", never as an error.
-Version 1 files (240 frame counts per bin) are not migrated.
+Version 1 files (240 frame counts per bin) are not migrated. Version 2
+files written before the Moon-altitude split load as they are: their bright
+Moon nights stay under the un-split names, which are now only read when the
+Moon's altitude is unknown.
 """
 from __future__ import annotations
 
@@ -48,6 +52,7 @@ from typing import Callable, Dict, Optional, Tuple
 from services.logger import app_logger
 from services.utils_paths import get_app_data_dir
 
+from .moon_bins import MOON_BINS, MOON_DOWN, MOON_UNKNOWN, moon_bin  # noqa: F401 — re-exported
 from .night_series import (  # noqa: F401 — re-exported for callers
     MAX_NIGHTS, MAX_NIGHT_SAMPLES, MIN_NIGHT_FRAMES, NightSeries, night_key,
 )
@@ -72,31 +77,6 @@ FWHM_MAX_PX = 100.0
 # A refinement of the same calibration moves a1 by well under 1 %; a
 # re-focused, swapped or re-mounted lens moves it by more than this.
 LENS_TOLERANCE = 0.05
-
-MOON_DOWN = 'moon_down'
-MOON_UNKNOWN = 'moon_unknown'
-_ILLUMINATION_EDGES = (25.0, 50.0, 75.0)
-MOON_BINS = (MOON_DOWN, 'moon_up_0_25', 'moon_up_25_50', 'moon_up_50_75',
-             'moon_up_75_100', MOON_UNKNOWN)
-
-
-def moon_bin(moon_up, illumination_pct) -> str:
-    """The baseline bin for the Moon's state. ``moon_up`` None = no site."""
-    if moon_up is None:
-        return MOON_UNKNOWN
-    if not moon_up:
-        return MOON_DOWN
-    try:
-        illum = float(illumination_pct)
-    except (TypeError, ValueError):
-        return MOON_UNKNOWN
-    if not math.isfinite(illum):
-        return MOON_UNKNOWN
-    for i, edge in enumerate(_ILLUMINATION_EDGES):
-        if illum < edge:
-            return MOON_BINS[1 + i]
-    return MOON_BINS[4]
-
 
 def default_baseline_path() -> str:
     return os.path.join(get_app_data_dir(), SUBDIR, FILENAME)

@@ -195,6 +195,11 @@ def _library_schemas() -> dict:
                 "moon_bin": {
                     "type": "string", "nullable": True,
                     "description": "Moon state the baseline was read for, e.g. 'moon_down'."},
+                "moon_separation_deg": {
+                    "type": "number", "nullable": True,
+                    "description": "Degrees between the target NINA was imaging and the "
+                                   "Moon when the frame was taken; null when NINA had "
+                                   "reported no target."},
                 "created_at": {"type": "integer"},
             },
         },

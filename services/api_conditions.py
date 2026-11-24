@@ -108,8 +108,16 @@ CONDITIONS_FIELDS = [
     ("moon", _obj({
         "up": dict(_BOOL, description="Moon above the horizon; null without a site."),
         "illumination_pct": dict(_NUM, description="Illuminated fraction, 0-100."),
+        "altitude_deg": dict(_NUM, description="Moon altitude above the horizon, degrees "
+                                               "(negative when it is down); null without "
+                                               "a site."),
     }, "Moon state the baseline bin was chosen from.")),
-    ("baseline_bin", dict(_STR, description="Baseline bin in use (moon_down, moon_up_0_25, ...).")),
+    ("baseline_bin", dict(_STR, description="Baseline bin in use: moon_down, moon_up_0_25, "
+                                            "moon_up_25_50, and for a Moon at least half lit "
+                                            "moon_up_50_75_low / _high and moon_up_75_100_low "
+                                            "/ _high (low = under about 30° altitude; no "
+                                            "suffix when the altitude is unknown), or "
+                                            "moon_unknown without a site.")),
     ("baseline_status", _obj({
         "state": {"type": "string", "enum": ["learning", "ready"]},
         "samples": {"type": "integer", "description":
@@ -124,6 +132,18 @@ CONDITIONS_FIELDS = [
     }, "The clear-sky baseline is learned on each installation from its own clear nights; "
        "until the current Moon bin is ready, stars.baseline and stars.ratio are null "
        "and the star-ratio rule does not fire.")),
+    ("target", dict(_obj({
+        "name": {"type": "string", "description": "The target's name, as NINA sent it."},
+        "moon_separation_deg": {"type": "number", "description":
+                                "Angular distance between the target and the Moon, "
+                                "degrees (0-180). Given whether the Moon is up or "
+                                "down: read moon.up with it."},
+        "altitude_deg": dict(_NUM, description="The target's altitude above the horizon, "
+                                               "degrees; null without a site."),
+    }, "The target NINA's sequencer is imaging (POST /nina/target) and how far it is "
+       "from the Moon; null when NINA has reported none or the report went stale. "
+       "Reported only: no rule reads it and imaging_ok never depends on it."),
+        nullable=True)),
     ("events", {"type": "array", "description":
                 "Recent changes of imaging_ok, newest first (at most 10, from the last "
                 "24 h; kept across a Sentinel restart). Empty while imaging conditions "

@@ -26,6 +26,10 @@ MOON_BIN_TEXT = {
     'moon_up_25_50': "Moon up, 25–50% lit",
     'moon_up_50_75': "Moon up, 50–75% lit",
     'moon_up_75_100': "Moon up, 75–100% lit",
+    'moon_up_50_75_low': "Moon low, 50–75% lit",
+    'moon_up_50_75_high': "Moon high, 50–75% lit",
+    'moon_up_75_100_low': "Moon low, 75–100% lit",
+    'moon_up_75_100_high': "Moon high, 75–100% lit",
     'moon_unknown': "Moon position unknown (no site set)",
 }
 
@@ -186,6 +190,10 @@ def detail_lines(snapshot: dict) -> str:
     if snapshot.get('sun_altitude_deg') is not None:
         parts.append(f"Sun {snapshot['sun_altitude_deg']:.0f}°")
     lines.append(" · ".join(parts))
+    from .target_moon_text import target_moon_detail
+    target = target_moon_detail(snapshot)
+    if target:
+        lines.append(target)
     return "\n".join(lines)
 
 

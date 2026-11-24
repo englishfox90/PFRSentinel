@@ -19,6 +19,14 @@
   star ratio and cloud cover limits are skipped with a note; the change % limits
   still apply. A limit whose measurement is missing is skipped, never treated as
   crossed.
+- Optional **Min Moon separation (°)** limit on both: with a value set, the
+  target being closer to the Moon than that counts as not OK while the Moon is
+  up. The distance is Sentinel's (`target.moon_separation_deg`, from the target
+  this plugin reports), so it needs **Send the current sequencer target to Sentinel** on and a site
+  set in Sentinel; with no target, or no Moon position, the limit is skipped
+  with a note, and with the Moon down it is not used at all. Sentinel itself
+  never pauses for it. The panel's conditions column shows the Moon and the
+  target's distance from it.
 - **No verdict = bad** (on by default): an unreachable Sentinel, a rejected token,
   a stale verdict, conditions switched off or a Sentinel without
   `/conditions` pauses the trigger and ends the loop. The item's status line names

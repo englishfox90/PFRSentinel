@@ -34,15 +34,21 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         /// <summary>Largest acceptable FWHM rise against the night median, percent: crossed at +Y or higher.</summary>
         public double? MaxFwhmRisePct { get; init; }
 
+        /// <summary>
+        /// Smallest acceptable distance between the target and the Moon, degrees. Used
+        /// only while the Moon is up.
+        /// </summary>
+        public double? MinMoonSeparationDeg { get; init; }
+
         /// <summary>Require the roof to read Open, whatever Sentinel's own setting.</summary>
         public bool RequireRoofOpen { get; init; }
 
         /// <summary>The limits for a sequence-log line; "none" for an unset one.</summary>
         public string Describe() =>
             string.Format(CultureInfo.InvariantCulture,
-                "MinStarRatio: {0}, MaxCloudCoverPct: {1}, MaxFwhmArcsec: {2}, MaxFwhmPx: {3}, MaxStarDropPct: {4}, MaxFwhmRisePct: {5}, RequireRoofOpen: {6}",
+                "MinStarRatio: {0}, MaxCloudCoverPct: {1}, MaxFwhmArcsec: {2}, MaxFwhmPx: {3}, MaxStarDropPct: {4}, MaxFwhmRisePct: {5}, MinMoonSeparationDeg: {6}, RequireRoofOpen: {7}",
                 Show(MinStarRatio), Show(MaxCloudCoverPct), Show(MaxFwhmArcsec), Show(MaxFwhmPx),
-                Show(MaxStarDropPct), Show(MaxFwhmRisePct), RequireRoofOpen);
+                Show(MaxStarDropPct), Show(MaxFwhmRisePct), Show(MinMoonSeparationDeg), RequireRoofOpen);
 
         private static string Show(double? value) =>
             value is double v ? v.ToString("0.###", CultureInfo.InvariantCulture) : "none";
@@ -113,6 +119,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
     /// <item><description>Sentinel "not OK" for any measured reason is Bad, <c>recovering</c> included.</description></item>
     /// <item><description>Sentinel "OK" is decided by <c>imaging_ok</c>, never by <c>reasons</c>: during Sentinel's grace frames <c>reasons</c> lists a bad frame's codes while <c>imaging_ok</c> is still true; those become a note.</description></item>
     /// <item><description>Each limit set and crossed adds a Bad reason; a limit whose measurement is null is skipped with a note, never treated as crossed - except Require roof Open, where an Unknown roof is not Open.</description></item>
+    /// <item><description>The Moon-separation limit is used only while Sentinel reports the Moon up: with the Moon down it is skipped silently, and with no target or no Moon position it is skipped with a note.</description></item>
     /// <item><description>While <c>baseline_status</c> reads learning, the star-ratio and cloud-cover limits are skipped with a note; the change-% limits still apply.</description></item>
     /// </list>
     /// </remarks>
@@ -225,6 +232,19 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                     }
                 } else {
                     notes.Add("FWHM change not measured; your rise limit is not used");
+                }
+            }
+
+            if (t.MinMoonSeparationDeg is double minSeparation && c.Moon.Up != false) {
+                // Moon down: nothing to keep away from, so nothing is said either.
+                if (c.Moon.Up is null) {
+                    notes.Add("Sentinel does not know whether the Moon is up; your Moon separation limit is not used");
+                } else if (c.Target?.MoonSeparationDeg is double separation) {
+                    if (separation < minSeparation) {
+                        reasons.Add($"the target is {N(separation, "0")}° from the Moon, closer than your {N(minSeparation, "0")}°");
+                    }
+                } else {
+                    notes.Add("target to Moon distance not known; your Moon separation limit is not used");
                 }
             }
         }

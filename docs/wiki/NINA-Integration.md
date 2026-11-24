@@ -66,10 +66,13 @@ Both follow Sentinel's verdict, and both accept optional limits of your own. Lea
 | **FWHM rise %** | empty | Star size (FWHM) is this percentage or more above the night's median. |
 | **Max FWHM (″)** | empty | Pier-camera FWHM in arcseconds is above the number. Needs Sentinel to know the pier camera's plate scale. |
 | **Max FWHM (px)** | empty | Pier-camera FWHM in pixels is above the number. |
+| **Min Moon separation (°)** | empty | The target is closer to the Moon than this many degrees while the Moon is up. Not used while the Moon is down. Needs **Send the current sequencer target to Sentinel** on, and a site (latitude and longitude) set in Sentinel. *New in the next release.* |
 | **Require roof Open** | off | The roof does not read Open, whatever Sentinel's own roof setting. An unknown roof is not Open. |
 | **No verdict = bad** | on | See below. |
 
 A limit whose measurement Sentinel does not have yet (no stars detected, no plate scale) is skipped, not treated as bad, and the item's status line says so.
+
+**Min Moon separation** is the only way a target near the Moon pauses a sequence: Sentinel shows the distance (see [Imaging Conditions](Imaging-Conditions#your-target-and-the-moon)) but never pauses for it. Bear in mind that the pause lasts until the target moves away, the sequence moves to another target, or the Moon sets. If Sentinel has no target from NINA or does not know where the Moon is, the limit is skipped and the status line says so.
 
 **While Sentinel is learning this sky.** Every rig learns its own clear-sky star count on its own installation, so a new install starts out learning. Until it has enough clear frames, **Min star ratio** and **Max cloud %** have nothing to compare against and are skipped; the status line says, for example, "Sentinel is learning this sky (12/30 clear frames); star ratio and cloud cover not used yet". **Star drop %** and **FWHM rise %** work from the first frames, because they compare the sky with itself.
 

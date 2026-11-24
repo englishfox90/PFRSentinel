@@ -21,6 +21,7 @@ from services.imaging_conditions.presets import (
 from ..components.cards import CollapsibleCard, FormRow, SwitchRow
 from ..components.conditions_live_text import FWHM_HELP, STAR_COUNT_HELP
 from ..components.imaging_conditions_text import secondary_text, summarize_conditions
+from ..components.target_moon_text import CLOSE_HINT, target_moon_text
 from ..components.scroll_safe_spinbox import SpinBox
 from ..theme.icons import mdi
 from ..theme.tokens import Colors, Spacing
@@ -95,6 +96,10 @@ class ImagingConditionsCard(CollapsibleCard):
         self.reasons_label.setWordWrap(True)
         self.reasons_label.hide()
         text_col.addWidget(self.reasons_label)
+        self.target_label = CaptionLabel("")
+        self.target_label.setWordWrap(True)
+        self.target_label.hide()
+        text_col.addWidget(self.target_label)
         status_row.addLayout(text_col, 1)
         self.live_button = PushButton(mdi('chart-line'), "Live view")
         self.live_button.setToolTip("Open the conditions panel on Live Monitoring")
@@ -284,6 +289,11 @@ class ImagingConditionsCard(CollapsibleCard):
         self.verdict_label.setStyleSheet(f"color: {_TONE_COLORS.get(tone, Colors.text_primary)};")
         _set_optional(self.reasons_label,
                       secondary_text(snapshot, capturing, self.good_spin.value()))
+        target_text, close = target_moon_text(snapshot)
+        _set_optional(self.target_label, target_text)
+        self.target_label.setStyleSheet(
+            f"color: {_TONE_COLORS['warn'] if close else Colors.text_secondary};")
+        self.target_label.setToolTip(CLOSE_HINT if close else "")
 
     def _emit_changed(self, *_):
         self.changed.emit()

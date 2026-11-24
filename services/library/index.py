@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS images (
     imaging_reasons  TEXT,
     clear_sky_ratio  REAL,
     moon_bin         TEXT,
+    moon_separation_deg REAL,
     created_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_images_captured_at ON images(captured_at);
@@ -46,7 +47,7 @@ _FIELDS = (
     "session", "exposure", "gain", "temp", "camera", "weather",
     "roof", "condition", "clouds", "star_count", "seeing", "fwhm",
     "imaging_ok", "frame_ok", "imaging_reasons", "clear_sky_ratio", "moon_bin",
-    "created_at",
+    "moon_separation_deg", "created_at",
 )
 
 # Columns added after the original release. Older databases predate them, so we
@@ -66,6 +67,8 @@ _MIGRATIONS = (
     ("imaging_reasons", "TEXT"),
     ("clear_sky_ratio", "REAL"),
     ("moon_bin", "TEXT"),
+    # NINA's target to the Moon at capture; NULL = no target was reported.
+    ("moon_separation_deg", "REAL"),
 )
 
 

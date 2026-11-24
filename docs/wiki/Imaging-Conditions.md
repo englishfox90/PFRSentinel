@@ -51,6 +51,7 @@ On the **Live Monitoring** page a narrow panel sits beside the preview. Hide it 
 
 - **The verdict in one sentence**, for example "Imaging paused at 23:14 — cloud moving in. 2 of 3 good frames to resume.", "OK to image since 21:02.", "Waiting for dark — imaging starts once the sun is low enough." or "Idle — start capture to judge the sky."
 - **The latest numbers**: stars against your clear-sky figure (for example "Stars 131/315"), cloud cover and FWHM. Hover for the full measurements.
+- **The target and the Moon**, when NINA is imaging a target and the Moon is up: for example "Target M 15 is 18° from an 87% Moon". See [Your target and the Moon](#your-target-and-the-moon).
 - **NINA last checked**: when NINA last asked for the verdict, for example "NINA last checked 4 s ago". It reads "NINA hasn't checked in yet" until it does, and turns amber if NINA's request was refused (check the control API) or if it has not asked for over 15 minutes while you capture. Sentinel tells NINA apart from other tools by the name the plugin sends with each request.
 - **A chart of the last few hours**: the star count as a line, your clear-sky figure dashed once it is learned, and amber shading wherever imaging was not OK, including gaps when no frames arrived.
 - **Recent**: the last few pauses and resumes with their time, the reason in plain words and how long each lasted ("so far" while it still holds). The list is kept across a restart of Sentinel for 24 hours.
@@ -68,7 +69,9 @@ The roof and sky readings need [ML Models](ML-Models) switched on. Without them,
 
 Every installation sees a different number of stars on a clear night. The lens, the camera, the exposure, the horizon and the light pollution all change it, so PFR Sentinel ships with no star numbers at all. It learns what a clear night looks like **on your rig**, from your own frames.
 
-A frame teaches it only when it is certain the sky is clear: the roof reads Open, the sun is more than 18° below the horizon, the sky classifier reads Clear, and the frame is not just sensor noise. A bright Moon washes out many stars, so the clear-sky count is learned separately for the Moon below the horizon and for each quarter of Moon brightness.
+A frame teaches it only when it is certain the sky is clear: the roof reads Open, the sun is more than 18° below the horizon, the sky classifier reads Clear, and the frame is not just sensor noise. A bright Moon washes out many stars, so the clear-sky count is learned separately for the Moon below the horizon and for each quarter of Moon brightness. A Moon that is at least half lit is also split by where it is: **low** (under about 30° above the horizon) or **high**. A bright Moon high up lights the whole sky and hides far more stars than the same Moon near the horizon, so the two keep their own figures. A thinner Moon is not split, because it changes the star count little wherever it is and every group has to collect its own clear nights. The Moon has to move about 3° past the 30° line before the group changes, so it does not flip back and forth on the line. Without a site (latitude and longitude in the weather settings) the Moon's position is not known and one figure is used for every Moon.
+
+> **New in the next release** — the split by Moon height is not available in version 3.8.0 or earlier.
 
 What it keeps is a history of **clear nights**, not of single frames. Each night with enough clear frames (30 by default) adds one entry per Moon phase: that night's typical star count. Sentinel keeps the newest 60 such nights per Moon phase. Only a newer clear night pushes an old one out, never the calendar, so a month of bad weather or a closed roof loses nothing. A night runs from local noon to the next local noon, like the nights in the image library, so it is never split at midnight.
 
@@ -76,7 +79,7 @@ Your clear-sky figure is taken from the **better** of those nights (the 75th per
 
 The same clear nights also record how sharp the stars were. From them Sentinel works out the star width (FWHM) of your sharper nights, and shows it next to tonight's reading ("your sharp nights 2.6 px"). This figure is for your information only: it never pauses imaging. The **Stars soft** check still compares each frame with the rest of tonight.
 
-Until one night has enough clear frames for the current Moon phase, the conditions panel says, for example, **Learning your clear sky with the Moon up, 25–50% lit — 12 of 30 clear frames**. While it is learning:
+Until one night has enough clear frames for the current Moon phase, the conditions panel says, for example, **Learning your clear sky with the Moon high, 75–100% lit — 12 of 30 clear frames**. While it is learning:
 
 - no star-count comparison is made, so a low count alone never pauses imaging
 - the cloud cover is a rough figure taken from the ML sky class, and is marked as such: Clear reads 5 %, Partly Cloudy 60 % and Overcast 95 % (the sky model has only these three classes). So with the Balanced 50 % cloud limit, Partly Cloudy pauses imaging; with Relaxed (70 %) it does not
@@ -146,6 +149,16 @@ The card holds the main settings (the card row for each key is given below). Eve
 | `baseline_min_samples` | `30` | Clear frames a night needs, per Moon phase, before it counts towards the clear-sky figure |
 | `stale_after_s` | `0` | Seconds without a frame before the verdict is stale; `0` picks it from the frame interval |
 
+## Your target and the Moon
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+When the [NINA plugin](NINA-Integration) reports the target your sequence is imaging, Sentinel works out how far that target is from the Moon and shows it while the Moon is up: on the conditions panel, on the Imaging Conditions card, in the IMAGING tile's tooltip and, for past frames, in the [Image Library](Image-Library). The line turns amber when the target is close to a bright Moon. "Close" grows with the Moon's brightness: under about 20° for a thin Moon, up to 60° at full Moon.
+
+**Sentinel never pauses imaging for this.** The verdict stays a statement about the sky. Imaging close to the Moon is your choice (narrowband imagers do it on purpose), and a pause for it would last until the Moon set. If you do want NINA to wait, set **Min Moon separation (°)** on the plugin's trigger or loop condition.
+
+The target is shown for as long as the all-sky overlay would draw it (two minutes after NINA last reported it, by default). Nothing is shown when NINA reports no target or the Moon is down.
+
 ## Reading it from a script
 
 The verdict is served at `GET /conditions` on the [web server](Web-Server), with the same token as the [Capture Control API](Capture-Control-API):
@@ -155,6 +168,8 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/conditions
 ```
 
 The main fields are `imaging_ok` (true or false), `reasons` (a list of codes such as `cloud_cover_high` or `stars_dropping`), `changed_at`, `stale`, `cloud_cover_pct` with `cloud_cover_source` (`star_baseline` or `ml_class`), `stars.change_pct` (signed %, e.g. `-45.0`, over `stars.window_frames` frames), `fwhm.px`, `fwhm.change_pct` and `baseline_status` (`learning` or `ready`, with `nights`, the clear nights behind the figure, `samples` and `needed`). `fwhm.reference_px` and `fwhm.reference_nights` give the star width of your sharper nights and how many nights it comes from; no check uses them. `fwhm.arcsec` is filled in only when an [all-sky calibration](All-Sky-Overlay) gives the plate scale. `events` lists the recent pauses and resumes, newest first: `at`, `kind` (`paused` or `resumed`), `reasons` and `duration_s` (null while it still holds). Every field, including the nested ones such as `stars.count`, is described in the `/conditions` fields table at `/docs` on the web server (shown once the control API is on).
+
+`moon.altitude_deg` is the Moon's height above the horizon, and `target` (null without a fresh NINA target) carries `name`, `moon_separation_deg` and `altitude_deg`. `baseline_bin` names the Moon group in use, for example `moon_down`, `moon_up_25_50` or `moon_up_75_100_high`.
 
 `/status` carries a short `conditions` block (`imaging_ok`, `reasons`, `changed_at`, `stale`) without a token.
 

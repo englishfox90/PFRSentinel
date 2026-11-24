@@ -82,6 +82,9 @@ class ImagingConditionsController(QObject):
         if self._strip is not None and hasattr(self._strip, 'set_imaging'):
             from ..components.imaging_conditions_text import summarize_conditions
             self._strip.set_imaging(*summarize_conditions(snapshot, capturing))
+            if hasattr(self._strip, 'set_imaging_detail'):
+                from ..components.target_moon_text import target_moon_detail
+                self._strip.set_imaging_detail(target_moon_detail(snapshot))
         if self._live is not None and self._live.isVisible():
             self._refresh_live(snapshot, capturing)
 

@@ -143,6 +143,7 @@ Under the frame details, **IMAGING CONDITIONS** shows what [Imaging Conditions](
 | Also | Any further reasons for the same frame. |
 | This frame alone | Shown when the frame's own result differed from the verdict: one bad frame does not pause imaging, and one good frame does not resume it. |
 | Stars at N% of clear sky | The frame's star count against the clear-sky baseline learned for your camera, with the Moon state that baseline was read for. Left out while the baseline was still being learned. |
+| Target N° from the Moon | How far the target NINA was imaging was from the Moon when the frame was taken. Shown only when NINA had reported a target and the Moon was up. *New in the next release.* |
 
 The grade is stored with the frame when it is captured and never recalculated, so changing the sensitivity later does not change what past frames show. A frame shows "—" when it was not graded: Imaging Conditions was off, the frame was archived in headless mode or by version 3.8.0 or earlier. A frame reprocessed after a settings change keeps the grade of the capture it came from.
 
@@ -160,7 +161,7 @@ Click or drag in the lane to go to that frame, exactly as on the filmstrip. Hove
 
 The night's header, and its card in the session list, show the share of graded frames that were OK and the most common reason for the rest, e.g. "Imaging OK on 82% of 1,400 graded frames · mostly Cloud cover high". Nights with no graded frames show nothing.
 
-The `/library` web manifest carries the same values per image: `imaging_ok` and `frame_ok` (1, 0, or null when not graded), `imaging_reasons` (comma-separated reason codes, as in `/conditions`), `clear_sky_ratio` and `moon_bin`.
+The `/library` web manifest carries the same values per image: `imaging_ok` and `frame_ok` (1, 0, or null when not graded), `imaging_reasons` (comma-separated reason codes, as in `/conditions`), `clear_sky_ratio`, `moon_bin` and `moon_separation_deg` (null when NINA had reported no target).
 
 ### Events Tonight
 

@@ -34,7 +34,9 @@ from .frame_signals import read_frame_signals
 from .plate_scale import PlateScale
 from .session_state import SessionState
 from .settings import auto_stale_after_s, read_settings
-from .star_baseline import StarBaseline, moon_bin, night_key
+from .moon_bins import MoonAltitudeBand, moon_bin
+from .star_baseline import StarBaseline, night_key
+from .target_moon import fresh_target, site_from_config, target_block
 from .verdict_hysteresis import VerdictHysteresis
 
 RECOVERING = 'recovering'
@@ -52,7 +54,9 @@ def _default_sun_alt(config):
 
 class _CachedMoon:
     """``moon.compute_moon_context`` re-reads config.json and runs astral;
-    the Moon moves slowly, so five minutes is fresh enough."""
+    five minutes is fresh enough for the phase, and for the altitude too:
+    it moves about 1.25° in that time, inside the band hysteresis
+    (``moon_bins.MOON_ALTITUDE_HYSTERESIS_DEG``)."""
 
     def __init__(self, clock=time.monotonic):
         self._clock = clock
@@ -84,6 +88,7 @@ class ImagingConditionsFeed:
                  session_state: Optional[SessionState] = None,
                  sun_alt_fn: Callable = _default_sun_alt,
                  moon_fn: Optional[Callable[[], dict]] = None,
+                 target_fn: Callable = fresh_target,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self._store = store
@@ -92,6 +97,8 @@ class ImagingConditionsFeed:
         self._plate_scale = plate_scale if plate_scale is not None else PlateScale()
         self._sun_alt_fn = sun_alt_fn
         self._moon_fn = moon_fn if moon_fn is not None else _CachedMoon()
+        self._target_fn = target_fn
+        self._moon_band = MoonAltitudeBand()
         self._clock = clock
         self._wall = wall
         self._lock = threading.Lock()
@@ -159,7 +166,9 @@ class ImagingConditionsFeed:
         self._check_stamp(metadata, frame_size)
         sun_alt = self._sun_alt_fn(config)
         moon = self._moon_fn() or {}
-        bin_name = moon_bin(moon.get('moon_is_up'), moon.get('illumination_pct'))
+        band = self._moon_band.update(
+            moon.get('altitude_deg') if moon.get('moon_is_up') else None)
+        bin_name = moon_bin(moon.get('moon_is_up'), moon.get('illumination_pct'), band)
         night = night_key(now)
         if self._night is not None and night != self._night:
             # Capture off through the day sees no daylight frame to clear
@@ -190,6 +199,8 @@ class ImagingConditionsFeed:
         record = self._record(signals, ev, state, sun_alt, moon, bin_name, baseline,
                               night_fwhm, frame_size, settings)
         record['baseline_status'] = baseline_status
+        record['target'] = target_block(self._target_fn(config), now,
+                                        *site_from_config(config))
         # Reported only: fwhm_high is still judged against tonight's median.
         record['fwhm']['reference_px'] = _round(fwhm_reference[0], 2)
         record['fwhm']['reference_nights'] = fwhm_reference[1]
@@ -264,6 +275,7 @@ class ImagingConditionsFeed:
             if scale is not None:
                 arcsec = round(ev.fwhm_px * scale, 1)
         illum = moon.get('illumination_pct')
+        moon_alt = moon.get('altitude_deg')
         return {
             'imaging_ok': state['imaging_ok'],
             'reasons': reasons,
@@ -287,7 +299,10 @@ class ImagingConditionsFeed:
                      'change_pct': ev.fwhm_change_pct},
             'sun_altitude_deg': _round(sun_alt, 1),
             'moon': {'up': moon.get('moon_is_up') if isinstance(moon.get('moon_is_up'), bool) else None,
-                     'illumination_pct': _round(illum, 1) if isinstance(illum, (int, float)) else None},
+                     'illumination_pct': _round(illum, 1) if isinstance(illum, (int, float)) else None,
+                     'altitude_deg': _round(moon_alt, 1)
+                     if isinstance(moon_alt, (int, float)) and not isinstance(moon_alt, bool)
+                     else None},
             'baseline_bin': bin_name,
         }
 
@@ -309,6 +324,7 @@ class ImagingConditionsFeed:
             self._counts.clear()
             self._fwhm.clear()
             self._intervals.clear()
+            self._moon_band.reset()
             self._last_mono = None
 
 

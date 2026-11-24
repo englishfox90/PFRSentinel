@@ -44,6 +44,7 @@ _TONE_COLORS = {
 
 NOT_CONFIGURED = "Not configured"
 
+_IMAGING_TOOLTIP = "Show imaging conditions on Live Monitoring"
 _STATIC_TOOLTIP = (
     "This frame is almost entirely sensor noise, so there is too little in it "
     "to judge the roof or the sky. The readings shown may be wrong."
@@ -278,7 +279,7 @@ class StatusStrip(QFrame):
         self.weather_tile = StatusTile('thermometer', "WEATHER")
         self.seeing_tile = StatusTile('star-four-points-outline', "SEEING")
         self.imaging_tile = StatusTile('telescope', "IMAGING")
-        self.imaging_tile.set_clickable(True, "Show imaging conditions on Live Monitoring")
+        self.imaging_tile.set_clickable(True, _IMAGING_TOOLTIP)
         self.imaging_tile.clicked.connect(self.imaging_clicked.emit)
         self._tiles = (self.web_tile, self.discord_tile, self.roof_tile,
                        self.sky_tile, self.weather_tile, self.seeing_tile, self.imaging_tile)
@@ -378,6 +379,11 @@ class StatusStrip(QFrame):
     def set_imaging(self, text: str, tone: str = 'primary'):
         """The imaging-conditions verdict (GET /conditions), already worded."""
         self.imaging_tile.set_value(text, tone, 'telescope')
+
+    def set_imaging_detail(self, detail: str = ""):
+        """A line under the IMAGING tile's tooltip (the target and the Moon)."""
+        self.imaging_tile.setToolTip("\n".join(
+            p for p in (_IMAGING_TOOLTIP, detail) if p))
 
     def set_sensors_stale(self, stale: bool):
         """Dim the per-frame sensor tiles (roof/sky/seeing) when capture is idle."""

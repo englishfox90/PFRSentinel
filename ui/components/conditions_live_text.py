@@ -34,7 +34,7 @@ STAR_COUNT_HELP = (
     "library. More stars means a clearer sky.")
 BASELINE_HELP = (
     "Clear-sky baseline: the star count this camera sees on a clear night, "
-    "learned from its own clear nights (separately for each Moon phase). It "
+    "learned from its own clear nights (separately for each Moon phase, and for a bright Moon low or high in the sky). It "
     "is taken from the better of those nights, so one hazy night barely moves it.")
 FWHM_HELP = (
     "FWHM: how wide a star looks, in pixels. Rising FWHM means softer, "

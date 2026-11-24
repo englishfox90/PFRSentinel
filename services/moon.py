@@ -48,11 +48,24 @@ def get_configured_location():
         return None, None, None
 
 
+def _altitude_azimuth(lat, lon) -> dict:
+    try:
+        from services.moon_position import moon_position
+        pos = moon_position(lat, lon)
+        return {'altitude_deg': round(pos['altitude_deg'], 1),
+                'azimuth_deg': round(pos['azimuth_deg'], 1)}
+    except Exception as e:
+        app_logger.debug(f"Moon altitude calculation failed: {e}")
+        return {'altitude_deg': None, 'azimuth_deg': None}
+
+
 def compute_moon_context():
     """Moon phase, illumination, rise/set, and whether it's currently up.
 
     Returns a dict with: available, phase_value, phase_name, illumination_pct,
-    is_bright_moon, and (when a location is configured) moonrise/moonset/moon_is_up.
+    is_bright_moon, and (when a location is configured) moonrise/moonset/moon_is_up
+    plus altitude_deg / azimuth_deg (``services.moon_position``, the all-sky
+    overlay's Moon; None when it could not be computed).
     """
     if not ASTRAL_AVAILABLE:
         return {'available': False, 'reason': 'astral not installed'}
@@ -122,6 +135,7 @@ def compute_moon_context():
                         result['moon_is_up'] = now_utc >= rise_dt or now_utc <= set_dt
                 else:
                     result['moon_is_up'] = None
+                result.update(_altitude_azimuth(lat, lon))
             except Exception as e:
                 app_logger.debug(f"Could not get moonrise/moonset: {e}")
 

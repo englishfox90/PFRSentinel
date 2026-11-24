@@ -7,6 +7,7 @@ what the IMAGING tile said when it was taken.
 from services.imaging_conditions.frame_grade import is_graded, split_reasons
 
 from .imaging_conditions_text import moon_bin_text, reason_text
+from .target_moon_text import stored_separation_text
 
 _HOLDING = ('warming_up', 'recovering')
 NOT_GRADED = "—"
@@ -50,6 +51,9 @@ def frame_grade_details(row) -> list:
     tail = " · ".join(p for p in (ratio, moon) if p)
     if tail:
         lines.append(tail)
+    target = stored_separation_text(row.get('moon_separation_deg'), row.get('moon_bin'))
+    if target:
+        lines.append(target)
     return lines
 
 

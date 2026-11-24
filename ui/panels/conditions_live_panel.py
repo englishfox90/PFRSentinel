@@ -17,6 +17,7 @@ from ..components.conditions_live_text import (
     BASELINE_HELP, FWHM_HELP, STAR_COUNT_HELP, event_line, learning_progress,
     measurements_line, nina_checked_text, verdict_sentence)
 from ..components.imaging_conditions_text import detail_lines
+from ..components.target_moon_text import CLOSE_HINT, target_moon_text
 from ..theme.icons import mdi, qicon
 from ..theme.tokens import Colors, Spacing
 
@@ -103,6 +104,11 @@ class ConditionsLivePanel(CardWidget):
         self.measurements_label.setStyleSheet(f"color: {Colors.text_secondary};")
         self.measurements_label.setContentsMargins(20, 0, 0, 0)
         lay.addWidget(self.measurements_label)
+        self.target_label = CaptionLabel("")
+        self.target_label.setWordWrap(True)
+        self.target_label.setContentsMargins(20, 0, 0, 0)
+        self.target_label.hide()
+        lay.addWidget(self.target_label)
         foot = QHBoxLayout()
         foot.setSpacing(Spacing.sm)
         foot.setContentsMargins(0, 0, 0, 0)
@@ -185,6 +191,13 @@ class ConditionsLivePanel(CardWidget):
         self.measurements_label.setVisible(bool(line))
         self.measurements_label.setToolTip(
             "\n".join(filter(None, (detail_lines(snapshot), "", STAR_COUNT_HELP, FWHM_HELP))))
+
+        target_text, close = target_moon_text(snapshot)
+        self.target_label.setText(target_text)
+        self.target_label.setVisible(bool(target_text))
+        self.target_label.setStyleSheet(
+            f"color: {_TONES['warn'] if close else Colors.text_secondary};")
+        self.target_label.setToolTip(CLOSE_HINT if close else "")
 
         self.chart.set_samples(samples or [], now)
 

@@ -52,6 +52,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         private double? maxFwhmPx;
         private double? maxStarDropPct;
         private double? maxFwhmRisePct;
+        private double? minMoonSeparationDeg;
         private bool requireRoofOpen;
         private bool treatNoVerdictAsBad = true;
 
@@ -107,6 +108,13 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         public double? MaxFwhmRisePct {
             get => maxFwhmRisePct;
             set { maxFwhmRisePct = SentinelConditionsSettings.Percent(value, allowZero: false); RaisePropertyChanged(nameof(MaxFwhmRisePct)); }
+        }
+
+        /// <summary>Smallest target-to-Moon distance, degrees, while the Moon is up; null = not used.</summary>
+        [JsonProperty]
+        public double? MinMoonSeparationDeg {
+            get => minMoonSeparationDeg;
+            set { minMoonSeparationDeg = SentinelConditionsSettings.Limit(value, 180.0); RaisePropertyChanged(nameof(MinMoonSeparationDeg)); }
         }
 
         /// <summary>End the loop unless the roof reads Open.</summary>
@@ -196,6 +204,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                 MaxFwhmPx = MaxFwhmPx,
                 MaxStarDropPct = MaxStarDropPct,
                 MaxFwhmRisePct = MaxFwhmRisePct,
+                MinMoonSeparationDeg = MinMoonSeparationDeg,
                 RequireRoofOpen = RequireRoofOpen,
                 TreatNoVerdictAsBad = TreatNoVerdictAsBad,
             };
@@ -212,6 +221,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
             MaxFwhmPx = MaxFwhmPx,
             MaxStarDropPct = MaxStarDropPct,
             MaxFwhmRisePct = MaxFwhmRisePct,
+            MinMoonSeparationDeg = MinMoonSeparationDeg,
             RequireRoofOpen = RequireRoofOpen,
         };
 

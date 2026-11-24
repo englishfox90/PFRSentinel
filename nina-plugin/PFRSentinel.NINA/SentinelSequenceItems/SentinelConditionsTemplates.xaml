@@ -142,6 +142,16 @@
                                 TextAlignment="Right"
                                 ToolTip="Highest pier-camera FWHM in pixels. Empty = not used." />
                         </StackPanel>
+                        <StackPanel Margin="0,2,12,2" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Text="Min Moon separation (°)" />
+                            <TextBox
+                                MinWidth="40"
+                                Margin="5,0,0,0"
+                                VerticalAlignment="Center"
+                                Text="{Binding MinMoonSeparationDeg, TargetNullValue=''}"
+                                TextAlignment="Right"
+                                ToolTip="Smallest distance between the target and the Moon, in degrees, while the Moon is up. Needs the target push and a site set in Sentinel. Empty = not used." />
+                        </StackPanel>
                         <CheckBox
                             Margin="0,2,12,2"
                             VerticalAlignment="Center"
@@ -261,6 +271,16 @@
                                 Text="{Binding MaxFwhmPx, TargetNullValue=''}"
                                 TextAlignment="Right"
                                 ToolTip="Highest pier-camera FWHM in pixels. Empty = not used." />
+                        </StackPanel>
+                        <StackPanel Margin="0,2,12,2" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Text="Min Moon separation (°)" />
+                            <TextBox
+                                MinWidth="40"
+                                Margin="5,0,0,0"
+                                VerticalAlignment="Center"
+                                Text="{Binding MinMoonSeparationDeg, TargetNullValue=''}"
+                                TextAlignment="Right"
+                                ToolTip="Smallest distance between the target and the Moon, in degrees, while the Moon is up. Needs the target push and a site set in Sentinel. Empty = not used." />
                         </StackPanel>
                         <CheckBox
                             Margin="0,2,12,2"

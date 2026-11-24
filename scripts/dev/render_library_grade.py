@@ -5,7 +5,8 @@ a few ungraded frames at the end, plus an older night with no grades),
 opens the real Library panel on it with the app theme and stylesheet, and
 saves screenshots at 2x:
 
-    night_clear.png      night view on a clear, "OK" frame
+    night_clear.png      night view on a clear, "OK" frame (with the
+                         target's distance from the Moon in the grade block)
     night_cloudy.png     night view on a cloudy, "Not OK" frame
     night_ungraded.png   night view on a frame that was never graded
     session_list.png     the session list with both nights' cards
@@ -115,7 +116,9 @@ def grade_for(i):
     else:
         ok, reasons = False, "cloud_cover_high"
     return {"imaging_ok": int(ok), "frame_ok": int(frame_ok), "imaging_reasons": reasons,
-            "clear_sky_ratio": ratio, "moon_bin": "moon_up_25_50"}
+            "clear_sky_ratio": ratio, "moon_bin": "moon_up_75_100_high",
+            # NINA's target drifting away from a bright, high Moon.
+            "moon_separation_deg": round(18.0 + i * 0.03, 1)}
 
 
 def build_library(root):

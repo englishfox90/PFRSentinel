@@ -91,7 +91,8 @@ def test_summary_is_small_and_json_safe():
                                         reasons=['cloud_cover_high', 'stars_low']))
     assert summary == {'imaging_ok': False, 'frame_ok': False,
                        'reasons': ['cloud_cover_high', 'stars_low'],
-                       'clear_sky_ratio': 0.62, 'moon_bin': 'moon_down'}
+                       'clear_sky_ratio': 0.62, 'moon_bin': 'moon_down',
+                       'moon_separation_deg': None}
     assert json.loads(json.dumps(summary)) == summary
 
 

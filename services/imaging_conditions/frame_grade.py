@@ -16,7 +16,7 @@ GRADE_KEY = '_imaging_grade'
 
 # Library columns, in the order they are stored. All NULL = not graded.
 GRADE_COLUMNS = ('imaging_ok', 'frame_ok', 'imaging_reasons',
-                 'clear_sky_ratio', 'moon_bin')
+                 'clear_sky_ratio', 'moon_bin', 'moon_separation_deg')
 
 _REASON_SEP = ','
 _MAX_REASONS = 8
@@ -32,12 +32,16 @@ def summarize_record(record) -> Optional[dict]:
     frame_ok = record.get('frame_ok')
     ratio = (record.get('stars') or {}).get('ratio')
     moon_bin = record.get('baseline_bin')
+    target = record.get('target')
+    separation = target.get('moon_separation_deg') if isinstance(target, dict) else None
     return {
         'imaging_ok': record['imaging_ok'],
         'frame_ok': frame_ok if isinstance(frame_ok, bool) else None,
         'reasons': [str(r) for r in (record.get('reasons') or [])][:_MAX_REASONS],
         'clear_sky_ratio': _number(ratio),
         'moon_bin': moon_bin if isinstance(moon_bin, str) and moon_bin else None,
+        # NINA's target to the Moon; None with no fresh target.
+        'moon_separation_deg': _number(separation),
     }
 
 
@@ -88,6 +92,7 @@ def grade_columns(metadata) -> dict:
         'imaging_reasons': join_reasons(grade.get('reasons')),
         'clear_sky_ratio': _number(grade.get('clear_sky_ratio')),
         'moon_bin': grade.get('moon_bin') if isinstance(grade.get('moon_bin'), str) else None,
+        'moon_separation_deg': _number(grade.get('moon_separation_deg')),
     }
 
 
