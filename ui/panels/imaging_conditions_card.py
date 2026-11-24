@@ -19,7 +19,7 @@ from services.imaging_conditions.presets import (
     CUSTOM, PRESET_KEYS, PRESET_LABELS, PRESET_ORDER, SENSITIVITY_KEY, preset_for,
     preset_values, star_floor_for)
 from ..components.cards import CollapsibleCard, FormRow, SwitchRow
-from ..components.conditions_live_text import FWHM_HELP, STAR_INDEX_HELP
+from ..components.conditions_live_text import FWHM_HELP, STAR_COUNT_HELP
 from ..components.imaging_conditions_text import secondary_text, summarize_conditions
 from ..components.scroll_safe_spinbox import SpinBox
 from ..theme.icons import mdi
@@ -155,7 +155,7 @@ class ImagingConditionsCard(CollapsibleCard):
         lay.setSpacing(Spacing.input_gap)
 
         self.cloud_spin = _spin(0, 100, " %")
-        self.cloud_spin.setToolTip(STAR_INDEX_HELP)
+        self.cloud_spin.setToolTip(STAR_COUNT_HELP)
         cloud_row = FormRow("Cloud limit", self.cloud_spin,
                             "Pause above this much cloud — read from how many of "
                             "your clear-sky stars are missing")

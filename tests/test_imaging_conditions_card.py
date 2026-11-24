@@ -83,7 +83,7 @@ def test_learning_line():
     snap['baseline_status']['bin'] = 'moon_up_25_50'
     assert baseline_learning_text(snap).endswith("(Moon up, 25–50% lit)")
     text = detail_lines(snap)
-    assert "Star index: 210" in text and "-45%" in text and "Learning your sky" in text
+    assert "Stars: 210" in text and "-45%" in text and "Learning your sky" in text
     assert baseline_learning_text({'baseline_status': {'state': 'ready'}}) == ""
 
 
@@ -191,7 +191,7 @@ def test_idle_until_capture_runs():
     assert secondary_text(warming, capturing=True).startswith("2 good frames")
 
 
-def test_learning_line_hidden_in_daylight_and_without_a_star_index():
+def test_learning_line_hidden_in_daylight_and_without_a_star_count():
     learning = {'state': 'learning', 'samples': 0, 'needed': 30, 'bin': 'moon_down'}
     day = _snap(reasons=['daylight', 'roof_not_open'], baseline_status=learning,
                 stars={'count': None})
@@ -201,10 +201,10 @@ def test_learning_line_hidden_in_daylight_and_without_a_star_index():
     assert baseline_learning_text(_snap(baseline_status=learning)) != ""
 
 
-def test_card_hides_empty_lines_and_explains_the_star_index(card):
+def test_card_hides_empty_lines_and_explains_the_star_count(card):
     card.show_conditions(_snap(imaging_ok=True, cloud_cover_pct=5.0))
     assert card.reasons_label.isHidden() and card.reasons_label.text() == ""
-    assert "Star index" in card.cloud_spin.toolTip()
+    assert "same count as the SEEING tile" in " ".join(card.cloud_spin.toolTip().split())
     card.show_conditions(_snap(reasons=['cloud_cover_high', 'stars_dropping']))
     assert not card.reasons_label.isHidden()
     assert card.reasons_label.text() == "Also: Stars dropping"

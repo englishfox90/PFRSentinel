@@ -71,10 +71,11 @@ CONDITIONS_FIELDS = [
         "stars_visible": dict(_BOOL, description="ML stars-visible verdict."),
     }, "ML sky verdict for the latest frame.")),
     ("stars", _obj({
-        "count": dict(_INT, description="Star index: star-like sources on the sky disc "
-                                         "resampled to a fixed 900 px plane, so it compares "
-                                         "between frames and with the baseline. Not the "
-                                         "full-frame count the FWHM is measured on."),
+        "count": dict(_INT, description="Stars counted on the sky disc at the frame's own "
+                                         "resolution: the same count as the STAR_COUNT "
+                                         "token, the status strip and the library, and "
+                                         "the stars the FWHM is measured on. Null when "
+                                         "star detection did not run on the frame."),
         "baseline": dict(_NUM, description="This rig's clear-sky count for the Moon's state; "
                                            "null until learned."),
         "ratio": dict(_NUM, description="count / baseline."),

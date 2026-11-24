@@ -427,9 +427,9 @@ class ImageProcessorWorker(QThread):
 
             # Star detection tokens (gated: sun below civil twilight, and roof open if ML enabled)
             try:
-                from services.star_detection import analyze_stars, should_run_star_detection
+                from services.star_detection import analyze_frame_stars, should_run_star_detection
                 if should_run_star_detection(config, metadata):
-                    star_tokens = analyze_stars(raw_array)
+                    star_tokens = analyze_frame_stars(raw_array, metadata)
                     metadata.update(star_tokens)
                 else:
                     metadata.update({'STAR_COUNT': 'N/A', 'FWHM': 'N/A', 'SEEING': 'N/A'})

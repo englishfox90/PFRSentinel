@@ -14,7 +14,7 @@ from qfluentwidgets import (BodyLabel, getFont, CaptionLabel, CardWidget, Progre
 
 from ..components.conditions_chart import ConditionsChart
 from ..components.conditions_live_text import (
-    BASELINE_HELP, FWHM_HELP, STAR_INDEX_HELP, event_line, learning_progress,
+    BASELINE_HELP, FWHM_HELP, STAR_COUNT_HELP, event_line, learning_progress,
     measurements_line, nina_checked_text, verdict_sentence)
 from ..components.imaging_conditions_text import detail_lines
 from ..theme.icons import mdi, qicon
@@ -115,9 +115,9 @@ class ConditionsLivePanel(CardWidget):
         lay.addLayout(foot)
 
         lay.addSpacing(Spacing.xs)
-        lay.addWidget(_section("Star index · last hours"))
+        lay.addWidget(_section("Stars · last hours"))
         self.chart = ConditionsChart()
-        self.chart.setToolTip(f"{STAR_INDEX_HELP}\n\n{BASELINE_HELP}")
+        self.chart.setToolTip(f"{STAR_COUNT_HELP}\n\n{BASELINE_HELP}")
         lay.addWidget(self.chart)
         self.legend_label = CaptionLabel(
             "Dashed: clear sky · shaded: not OK to image")
@@ -184,7 +184,7 @@ class ConditionsLivePanel(CardWidget):
         self.measurements_label.setText(line)
         self.measurements_label.setVisible(bool(line))
         self.measurements_label.setToolTip(
-            "\n".join(filter(None, (detail_lines(snapshot), "", STAR_INDEX_HELP, FWHM_HELP))))
+            "\n".join(filter(None, (detail_lines(snapshot), "", STAR_COUNT_HELP, FWHM_HELP))))
 
         self.chart.set_samples(samples or [], now)
 

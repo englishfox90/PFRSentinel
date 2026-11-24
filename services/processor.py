@@ -227,10 +227,10 @@ def process_image(image_path, config, metadata_dict=None, weather_service=None, 
         compute_sky_evidence(raw_img, metadata, config)
 
         try:
-            from .star_detection import analyze_stars, should_run_star_detection
+            from .star_detection import analyze_frame_stars, should_run_star_detection
             if should_run_star_detection(config, metadata):
                 src_img = Image.open(image_path) if isinstance(image_path, str) else image_path
-                star_tokens = analyze_stars(np.array(src_img.convert('RGB')))
+                star_tokens = analyze_frame_stars(np.array(src_img.convert('RGB')), metadata)
                 metadata.update(star_tokens)
             else:
                 metadata.update({'STAR_COUNT': 'N/A', 'FWHM': 'N/A', 'SEEING': 'N/A'})

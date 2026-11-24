@@ -1,4 +1,4 @@
-"""Star index over the last few hours, with the not-OK stretches shaded and the
+"""Star count over the last few hours, with the not-OK stretches shaded and the
 clear-sky baseline dashed — the chart on Live Monitoring's conditions panel.
 
 Painted with QPainter like the histogram beside it; no charting library.
@@ -122,7 +122,7 @@ class ConditionsChart(QFrame):
                    Qt.AlignRight | Qt.AlignVCenter, "0")
 
         if not counts:
-            p.drawText(plot, Qt.AlignCenter, "No star index yet")
+            p.drawText(plot, Qt.AlignCenter, "No star count yet")
             p.end()
             return
 

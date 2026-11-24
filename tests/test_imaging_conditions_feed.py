@@ -13,7 +13,6 @@ from services.imaging_conditions.feed import observe_imaging_conditions
 from services.imaging_conditions.plate_scale import ARCSEC_PER_RADIAN, PlateScale
 from services.imaging_conditions.star_baseline import StarBaseline
 from services.observing_window import SAME_CAPTURE_KEY
-from services.sky_evidence import EVIDENCE_KEY
 
 FRAME = (3552, 3552)
 
@@ -53,12 +52,12 @@ def make_feed(tmp_path, *, sun=-30.0, moon=None, plate=None, clock=None):
     return feed, store, clock, sun_box
 
 
-def frame(count=300, roof='Open', sky='Clear', fwhm='3.0', detections='150', camera='ZWO ASI676MC'):
+def frame(count=300, roof='Open', sky='Clear', fwhm='3.0', camera='ZWO ASI676MC'):
     return {
         '_ML_RESULTS': {'roof_status': roof, 'roof_confidence': 0.95,
                         'sky_condition': sky, 'sky_confidence': 0.9,
                         'stars_visible': count is None or count > 0},
-        EVIDENCE_KEY: {'star_count': count}, 'FWHM': fwhm, 'STAR_COUNT': detections,
+        'FWHM': fwhm, 'STAR_COUNT': 'N/A' if count is None else str(count),
         'CAMERA': camera,
     }
 

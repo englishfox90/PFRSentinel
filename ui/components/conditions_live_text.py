@@ -28,11 +28,12 @@ CAUSE_TEXT = {
 
 NINA_STALE_S = 15 * 60
 
-STAR_INDEX_HELP = (
-    "Star index: how many stars Sentinel counts on the sky, measured the same "
-    "way on every frame so frames can be compared. Higher is clearer.")
+STAR_COUNT_HELP = (
+    "Stars: how many stars Sentinel counts on the sky in each frame — the same "
+    "count as the SEEING tile, the {STAR_COUNT} overlay token and the image "
+    "library. More stars means a clearer sky.")
 BASELINE_HELP = (
-    "Clear-sky baseline: the star index this camera sees on a clear night, "
+    "Clear-sky baseline: the star count this camera sees on a clear night, "
     "learned from its own frames (separately for each Moon phase).")
 FWHM_HELP = (
     "FWHM: how wide a star looks, in pixels. Rising FWHM means softer, "
@@ -150,7 +151,7 @@ def learning_progress(snapshot: dict):
     done = min(int(status.get('samples') or 0), needed) if needed else 0
     if status.get('state') == 'ready':
         base = (snapshot.get('stars') or {}).get('baseline')
-        tail = f": star index {base:.0f}" if isinstance(base, (int, float)) else ""
+        tail = f": {base:.0f} stars" if isinstance(base, (int, float)) else ""
         return f"Clear-sky baseline learned{moon}{tail}", needed, needed
     return f"Learning your clear sky{moon} — {done} of {needed} clear frames", done, needed
 
@@ -175,7 +176,7 @@ def nina_checked_text(checkins: dict, capturing=None):
 
 def measurements_line(snapshot: dict) -> str:
     """The latest frame's numbers in one short line: ``Stars 131/315 ·
-    Cloud 58% · FWHM 2.9 px`` (star index / clear-sky baseline). Empty before the first judged frame."""
+    Cloud 58% · FWHM 2.9 px`` (star count / clear-sky baseline). Empty before the first judged frame."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     if not snapshot.get('enabled') or (
             not snapshot.get('updated_at') and not snapshot.get('frames_considered')):

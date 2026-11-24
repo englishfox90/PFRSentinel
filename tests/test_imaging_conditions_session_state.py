@@ -9,7 +9,6 @@ from services.imaging_conditions.plate_scale import PlateScale
 from services.imaging_conditions.session_state import SessionState
 from services.imaging_conditions.star_baseline import StarBaseline
 from services.imaging_conditions.verdict_hysteresis import VerdictHysteresis
-from services.sky_evidence import EVIDENCE_KEY
 
 T0 = datetime(2026, 11, 24, 3, 0, tzinfo=timezone.utc)
 CFG = {'imaging_conditions': {}}
@@ -44,7 +43,7 @@ class Run:
                 '_ML_RESULTS': {'roof_status': roof, 'roof_confidence': 0.95,
                                 'sky_condition': 'Clear', 'sky_confidence': 0.9,
                                 'stars_visible': True},
-                EVIDENCE_KEY: {'star_count': count}, 'FWHM': fwhm, 'STAR_COUNT': '150',
+                'FWHM': fwhm, 'STAR_COUNT': str(count),
                 'CAMERA': 'ZWO ASI676MC'}, cfg, FRAME)
         return self.store.snapshot()
 

@@ -52,13 +52,15 @@ On the **Live Monitoring** page a narrow panel sits beside the preview. Hide it 
 - **The verdict in one sentence**, for example "Imaging paused at 23:14 — cloud moving in. 2 of 3 good frames to resume.", "OK to image since 21:02.", "Waiting for dark — imaging starts once the sun is low enough." or "Idle — start capture to judge the sky."
 - **The latest numbers**: stars against your clear-sky figure (for example "Stars 131/315"), cloud cover and FWHM. Hover for the full measurements.
 - **NINA last checked**: when NINA last asked for the verdict, for example "NINA last checked 4 s ago". It reads "NINA hasn't checked in yet" until it does, and turns amber if NINA's request was refused (check the control API) or if it has not asked for over 15 minutes while you capture. Sentinel tells NINA apart from other tools by the name the plugin sends with each request.
-- **A chart of the last few hours**: the star index as a line, your clear-sky figure dashed once it is learned, and amber shading wherever imaging was not OK, including gaps when no frames arrived.
+- **A chart of the last few hours**: the star count as a line, your clear-sky figure dashed once it is learned, and amber shading wherever imaging was not OK, including gaps when no frames arrived.
 - **Recent**: the last few pauses and resumes with their time, the reason in plain words and how long each lasted ("so far" while it still holds). The list is kept across a restart of Sentinel for 24 hours.
 - **Clear-sky baseline**: how far learning has got for the current Moon phase, with a progress bar, or the learned figure once it is ready.
 
 The panel is shown only on Live Monitoring, where the preview has room beside it. **Settings in NINA & ASCOM** at its foot takes you to the card.
 
-The **star index** is not the same number as the star count on the **SEEING** tile. The star index counts stars on the sky disc after it has been scaled to a fixed size, so it can be compared from frame to frame and with your clear-sky figure. The SEEING count comes from the full-size frame, where the sharpness (FWHM) is measured, and changes with the frame size. Hover over the chart or the numbers for the same explanation.
+There is one star count in Sentinel. The **Stars** figure here is the same number as the star count on the **SEEING** tile, the `{STAR_COUNT}` overlay token and the image library: the stars found on the sky disc of the full-size frame, with a detection threshold that follows the frame's own noise. The sharpness (FWHM) is measured on those same stars. Hover over the chart or the numbers for the same explanation.
+
+While star detection is skipped (roof closed, daylight, an exposure too short, or an open roof with no stars in the frame) there is no star count, and the panel shows none. An open roof with no stars in the frame reads **Too few stars**.
 
 The roof and sky readings need [ML Models](ML-Models) switched on. Without them, turn off **require roof open** in `config.json` (see below) if you have no roof.
 
@@ -87,7 +89,7 @@ A frame counts as **bad** when any of these is true:
 | Frame is sensor noise | Nothing in the frame can be judged |
 | No sky reading | Neither a star count nor an ML sky reading is available |
 | Cloud cover high | Estimated cloud cover is above your cloud limit (50 % with Balanced) |
-| Too few stars | Fewer than 40 % of your learned clear-sky count with Balanced (only once the count is learned) |
+| Too few stars | Fewer than 40 % of your learned clear-sky count with Balanced (only once the count is learned), or the roof is open and the frame shows no stars at all |
 | Stars dropping | The star count fell by more than 40 % (Balanced) against the last 10 frames |
 | Stars soft (FWHM) | Stars are more than 50 % wider (Balanced) than tonight's median. FWHM is how wide a star looks in pixels: haze, dew or poor seeing make it grow |
 

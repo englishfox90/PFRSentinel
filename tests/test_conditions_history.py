@@ -136,7 +136,7 @@ def test_the_feed_records_every_judged_frame(tmp_path):
                                  clock=lambda: clock['mono'], wall=lambda: clock['wall'])
     md = {'_ML_RESULTS': {'roof_status': 'Open', 'roof_confidence': 0.9,
                           'sky_condition': 'Clear', 'sky_confidence': 0.9},
-          '_SKY_EVIDENCE': {'star_count': 300}}
+          'STAR_COUNT': '300'}
     for _ in range(4):
         tick()
         feed.observe(md, {}, (100, 100))
