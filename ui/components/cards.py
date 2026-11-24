@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QSizePolicy, QSlider
 )
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QPainter
 from qfluentwidgets import (
     CardWidget, ExpandSettingCard, SettingCard,
     SubtitleLabel, BodyLabel, CaptionLabel,
@@ -16,6 +17,7 @@ from qfluentwidgets import (
 )
 
 from ..theme.tokens import Colors, Typography, Spacing, Layout
+from .collapse_header import CollapseHeader
 
 
 class ClickSlider(QSlider):
@@ -40,6 +42,29 @@ class ClickSlider(QSlider):
     def wheelEvent(self, event):
         # Ignore wheel events - only allow click-drag
         event.ignore()
+
+class StaticCard(CardWidget):
+    """A card that is a surface, not a control: the same fill, radius and
+    edge as qfluentwidgets' ``CardWidget`` at rest, without its hover and
+    pressed states. ``CardWidget`` is a clickable card — it lightens its fill
+    and draws a pale 1 px border while the pointer is over it — so two plain
+    ``CardWidget`` panels side by side stop matching as soon as the pointer
+    rests on one of them."""
+
+    def _hoverBackgroundColor(self):
+        return self._normalBackgroundColor()
+
+    def _pressedBackgroundColor(self):
+        return self._normalBackgroundColor()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.Antialiasing)
+        painter.setPen(QColor(0, 0, 0, 20))
+        painter.setBrush(self._normalBackgroundColor())
+        radius = self.borderRadius
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), radius, radius)
+
 
 class MonitoringCard(CardWidget):
     """Card for monitoring/display sections"""
@@ -213,80 +238,51 @@ class SwitchRow(QWidget):
         self.switch.setChecked(checked)
 
 
-class CollapsibleCard(CardWidget):
-    """Expandable/collapsible settings card"""
-    
+class CollapsibleCard(StaticCard):
+    """Expandable/collapsible settings card. The whole header row toggles
+    it (mouse, Space or Enter); the chevron points down while it is open."""
+
     def __init__(self, title: str, icon=None, parent=None):
         super().__init__(parent)
         self._title = title
         self._icon = icon
         self._expanded = False  # Default to collapsed
         self._setup_ui()
-    
+
     def _setup_ui(self):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
-        
-        # Header (clickable) - compact height
-        self.header = QFrame()
-        self.header.setCursor(Qt.PointingHandCursor)
-        self.header.setStyleSheet(f"""
-            QFrame {{
-                background-color: transparent;
-            }}
-            QFrame:hover {{
-                background-color: {Colors.bg_hover};
-            }}
-        """)
-        
-        header_layout = QHBoxLayout(self.header)
-        header_layout.setContentsMargins(
-            Spacing.base, Spacing.sm,
-            Spacing.base, Spacing.sm
-        )
-        
-        # Icon (optional) — accepts either a FluentIcon (has .icon()) or
-        # a ready-made QIcon (e.g. from qtawesome, as used in the nav rail).
-        if self._icon:
-            icon_label = QLabel()
-            if hasattr(self._icon, 'icon'):
-                icon_label.setPixmap(self._icon.icon().pixmap(20, 20))
-            elif hasattr(self._icon, 'pixmap'):
-                icon_label.setPixmap(self._icon.pixmap(20, 20))
-            header_layout.addWidget(icon_label)
-        
-        # Title
-        title_label = SubtitleLabel(self._title)
-        title_label.setStyleSheet(f"color: {Colors.text_primary};")
-        header_layout.addWidget(title_label, 1)
-        
-        # Expand indicator (collapsed by default)
-        self.expand_icon = QLabel("▶")
-        self.expand_icon.setStyleSheet(f"color: {Colors.text_muted};")
-        header_layout.addWidget(self.expand_icon)
-        
-        self.main_layout.addWidget(self.header)
-        
+
+        self.header = CollapseHeader(self._title, self._icon)
+        self.header.clicked.connect(self._toggle_expanded)
+        self.expand_icon = self.header.chevron
+        # Top-aligned: a card given more room than it needs keeps a compact
+        # header instead of stretching it.
+        self.main_layout.addWidget(self.header, 0, Qt.AlignTop)
+
         # Content area (hidden by default)
         self.content = QWidget()
         self.content.setVisible(False)  # Start collapsed
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(
             Spacing.card_padding, Spacing.sm,
-            Spacing.card_padding, Spacing.md
+            Spacing.card_padding, Spacing.base
         )
         self.content_layout.setSpacing(Spacing.input_gap)
-        self.main_layout.addWidget(self.content)
-        
-        # Connect header click
-        self.header.mousePressEvent = self._toggle_expanded
-    
-    def _toggle_expanded(self, event):
-        self._expanded = not self._expanded
+        self.main_layout.addWidget(self.content, 1)
+
+    def is_expanded(self) -> bool:
+        return self._expanded
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._expanded = bool(expanded)
         self.content.setVisible(self._expanded)
-        self.expand_icon.setText("▼" if self._expanded else "▶")
-    
+        self.header.set_expanded(self._expanded)
+
+    def _toggle_expanded(self, _event=None):
+        self.set_expanded(not self._expanded)
+
     def add_widget(self, widget):
         """Add widget to card content"""
         self.content_layout.addWidget(widget)

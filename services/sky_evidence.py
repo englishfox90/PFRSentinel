@@ -5,9 +5,16 @@ The ML roof classifier is the roof source, but its verdict alone cannot say
 whether a frame shows a sky worth annotating: a misread Open on a lit roof,
 or an overcast night, still drew constellation labels (issue #93). This
 module measures what the frame itself contains — how many star-like sources
-the all-sky detector's thresholds find inside the sky circle, and how long
-the exposure was — and stores it on the frame's metadata for
-``observing_window`` to corroborate the roof verdict with.
+the shared scan (``star_source_scan``) finds inside the sky circle on a fixed
+900 px plane, and how long the exposure was — and stores it on the frame's
+metadata for ``observing_window`` to corroborate the roof verdict with.
+
+That plane count is the gate's own, internal measure: the gate must decide
+before star detection whether detection runs, and its floor is calibrated
+on this plane. It is never shown to a user and is not the frame's star
+count — that is ``STAR_COUNT``, the same scan at the frame's own resolution
+(``star_detection.analyze_stars``), which also reuses the ``sky_circle``
+measured here.
 
 Runs on the capture path for every frame, so it is built to a budget
 (plan §8: ≤ 30 ms per 3552 px frame, single core): the frame is box-reduced
@@ -23,6 +30,9 @@ from typing import Optional
 import numpy as np
 
 from .logger import app_logger
+from .star_source_scan import (  # noqa: F401  (re-exported for existing callers)
+    BACKGROUND_REDUCE, SIGMA_STRIDE, find_star_like_sources,
+)
 
 # Where the evidence rides on a frame's metadata. Underscore-prefixed like
 # _ML_RESULTS: internal, never an overlay token.
@@ -54,29 +64,9 @@ EVIDENCE_MAX_EDGE_PX = EVIDENCE_PLANE_EDGE_PX   # re-exported for existing calle
 # half hour or so), so a re-mounted camera is picked up within the session.
 CIRCLE_REFRESH_FRAMES = 100
 
-# The sky background for the scan is estimated at 1/BACKGROUND_REDUCE of the
-# plane and interpolated back. detect_stars blurs at full plane size with a
-# kernel of sky_r / 6 (59 taps at 888 px, ~14 ms single core); the same
-# Gaussian at quarter scale is 15 taps on a sixteenth of the pixels (~1 ms).
-# Sky glow varies over hundreds of pixels, so the interpolation changes the
-# count by nothing measurable — see test_sky_evidence's agreement test.
-BACKGROUND_REDUCE = 4
-
-# Every SIGMA_STRIDE-th pixel of the residual feeds the noise estimate. The
-# median of the full 888 px plane is ~8 ms; a 1/16 sample of ~30 000 sky
-# pixels puts the MAD within ~1 % of the full figure, and the threshold is
-# an integer multiple of it anyway.
-SIGMA_STRIDE = 4
-
-# detect_stars's thresholds, mirrored so the count means the same thing as
-# the calibration feed's detections: 4 sigma over the local background,
-# blob area 4-1000 px at the 750 px reference (scaled linearly with the sky
-# radius), sources within 20 px of the circle edge ignored as horizon noise.
-_THRESHOLD_SIGMA = 4.0
-_MIN_AREA_REF = 4
-_MAX_AREA_REF = 500
-_EDGE_BORDER_PX = 20
-_REFERENCE_SKY_RADIUS_PX = 375.0
+# The scan itself is the shared one (star_source_scan), which the user-facing
+# star count also runs at the frame's own resolution. This plane count is
+# internal to the gate and is never shown as a star count.
 
 _EXPOSURE_RE = re.compile(
     r'\s*([0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\s*'
@@ -255,63 +245,12 @@ def _resample_to_plane(arr: np.ndarray, cv2) -> np.ndarray:
 
 def count_star_like_sources(plane: np.ndarray, circle, ignore_rects=None) -> int:
     """Number of star-like sources inside ``circle`` = (cx, cy, r) on a
-    uint8 grey plane, by detect_stars's thresholds without its sub-pixel
-    centroiding: local background subtracted, 4 sigma threshold, 3x3 open,
-    blob area band, sources within the edge border ignored. ``ignore_rects``
-    are ``(x0, y0, x1, y1)`` boxes in plane pixels left out of the count.
+    uint8 grey plane: local background subtracted, 4 sigma threshold, 3x3
+    open, blob area band, sources within the edge border ignored.
+    ``ignore_rects`` are ``(x0, y0, x1, y1)`` boxes in plane pixels left out
+    of the count.
     """
-    import cv2
-
-    cx, cy, r = circle
-    h, w = plane.shape
-    linear_scale = max(1.0, r / _REFERENCE_SKY_RADIUS_PX)
-    min_area = max(_MIN_AREA_REF, int(_MIN_AREA_REF * linear_scale))
-    max_area = max(min_area + 1, int(_MAX_AREA_REF * linear_scale * 2))
-
-    # detect_stars: GaussianBlur with ksize = max(31, r // 6) | 1, whose
-    # sigma by OpenCV's rule is 0.3 * ((ksize - 1) * 0.5 - 1) + 0.8.
-    ksize = max(31, int(r // 6)) | 1
-    sigma_px = 0.3 * ((ksize - 1) * 0.5 - 1) + 0.8
-    small = cv2.resize(plane, (max(1, w // BACKGROUND_REDUCE), max(1, h // BACKGROUND_REDUCE)),
-                       interpolation=cv2.INTER_AREA)
-    small = cv2.GaussianBlur(small, (0, 0), sigma_px / BACKGROUND_REDUCE)
-    background = cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
-    residual = cv2.subtract(plane, background)   # uint8: clipped at 0 for the threshold
-
-    mask = np.zeros((h, w), dtype=np.uint8)
-    cv2.circle(mask, (int(round(cx)), int(round(cy))), int(round(r)), 255, -1)
-    for x0, y0, x1, y1 in ignore_rects or ():
-        mask[max(0, int(y0)):max(0, int(y1)), max(0, int(x0)):max(0, int(x1))] = 0
-
-    # Noise from the SIGNED residual. detect_stars takes its MAD from the
-    # clipped one, and on a noise-only frame that is a half-rectified
-    # Gaussian whose median and MAD are both ~0: the threshold collapses to
-    # the floor and every grain becomes a source. Measured on the reference
-    # rig's closed-roof frames (256 px community FITS, 2026-07-18, 13 s at
-    # gain 300; 750 px library JPEGs, 2026-09-17): 120-140 and ~950
-    # "stars" on a dark closed roof with the clipped estimate, against
-    # 15-50 on open clear nights. The signed MAD sees the amplified noise
-    # and lifts the threshold above it.
-    sub = mask[::SIGMA_STRIDE, ::SIGMA_STRIDE] > 0
-    sample = (plane[::SIGMA_STRIDE, ::SIGMA_STRIDE][sub].astype(np.float32)
-              - background[::SIGMA_STRIDE, ::SIGMA_STRIDE][sub].astype(np.float32))
-    if sample.size == 0:
-        return 0
-    sigma = max(1.5, 1.4826 * float(np.median(np.abs(sample - np.median(sample)))))
-    threshold = max(1, int(_THRESHOLD_SIGMA * sigma))
-
-    _, binary = cv2.threshold(residual, threshold, 255, cv2.THRESH_BINARY)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-    binary = cv2.bitwise_and(binary, mask)
-
-    n_labels, _labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    if n_labels <= 1:
-        return 0
-    area = stats[1:, cv2.CC_STAT_AREA]
-    dist = np.hypot(centroids[1:, 0] - cx, centroids[1:, 1] - cy)
-    keep = (area >= min_area) & (area <= max_area) & (dist <= r - _EDGE_BORDER_PX)
-    return int(np.count_nonzero(keep))
+    return int(len(find_star_like_sources(plane, circle, ignore_rects)))
 
 
 class _SkyCircleCache:

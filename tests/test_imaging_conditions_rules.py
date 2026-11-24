@@ -8,7 +8,7 @@ from services.config_defaults import DEFAULT_CONFIG
 from services.imaging_conditions import frame_rules as rules
 from services.imaging_conditions.frame_signals import read_frame_signals
 from services.imaging_conditions.settings import auto_stale_after_s, read_settings
-from services.sky_evidence import EVIDENCE_KEY
+from services.observing_window import REASON_KEY
 
 SETTINGS = read_settings({'imaging_conditions': {}})
 
@@ -18,8 +18,7 @@ def clear_meta(**over):
         '_ML_RESULTS': {'roof_status': 'Open', 'roof_confidence': 0.95,
                         'sky_condition': 'Clear', 'sky_confidence': 0.9,
                         'stars_visible': True, 'frame_is_static': False},
-        EVIDENCE_KEY: {'star_count': 300},
-        'FWHM': '3.0', 'STAR_COUNT': '150',
+        'FWHM': '3.0', 'STAR_COUNT': '300',
     }
     md.update(over)
     return md
@@ -65,7 +64,7 @@ def test_roof_rule_can_be_switched_off_for_a_roofless_rig():
 
 def test_watch_mode_tokens_read_like_ml_results():
     md = {'ROOF_STATUS': 'Open (95%)', 'SKY_CONDITION': 'Partly Cloudy (72%)',
-          'STARS_VISIBLE': 'Yes', EVIDENCE_KEY: {'star_count': 120}, 'FWHM': 'N/A'}
+          'STARS_VISIBLE': 'Yes', 'STAR_COUNT': '120', 'FWHM': 'N/A'}
     sig = read_frame_signals(md)
     assert (sig.roof_state, sig.roof_confidence) == ('Open', 0.95)
     assert (sig.sky_condition, sig.sky_confidence) == ('Partly Cloudy', 0.72)
@@ -88,13 +87,13 @@ def test_low_confidence_ml_class_is_not_used_for_cloud_cover():
 
 
 def test_baseline_ratio_sets_cloud_cover_and_stars_low():
-    ev = evaluate(clear_meta(**{EVIDENCE_KEY: {'star_count': 90}}), baseline=300.0)
+    ev = evaluate(clear_meta(STAR_COUNT='90'), baseline=300.0)
     assert ev.ratio == 0.3 and ev.cloud_cover_pct == 70.0
     assert {rules.CLOUD_COVER_HIGH, rules.STARS_LOW} <= set(ev.reasons)
 
 
 def test_ratio_above_one_reads_zero_cloud():
-    assert evaluate(clear_meta(**{EVIDENCE_KEY: {'star_count': 450}}),
+    assert evaluate(clear_meta(STAR_COUNT='450'),
                     baseline=300.0).cloud_cover_pct == 0.0
 
 
@@ -102,15 +101,51 @@ def test_ratio_above_one_reads_zero_cloud():
 def test_cold_start_never_judges_a_count_on_its_own(count):
     # No shipped star numbers: until this rig's baseline is learned, any count
     # (even 0) passes the star-ratio rule; only relative rules may fire.
-    ev = evaluate(clear_meta(**{EVIDENCE_KEY: {'star_count': count}}))
+    ev = evaluate(clear_meta(STAR_COUNT=str(count)))
     assert rules.STARS_LOW not in ev.reasons
     assert ev.ratio is None and ev.cloud_cover_source == rules.SOURCE_ML_CLASS
 
 
 def test_ml_no_stars_without_a_count_is_stars_low():
-    md = clear_meta(**{EVIDENCE_KEY: {'star_count': None}})
+    md = clear_meta(STAR_COUNT='N/A')
     md['_ML_RESULTS']['stars_visible'] = False
     assert rules.STARS_LOW in evaluate(md).reasons
+
+
+def test_count_withheld_by_the_no_stars_gate_is_stars_low_not_sky_unknown():
+    # Roof Open, no stars in frame: the observable-sky gate keeps star
+    # detection off, so STAR_COUNT is N/A. That is an overcast sky, with or
+    # without ML and with or without a learned baseline.
+    no_ml = {'STAR_COUNT': 'N/A', REASON_KEY: 'no_stars'}
+    roofless = read_settings({'imaging_conditions': {'require_roof_open': False}})
+    assert evaluate(no_ml, settings=roofless).reasons == [rules.STARS_LOW]
+    md = clear_meta(STAR_COUNT='N/A', **{REASON_KEY: 'no_stars'})
+    ev = evaluate(md, baseline=300.0)
+    assert rules.STARS_LOW in ev.reasons and rules.SKY_UNKNOWN not in ev.reasons
+    assert ev.ratio is None and read_frame_signals(md).star_count is None
+
+
+@pytest.mark.parametrize("reason, expected", [('twilight', rules.DAYLIGHT),
+                                              ('roof', rules.ROOF_NOT_OPEN)])
+def test_other_gate_reasons_keep_their_own_reason_code(reason, expected):
+    md = clear_meta(STAR_COUNT='N/A', **{REASON_KEY: reason})
+    if reason == 'roof':
+        md['_ML_RESULTS'].update(roof_status='Closed', roof_confidence=0.99)
+    ev = evaluate(md, sun=-3.0 if reason == 'twilight' else -30.0, baseline=300.0)
+    assert expected in ev.reasons
+    assert rules.STARS_LOW not in ev.reasons and rules.SKY_UNKNOWN not in ev.reasons
+    assert not read_frame_signals(md).no_star_evidence
+
+
+def test_a_counted_frame_is_never_no_star_evidence():
+    # A reprocess can carry a stale gate reason beside a real count.
+    sig = read_frame_signals(clear_meta(**{REASON_KEY: 'no_stars'}))
+    assert sig.star_count == 300 and not sig.no_star_evidence
+
+
+def test_the_gate_plane_count_is_never_the_conditions_star_count():
+    md = clear_meta(STAR_COUNT='N/A', _SKY_EVIDENCE={'star_count': 412})
+    assert read_frame_signals(md).star_count is None
 
 
 def test_nothing_to_judge_the_sky_by_is_sky_unknown():
@@ -126,18 +161,18 @@ def test_static_frame_is_bad_and_not_sky_unknown():
 
 def test_trend_against_the_recent_median():
     recent = [300, 310, 290, 305, 295]
-    ev = evaluate(clear_meta(**{EVIDENCE_KEY: {'star_count': 120}}), recent=recent)
+    ev = evaluate(clear_meta(STAR_COUNT='120'), recent=recent)
     assert ev.trend == pytest.approx((120 - 300) / 300, abs=1e-3)
     assert ev.change_pct == -60.0
     assert rules.STARS_DROPPING in ev.reasons
     # 200 of 300 is a 33 % drop: under the default 40 %.
     assert rules.STARS_DROPPING not in evaluate(
-        clear_meta(**{EVIDENCE_KEY: {'star_count': 200}}), recent=recent).reasons
+        clear_meta(STAR_COUNT='200'), recent=recent).reasons
 
 
 def test_star_drop_threshold_is_a_configurable_percent():
     settings = read_settings({'imaging_conditions': {'star_drop_pct': 25}})
-    ev = evaluate(clear_meta(**{EVIDENCE_KEY: {'star_count': 200}}), recent=[300] * 5,
+    ev = evaluate(clear_meta(STAR_COUNT='200'), recent=[300] * 5,
                   settings=settings)
     assert ev.change_pct == pytest.approx(-33.3) and rules.STARS_DROPPING in ev.reasons
 
@@ -148,7 +183,7 @@ def test_trend_needs_a_few_earlier_frames():
 
 def test_trend_uses_only_the_last_trend_frames():
     settings = read_settings({'imaging_conditions': {'trend_frames': 3}})
-    ev = evaluate(clear_meta(**{EVIDENCE_KEY: {'star_count': 100}}),
+    ev = evaluate(clear_meta(STAR_COUNT='100'),
                   recent=[1000] * 20 + [100, 100, 100], settings=settings)
     assert ev.trend == 0.0
 

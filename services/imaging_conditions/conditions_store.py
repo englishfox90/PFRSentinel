@@ -53,13 +53,15 @@ def empty_record() -> dict:
                   'change_pct': None, 'window_frames': None},
         'cloud_cover_pct': None,
         'cloud_cover_source': None,
-        'fwhm': {'px': None, 'arcsec': None, 'night_median_px': None, 'change_pct': None},
+        'fwhm': {'px': None, 'arcsec': None, 'night_median_px': None, 'change_pct': None,
+                 'reference_px': None, 'reference_nights': 0},
         'sun_altitude_deg': None,
-        'moon': {'up': None, 'illumination_pct': None},
+        'moon': {'up': None, 'illumination_pct': None, 'altitude_deg': None},
         'baseline_bin': None,
         'baseline_status': {'state': 'learning', 'samples': 0,
                             'needed': int(DEFAULT_CONFIG[CONFIG_KEY]['baseline_min_samples']),
-                            'bin': None},
+                            'bin': None, 'nights': 0},
+        'target': None,
     }
 
 

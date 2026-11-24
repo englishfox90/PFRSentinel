@@ -60,6 +60,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         private double? maxFwhmPx;
         private double? maxStarDropPct;
         private double? maxFwhmRisePct;
+        private double? minMoonSeparationDeg;
         private bool requireRoofOpen;
         private bool treatNoVerdictAsBad = true;
         private bool onlyBeforeExposures = true;
@@ -121,6 +122,13 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
             set { maxFwhmRisePct = SentinelConditionsSettings.Percent(value, allowZero: false); RaisePropertyChanged(nameof(MaxFwhmRisePct)); }
         }
 
+        /// <summary>Smallest target-to-Moon distance, degrees, while the Moon is up; null = not used.</summary>
+        [JsonProperty]
+        public double? MinMoonSeparationDeg {
+            get => minMoonSeparationDeg;
+            set { minMoonSeparationDeg = SentinelConditionsSettings.Limit(value, 180.0); RaisePropertyChanged(nameof(MinMoonSeparationDeg)); }
+        }
+
         /// <summary>Pause unless the roof reads Open, whatever Sentinel's own roof setting.</summary>
         [JsonProperty]
         public bool RequireRoofOpen {
@@ -129,8 +137,9 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         }
 
         /// <summary>
-        /// Pause when Sentinel gives no verdict (unreachable, token rejected, stale, warming up,
-        /// switched off). On by default: no answer is not a yes.
+        /// Pause when Sentinel gives no verdict (unreachable, token rejected, stale, switched
+        /// off). On by default: no answer is not a yes. A Sentinel that answers but has not
+        /// judged a frame yet is not this case; the evaluator allows it.
         /// </summary>
         [JsonProperty]
         public bool TreatNoVerdictAsBad {
@@ -303,6 +312,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                 MaxFwhmPx = MaxFwhmPx,
                 MaxStarDropPct = MaxStarDropPct,
                 MaxFwhmRisePct = MaxFwhmRisePct,
+                MinMoonSeparationDeg = MinMoonSeparationDeg,
                 RequireRoofOpen = RequireRoofOpen,
                 TreatNoVerdictAsBad = TreatNoVerdictAsBad,
                 OnlyBeforeExposures = OnlyBeforeExposures,
@@ -325,6 +335,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
             MaxFwhmPx = MaxFwhmPx,
             MaxStarDropPct = MaxStarDropPct,
             MaxFwhmRisePct = MaxFwhmRisePct,
+            MinMoonSeparationDeg = MinMoonSeparationDeg,
             RequireRoofOpen = RequireRoofOpen,
         };
 

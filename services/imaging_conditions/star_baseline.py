@@ -1,94 +1,109 @@
 """
-This rig's clear-sky star count, learned from its own good frames.
+This rig's clear-sky star count, learned from its own good nights.
 
-The star count ``sky_evidence`` measures depends on the lens, the sensor,
-the exposure and the light pollution, so no fixed number can say "clear".
-Frames the feed is confident about — roof Open, astronomical night, ML
-Clear, not sensor noise — teach a per-bin median here; the bins split by
-the Moon (down, or up in an illumination quarter) because a bright Moon
-washes out most of the faint stars a moonless sky shows.
+The star count depends on the lens, the sensor, the exposure and the light
+pollution, so no fixed number can say "clear". Frames the feed is confident
+about — roof Open, astronomical night, ML Clear, not sensor noise
+(``frame_rules.is_baseline_frame``) — teach it. The bins split by the Moon
+(``moon_bins``: down, or up in an illumination quarter, and a bright Moon
+by its altitude too) because a bright Moon washes out most of the faint
+stars a moonless sky shows.
+
+What is kept is a store of NIGHTS, not frames (``night_series``): per Moon
+bin, one entry per clear night — the night's median count, how many clear
+frames it came from, its date — the newest MAX_NIGHTS of them, oldest out by
+number of nights and never by age. The baseline is a HIGH percentile across
+those nights (BASELINE_PERCENTILE), not their median: "clear sky" means this
+rig's good nights, so a hazy night the ML still calls Clear barely moves it
+and it sharpens as nights accumulate. Tonight takes part as it goes, once it
+has enough clear frames, so a first night behaves like a running median.
+
+The same clear frames' FWHM is kept the same way (one series, not per Moon
+bin: seeing does not follow the Moon) and read from the LOW side
+(FWHM_REFERENCE_PERCENTILE), because for star width good is small.
 
 Learned on each installation, never shipped: no star count from any other
 rig is a default. The file carries a stamp — camera, analysed frame size
 and the lens calibration's plate scale — and a frame from a different
 camera, frame size or lens (scale off by more than LENS_TOLERANCE) starts
-the baseline over, because the old counts no longer describe this sky.
+everything over, because the old nights no longer describe this sky.
 
-Persisted to ``<app-data>/imaging_conditions/star_baseline.json``: written
-atomically (temp file + ``os.replace``), at most every SAVE_INTERVAL_S,
-bounded to MAX_SAMPLES per bin, and read back tolerantly — a truncated,
-oversized or foreign file loads as "no baseline yet", never as an error.
+Persisted to ``<app-data>/imaging_conditions/star_baseline.json`` with the
+night in progress included, so a restart mid-night loses nothing older than
+the last save: written atomically (temp file + ``os.replace``), at most
+every SAVE_INTERVAL_S plus ``save_now`` at capture stop and shutdown,
+bounded in size, and read back tolerantly — a truncated, oversized, foreign
+or older-version file loads as "no baseline yet", never as an error.
+Version 1 files (240 frame counts per bin) are not migrated. Version 2
+files written before the Moon-altitude split load as they are: their bright
+Moon nights stay under the un-split names, which are now only read when the
+Moon's altitude is unknown.
 """
 from __future__ import annotations
 
 import json
 import math
 import os
-import statistics
 import tempfile
 import threading
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from services.logger import app_logger
 from services.utils_paths import get_app_data_dir
 
-FILE_VERSION = 1
+from .moon_bins import MOON_BINS, MOON_DOWN, MOON_UNKNOWN, moon_bin  # noqa: F401 — re-exported
+from .night_series import (  # noqa: F401 — re-exported for callers
+    MAX_NIGHTS, MAX_NIGHT_SAMPLES, MIN_NIGHT_FRAMES, NightSeries, night_key,
+)
+
+FILE_VERSION = 2
 FILENAME = 'star_baseline.json'
 SUBDIR = 'imaging_conditions'
 
-# A couple of hours of clear frames at a 30 s cadence per bin: enough for a
-# stable median, short enough that a re-pointed camera or a new exposure
-# regime replaces the old figure within a night or two.
-MAX_SAMPLES = 240
+# Starting guesses, not measurements. The 75th percentile of the stored
+# nights' medians: high enough that the figure is this rig's good nights,
+# not so high that one exceptional night sets it alone.
+BASELINE_PERCENTILE = 75.0
+# The mirror image for star width, where good is LOW: the 25th percentile
+# of the nights' median FWHM is what this rig's sharp nights look like.
+FWHM_REFERENCE_PERCENTILE = 25.0
+
 MAX_FILE_BYTES = 256 * 1024
 SAVE_INTERVAL_S = 600.0
 MAX_STAR_COUNT = 100_000
+FWHM_MIN_PX = 0.3
+FWHM_MAX_PX = 100.0
 # A refinement of the same calibration moves a1 by well under 1 %; a
 # re-focused, swapped or re-mounted lens moves it by more than this.
 LENS_TOLERANCE = 0.05
-
-MOON_DOWN = 'moon_down'
-MOON_UNKNOWN = 'moon_unknown'
-_ILLUMINATION_EDGES = (25.0, 50.0, 75.0)
-MOON_BINS = (MOON_DOWN, 'moon_up_0_25', 'moon_up_25_50', 'moon_up_50_75',
-             'moon_up_75_100', MOON_UNKNOWN)
-
-
-def moon_bin(moon_up, illumination_pct) -> str:
-    """The baseline bin for the Moon's state. ``moon_up`` None = no site."""
-    if moon_up is None:
-        return MOON_UNKNOWN
-    if not moon_up:
-        return MOON_DOWN
-    try:
-        illum = float(illumination_pct)
-    except (TypeError, ValueError):
-        return MOON_UNKNOWN
-    if not math.isfinite(illum):
-        return MOON_UNKNOWN
-    for i, edge in enumerate(_ILLUMINATION_EDGES):
-        if illum < edge:
-            return MOON_BINS[1 + i]
-    return MOON_BINS[4]
-
 
 def default_baseline_path() -> str:
     return os.path.join(get_app_data_dir(), SUBDIR, FILENAME)
 
 
-class StarBaseline:
-    """Thread-safe per-bin sample store with lazy load and throttled saves."""
+def _star_series() -> NightSeries:
+    return NightSeries(0, MAX_STAR_COUNT)
 
-    def __init__(self, path: Optional[str] = None, *, max_samples: int = MAX_SAMPLES,
+
+def _fwhm_series() -> NightSeries:
+    return NightSeries(FWHM_MIN_PX, FWHM_MAX_PX)
+
+
+class StarBaseline:
+    """Thread-safe store of clear nights with lazy load and throttled saves."""
+
+    def __init__(self, path: Optional[str] = None, *,
                  clock: Callable[[], float] = time.monotonic,
-                 save_interval_s: float = SAVE_INTERVAL_S):
+                 save_interval_s: float = SAVE_INTERVAL_S,
+                 night_fn: Callable[[], str] = night_key):
         self._path = path
-        self._max = max_samples
         self._clock = clock
         self._save_interval_s = save_interval_s
+        self._night_fn = night_fn
         self._lock = threading.Lock()
-        self._bins: Dict[str, List[int]] = {}
+        self._bins: Dict[str, NightSeries] = {}
+        self._fwhm = _fwhm_series()
         self._stamp: Optional[dict] = None
         self._loaded = False
         self._dirty = False
@@ -98,38 +113,80 @@ class StarBaseline:
     def path(self) -> str:
         return self._path or default_baseline_path()
 
-    def add(self, bin_name: str, star_count: int) -> None:
-        if bin_name not in MOON_BINS or not _valid_count(star_count):
+    def add(self, bin_name: str, star_count, night: Optional[str] = None,
+            min_frames: int = MIN_NIGHT_FRAMES) -> None:
+        """One clear frame's star count for ``night`` (default: the observing
+        night now). ``min_frames`` is what the night in progress must hold to
+        enter the history when a later night replaces it."""
+        if bin_name not in MOON_BINS:
             return
+        night = night or self._night_fn()
         with self._lock:
             self._ensure_loaded_locked()
-            samples = self._bins.setdefault(bin_name, [])
-            samples.append(int(star_count))
-            del samples[:-self._max]
-            self._dirty = True
+            series = self._bins.get(bin_name)
+            if series is None:
+                series = _star_series()
+            if series.add(night, star_count, min_frames):
+                self._bins[bin_name] = series
+                self._dirty = True
+
+    def add_fwhm(self, fwhm_px, night: Optional[str] = None,
+                 min_frames: int = MIN_NIGHT_FRAMES) -> None:
+        """One clear frame's FWHM (px) for ``night``."""
+        night = night or self._night_fn()
+        with self._lock:
+            self._ensure_loaded_locked()
+            if self._fwhm.add(night, fwhm_px, min_frames):
+                self._dirty = True
 
     def baseline(self, bin_name: str, min_samples: int) -> Optional[float]:
-        """Median clear-sky count for the bin, or None with too few samples."""
+        """Clear-sky count for the bin: the BASELINE_PERCENTILE across its
+        nights of at least ``min_samples`` clear frames (tonight included
+        once it has them), or None with no such night."""
         with self._lock:
             self._ensure_loaded_locked()
-            samples = self._bins.get(bin_name) or []
-            if len(samples) < max(1, int(min_samples)):
-                return None
-            value = float(statistics.median(samples))
-        return value if value > 0 else None
+            series = self._bins.get(bin_name)
+            value = series.value(BASELINE_PERCENTILE, min_samples) if series else None
+        return value if value is not None and value > 0 else None
 
-    def status(self, bin_name: str, min_samples: int) -> dict:
-        """``baseline_status`` for the contract: learning until the bin has
-        ``min_samples`` clear frames, then ready."""
+    def status(self, bin_name: str, min_samples: int, night: Optional[str] = None) -> dict:
+        """``baseline_status`` for the contract. Learning until the bin has
+        one night of ``min_samples`` clear frames: ``samples`` is then
+        tonight's clear frames. Ready from there on: ``samples`` is every
+        clear frame behind the baseline and ``nights`` the nights it is
+        taken across."""
         needed = max(1, int(min_samples))
-        samples = self.sample_count(bin_name)
-        return {'state': 'ready' if samples >= needed else 'learning',
-                'samples': samples,
-                'needed': needed, 'bin': bin_name}
+        with self._lock:
+            self._ensure_loaded_locked()
+            series = self._bins.get(bin_name)
+            nights = series.contributing(needed) if series else []
+            tonight = series.tonight_frames(night) if series else 0
+        if nights:
+            return {'state': 'ready', 'samples': sum(n['frames'] for n in nights),
+                    'needed': needed, 'bin': bin_name, 'nights': len(nights)}
+        return {'state': 'learning', 'samples': tonight, 'needed': needed,
+                'bin': bin_name, 'nights': 0}
+
+    def fwhm_reference(self, min_samples: int) -> Tuple[Optional[float], int]:
+        """``(px, nights)``: this rig's sharp-night FWHM — the
+        FWHM_REFERENCE_PERCENTILE across the nights' medians — and how many
+        nights it is taken across. ``(None, 0)`` before the first."""
+        with self._lock:
+            self._ensure_loaded_locked()
+            nights = self._fwhm.contributing(min_samples)
+            value = self._fwhm.value(FWHM_REFERENCE_PERCENTILE, min_samples)
+        return value, len(nights)
+
+    def nights(self, bin_name: str) -> list:
+        """The stored nights of a bin, oldest first (copies)."""
+        with self._lock:
+            self._ensure_loaded_locked()
+            series = self._bins.get(bin_name)
+            return [dict(n) for n in series.nights] if series else []
 
     def ensure_stamp(self, stamp: dict) -> bool:
         """Adopt ``stamp`` (camera, width, height, lens_a1). Returns True when
-        it differs from the stored one and the samples were dropped."""
+        it differs from the stored one and every night was dropped."""
         with self._lock:
             self._ensure_loaded_locked()
             old = self._stamp
@@ -143,6 +200,7 @@ class StarBaseline:
                     self._dirty = True
                 return False
             self._bins = {}
+            self._fwhm = _fwhm_series()
             self._stamp = dict(stamp)
             self._dirty = True
         app_logger.info("Imaging conditions: camera, frame size or lens changed; "
@@ -150,9 +208,11 @@ class StarBaseline:
         return True
 
     def sample_count(self, bin_name: str) -> int:
+        """Clear frames of the bin's night in progress."""
         with self._lock:
             self._ensure_loaded_locked()
-            return len(self._bins.get(bin_name) or [])
+            series = self._bins.get(bin_name)
+            return series.tonight_frames() if series else 0
 
     def maybe_save(self) -> bool:
         """Save when dirty and the throttle allows. Returns True if written."""
@@ -163,7 +223,8 @@ class StarBaseline:
             if self._last_save is not None and now - self._last_save < self._save_interval_s:
                 return False
             data = {'version': FILE_VERSION, 'stamp': self._stamp,
-                    'bins': {k: list(v) for k, v in self._bins.items()}}
+                    'stars': {k: v.to_dict() for k, v in self._bins.items()},
+                    'fwhm': self._fwhm.to_dict()}
             self._dirty = False
             self._last_save = now
         if self._write(data):
@@ -178,9 +239,10 @@ class StarBaseline:
         return self.maybe_save()
 
     def reset(self) -> None:
-        """Forget every sample, on disk too (files only)."""
+        """Forget every night, on disk too (files only)."""
         with self._lock:
             self._bins = {}
+            self._fwhm = _fwhm_series()
             self._stamp = None
             self._loaded = True
             self._dirty = False
@@ -196,7 +258,7 @@ class StarBaseline:
         if self._loaded:
             return
         self._loaded = True
-        self._bins, self._stamp = load_file(self.path, self._max)
+        self._bins, self._fwhm, self._stamp = load_file(self.path)
 
     def _write(self, data: dict) -> bool:
         path = self.path
@@ -219,11 +281,6 @@ class StarBaseline:
                 except OSError:
                     pass
             return False
-
-
-def _valid_count(value) -> bool:
-    return (isinstance(value, int) and not isinstance(value, bool)
-            and 0 <= value <= MAX_STAR_COUNT)
 
 
 def stamps_match(a: dict, b: dict) -> bool:
@@ -250,34 +307,32 @@ def _clean_stamp(stamp) -> Optional[dict]:
             'lens_a1': lens}
 
 
-def load_bins(path: str, max_samples: int = MAX_SAMPLES) -> Dict[str, List[int]]:
-    """Read a baseline file into ``{bin: [counts]}``; anything unusable is {}."""
-    return load_file(path, max_samples)[0]
-
-
-def load_file(path: str, max_samples: int = MAX_SAMPLES):
-    """``(bins, stamp)`` from a baseline file; anything unusable is ``({}, None)``."""
+def load_file(path: str):
+    """``(bins, fwhm, stamp)`` from a baseline file: ``{bin: NightSeries}``,
+    the FWHM ``NightSeries`` and the stamp. Anything unusable — missing,
+    oversized, not JSON, another version — is ``({}, empty series, None)``."""
+    empty = ({}, _fwhm_series(), None)
     try:
         if not os.path.isfile(path):
-            return {}, None
+            return empty
         if os.path.getsize(path) > MAX_FILE_BYTES:
             app_logger.warning("Imaging conditions: star baseline file too large; starting over")
-            return {}, None
+            return empty
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
     except Exception as e:
         app_logger.warning(f"Imaging conditions: star baseline unreadable ({e}); starting over")
-        return {}, None
+        return empty
     if not isinstance(data, dict) or data.get('version') != FILE_VERSION:
-        return {}, None
-    bins = data.get('bins')
-    if not isinstance(bins, dict):
-        return {}, None
-    result = {}
-    for name, samples in bins.items():
-        if name not in MOON_BINS or not isinstance(samples, list):
+        return empty
+    stars = data.get('stars')
+    if not isinstance(stars, dict):
+        return empty
+    bins = {}
+    for name, raw in stars.items():
+        if name not in MOON_BINS:
             continue
-        clean = [int(s) for s in samples if _valid_count(s)]
-        if clean:
-            result[name] = clean[-max_samples:]
-    return result, _clean_stamp(data.get('stamp'))
+        series = _star_series().load(raw)
+        if not series.is_empty():
+            bins[name] = series
+    return bins, _fwhm_series().load(data.get('fwhm')), _clean_stamp(data.get('stamp'))

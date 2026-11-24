@@ -53,7 +53,7 @@ namespace PFRSentinel.NINA.SentinelDockables {
                 return new SentinelConditionsView { State = verdict.State, Headline = headline, Reasons = reasons };
             }
 
-            var rows = new List<SentinelStat>(10) {
+            var rows = new List<SentinelStat>(12) {
                 new("Roof", Roof(c.Roof)),
                 new("Sky", Sky(c.Sky)),
                 new("Stars", Stars(c.Stars)),
@@ -63,6 +63,10 @@ namespace PFRSentinel.NINA.SentinelDockables {
                     : SentinelStat.Unknown),
                 new("FWHM", Fwhm(c.Fwhm)),
                 new("Sun", c.SunAltitudeDeg is double alt ? $"{SentinelConditionsText.Num(alt, "0.0")}°" : SentinelStat.Unknown),
+                new("Moon", Moon(c.Moon)),
+                new("Target to Moon", c.Target?.MoonSeparationDeg is double separation
+                    ? $"{SentinelConditionsText.Num(separation, "0")}°"
+                    : SentinelStat.Unknown),
                 new("Baseline", Baseline(c.BaselineStatus)),
                 new("Judged", c.AgeSeconds is double age
                     ? $"{SentinelPanelText.Duration((int)Math.Max(0, age))} ago{(c.Stale ? " (stale)" : string.Empty)}"
@@ -139,6 +143,27 @@ namespace PFRSentinel.NINA.SentinelDockables {
                 text += $" · {SentinelConditionsText.SignedPct(change)} vs night";
             } else if (fwhm.NightMedianPx is double median) {
                 text += $" · night {SentinelConditionsText.Num(median, "0.0")} px";
+            }
+
+            return text;
+        }
+
+        private static string Moon(SentinelConditionsMoon moon) {
+            if (moon.Up is not bool up) {
+                return SentinelStat.Unknown;
+            }
+
+            if (!up) {
+                return "down";
+            }
+
+            string text = "up";
+            if (moon.IlluminationPct is double lit) {
+                text += $" · {SentinelConditionsText.Num(lit, "0")}% lit";
+            }
+
+            if (moon.AltitudeDeg is double altitude) {
+                text += $" · {SentinelConditionsText.Num(altitude, "0")}° high";
             }
 
             return text;

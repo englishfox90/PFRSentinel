@@ -15,7 +15,7 @@ REASON_TEXT = {
     'stars_dropping': "Stars dropping",
     'fwhm_high': "Stars soft (FWHM)",
     'stale': "No recent frames",
-    'warming_up': "Warming up",
+    'warming_up': "Waiting for first frame",
     'recovering': "Recovering",
     'disabled': "Off",
 }
@@ -26,15 +26,18 @@ MOON_BIN_TEXT = {
     'moon_up_25_50': "Moon up, 25–50% lit",
     'moon_up_50_75': "Moon up, 50–75% lit",
     'moon_up_75_100': "Moon up, 75–100% lit",
+    'moon_up_50_75_low': "Moon low, 50–75% lit",
+    'moon_up_50_75_high': "Moon high, 50–75% lit",
+    'moon_up_75_100_low': "Moon low, 75–100% lit",
+    'moon_up_75_100_high': "Moon high, 75–100% lit",
     'moon_unknown': "Moon position unknown (no site set)",
 }
 
-STAR_INDEX_TOOLTIP = (
-    "Star index: star-like points counted on the sky disc after it is resampled "
-    "to a fixed 900 px plane, so the figure compares between frames, exposures "
-    "and frame sizes, and against this rig's learned clear-sky index.\n"
-    "It is not the SEEING tile's star count, which is measured on the full "
-    "frame for FWHM and changes with resolution and detection threshold."
+STAR_COUNT_TOOLTIP = (
+    "Stars: the stars counted on the sky disc of the latest frame, compared "
+    "with this rig's learned clear-sky count.\n"
+    "It is the same count as the SEEING tile, the {STAR_COUNT} overlay token "
+    "and the image library."
 )
 
 _HOLDING = ('warming_up', 'recovering')
@@ -59,9 +62,13 @@ def summarize_conditions(snapshot: dict, capturing=None):
     """``(text, tone)`` for a one-line verdict; tones are the status strip's.
 
     ``capturing`` is whether capture is running (None = not known). With
-    capture stopped there is nothing to warm up, so a store that never saw
-    a frame reads as idle, and a stale one says capture stopped rather than
-    implying frames went missing.
+    capture stopped there is no first frame to wait for, so a store that
+    never saw a frame reads as idle, and a stale one says capture stopped
+    rather than implying frames went missing.
+
+    ``warming_up`` means only "no frame judged yet since the start": the
+    first good frame sets OK (``verdict_hysteresis``), so there is no
+    good-frame count to show for it.
     """
     if not isinstance(snapshot, dict) or not snapshot.get('enabled', False):
         return "Off", 'muted'
@@ -70,7 +77,7 @@ def summarize_conditions(snapshot: dict, capturing=None):
         cloud = snapshot.get('cloud_cover_pct')
         return ("OK" if cloud is None else f"OK · {cloud:.0f}% cloud"), 'ok'
     if capturing is False:
-        if _never_judged(snapshot):
+        if _never_judged(snapshot) or reasons[:1] == ['warming_up']:
             return "Idle", 'muted'
         if snapshot.get('stale'):
             return "Paused · Capture stopped", 'muted'
@@ -92,14 +99,14 @@ def secondary_text(snapshot: dict, capturing=None, good_needed=None) -> str:
     if snapshot.get('imaging_ok'):
         return ""
     if snapshot.get('stale'):
-        return "Reported to NINA as not OK until frames arrive again"
+        return "NINA gets no verdict until frames arrive again"
     reasons = list(snapshot.get('reasons') or [])
     if not reasons:
         return ""
     if reasons[0] == 'warming_up':
-        if capturing is False and _never_judged(snapshot):
+        if capturing is False:
             return ""
-        return f"{_good_so_far(snapshot, good_needed)} before imaging is OK"
+        return "No frame judged yet, so NINA is not held back"
     if reasons[0] == 'recovering':
         return f"{_good_so_far(snapshot, good_needed)} to resume"
     rest = [reason_text(r) for r in reasons[1:]]
@@ -153,7 +160,7 @@ def detail_lines(snapshot: dict) -> str:
         lines.append(as_of)
     stars = snapshot.get('stars') or {}
     if stars.get('count') is not None:
-        text = f"Star index: {stars['count']}"
+        text = f"Stars: {stars['count']}"
         if stars.get('baseline') is not None:
             text += f" of a clear-sky {stars['baseline']:.0f}"
         if stars.get('change_pct') is not None:
@@ -165,7 +172,7 @@ def detail_lines(snapshot: dict) -> str:
     cloud = snapshot.get('cloud_cover_pct')
     if cloud is not None:
         source = "estimated from the ML sky class" \
-            if snapshot.get('cloud_cover_source') == 'ml_class' else "from the star index"
+            if snapshot.get('cloud_cover_source') == 'ml_class' else "from the star count"
         lines.append(f"Cloud cover: {cloud:.0f}% ({source})")
     fwhm = snapshot.get('fwhm') or {}
     if fwhm.get('px') is not None:
@@ -176,6 +183,8 @@ def detail_lines(snapshot: dict) -> str:
             text += f", tonight's median {fwhm['night_median_px']:.1f} px"
         if fwhm.get('change_pct') is not None:
             text += f" ({signed_pct(fwhm['change_pct'])})"
+        if fwhm.get('reference_px') is not None:
+            text += f"; your sharp nights {fwhm['reference_px']:.1f} px"
         lines.append(text)
     roof = snapshot.get('roof') or {}
     sky = snapshot.get('sky') or {}
@@ -185,6 +194,10 @@ def detail_lines(snapshot: dict) -> str:
     if snapshot.get('sun_altitude_deg') is not None:
         parts.append(f"Sun {snapshot['sun_altitude_deg']:.0f}°")
     lines.append(" · ".join(parts))
+    from .target_moon_text import target_moon_detail
+    target = target_moon_detail(snapshot)
+    if target:
+        lines.append(target)
     return "\n".join(lines)
 
 
@@ -196,7 +209,7 @@ def baseline_learning_text(snapshot: dict) -> str:
     """"Learning your sky: 12/30 clear frames with the Moon down" while the
     current Moon bin's baseline is not ready. Empty once it is, and empty
     whenever the latest frame could not have taught it anything (sun up, or
-    no star index), where a learning count is only noise."""
+    no star count), where a learning count is only noise."""
     snapshot = snapshot or {}
     status = snapshot.get('baseline_status') or {}
     if status.get('state') != 'learning':

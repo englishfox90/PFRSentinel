@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS images (
     star_count   INTEGER,
     seeing       TEXT,
     fwhm         TEXT,
+    imaging_ok       INTEGER,
+    frame_ok         INTEGER,
+    imaging_reasons  TEXT,
+    clear_sky_ratio  REAL,
+    moon_bin         TEXT,
+    moon_separation_deg REAL,
     created_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_images_captured_at ON images(captured_at);
@@ -39,7 +45,9 @@ CREATE INDEX IF NOT EXISTS idx_images_captured_at ON images(captured_at);
 _FIELDS = (
     "captured_at", "path", "width", "height", "bytes",
     "session", "exposure", "gain", "temp", "camera", "weather",
-    "roof", "condition", "clouds", "star_count", "seeing", "fwhm", "created_at",
+    "roof", "condition", "clouds", "star_count", "seeing", "fwhm",
+    "imaging_ok", "frame_ok", "imaging_reasons", "clear_sky_ratio", "moon_bin",
+    "moon_separation_deg", "created_at",
 )
 
 # Columns added after the original release. Older databases predate them, so we
@@ -52,6 +60,15 @@ _MIGRATIONS = (
     ("star_count", "INTEGER"),
     ("seeing", "TEXT"),
     ("fwhm", "TEXT"),
+    # Imaging-conditions grade at capture time (services/imaging_conditions/
+    # frame_grade.py). NULL imaging_ok = the frame was never graded.
+    ("imaging_ok", "INTEGER"),
+    ("frame_ok", "INTEGER"),
+    ("imaging_reasons", "TEXT"),
+    ("clear_sky_ratio", "REAL"),
+    ("moon_bin", "TEXT"),
+    # NINA's target to the Moon at capture; NULL = no target was reported.
+    ("moon_separation_deg", "REAL"),
 )
 
 
@@ -108,14 +125,15 @@ class LibraryIndex:
         """Lightweight rows for session grouping, oldest first.
 
         Carries only what the night summary and condition band need —
-        ``id, captured_at, temp, roof, condition, clouds`` — not the full
-        per-frame metadata.
+        ``id, captured_at, temp, roof, condition, clouds``, the star figures
+        and the imaging-conditions verdict — not the full per-frame metadata.
         """
         where, params = self._range_clause(since, until)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, captured_at, temp, roof, condition, clouds, "
-                f"star_count, seeing, fwhm FROM images{where} "
+                "star_count, seeing, fwhm, imaging_ok, frame_ok, imaging_reasons "
+                f"FROM images{where} "
                 "ORDER BY captured_at ASC, id ASC", params
             ).fetchall()
         return [dict(r) for r in rows]

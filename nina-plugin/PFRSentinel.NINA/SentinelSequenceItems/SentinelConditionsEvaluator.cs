@@ -34,15 +34,21 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         /// <summary>Largest acceptable FWHM rise against the night median, percent: crossed at +Y or higher.</summary>
         public double? MaxFwhmRisePct { get; init; }
 
+        /// <summary>
+        /// Smallest acceptable distance between the target and the Moon, degrees. Used
+        /// only while the Moon is up.
+        /// </summary>
+        public double? MinMoonSeparationDeg { get; init; }
+
         /// <summary>Require the roof to read Open, whatever Sentinel's own setting.</summary>
         public bool RequireRoofOpen { get; init; }
 
         /// <summary>The limits for a sequence-log line; "none" for an unset one.</summary>
         public string Describe() =>
             string.Format(CultureInfo.InvariantCulture,
-                "MinStarRatio: {0}, MaxCloudCoverPct: {1}, MaxFwhmArcsec: {2}, MaxFwhmPx: {3}, MaxStarDropPct: {4}, MaxFwhmRisePct: {5}, RequireRoofOpen: {6}",
+                "MinStarRatio: {0}, MaxCloudCoverPct: {1}, MaxFwhmArcsec: {2}, MaxFwhmPx: {3}, MaxStarDropPct: {4}, MaxFwhmRisePct: {5}, MinMoonSeparationDeg: {6}, RequireRoofOpen: {7}",
                 Show(MinStarRatio), Show(MaxCloudCoverPct), Show(MaxFwhmArcsec), Show(MaxFwhmPx),
-                Show(MaxStarDropPct), Show(MaxFwhmRisePct), RequireRoofOpen);
+                Show(MaxStarDropPct), Show(MaxFwhmRisePct), Show(MinMoonSeparationDeg), RequireRoofOpen);
 
         private static string Show(double? value) =>
             value is double v ? v.ToString("0.###", CultureInfo.InvariantCulture) : "none";
@@ -58,8 +64,8 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         Bad,
 
         /// <summary>
-        /// Nothing is known: Sentinel unreachable, rejected the request, stale, warming
-        /// up or switched off. The item's "treat no verdict as bad" setting decides.
+        /// Nothing is known: Sentinel unreachable, rejected the request, stale or
+        /// switched off. The item's "treat no verdict as bad" setting decides.
         /// </summary>
         NoVerdict,
     }
@@ -108,10 +114,12 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
     /// Pure, NINA-free and clock-injected, so the whole decision can be unit-tested. Rules:
     /// <list type="number">
     /// <item><description>No reading, a failed read, or one older than <see cref="MaxReadingAge"/> is NoVerdict.</description></item>
-    /// <item><description>Sentinel off, stale, or "not OK" only for warming_up / stale / disabled is NoVerdict.</description></item>
+    /// <item><description>Sentinel off or stale is NoVerdict.</description></item>
+    /// <item><description>Sentinel "not OK" only for warming_up - it has not judged a frame yet, so nothing has said the sky is bad - is OK with a note; the operator's limits still apply.</description></item>
     /// <item><description>Sentinel "not OK" for any measured reason is Bad, <c>recovering</c> included.</description></item>
     /// <item><description>Sentinel "OK" is decided by <c>imaging_ok</c>, never by <c>reasons</c>: during Sentinel's grace frames <c>reasons</c> lists a bad frame's codes while <c>imaging_ok</c> is still true; those become a note.</description></item>
     /// <item><description>Each limit set and crossed adds a Bad reason; a limit whose measurement is null is skipped with a note, never treated as crossed - except Require roof Open, where an Unknown roof is not Open.</description></item>
+    /// <item><description>The Moon-separation limit is used only while Sentinel reports the Moon up: with the Moon down it is skipped silently, and with no target or no Moon position it is skipped with a note.</description></item>
     /// <item><description>While <c>baseline_status</c> reads learning, the star-ratio and cloud-cover limits are skipped with a note; the change-% limits still apply.</description></item>
     /// </list>
     /// </remarks>
@@ -150,7 +158,16 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                     return NoVerdict(SentinelConditionsText.Reason(SentinelConditionReasons.Stale, c));
                 }
 
-                return new SentinelConditionsVerdict(SentinelConditionsState.NoVerdict, Phrases(c), None);
+                // warming_up alone: Sentinel has not judged a frame yet. Good unless
+                // stated otherwise - a first night must not read "bad" for want of frames.
+                var early = new List<string>();
+                var earlyNotes = new List<string> {
+                    "PFR Sentinel has not judged a frame yet; imaging is allowed until it reports a problem",
+                };
+                ApplyLimits(c, thresholds, early, earlyNotes);
+                return new SentinelConditionsVerdict(
+                    early.Count > 0 ? SentinelConditionsState.Bad : SentinelConditionsState.Ok,
+                    early, earlyNotes);
             }
 
             var reasons = new List<string>();
@@ -215,6 +232,19 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                     }
                 } else {
                     notes.Add("FWHM change not measured; your rise limit is not used");
+                }
+            }
+
+            if (t.MinMoonSeparationDeg is double minSeparation && c.Moon.Up != false) {
+                // Moon down: nothing to keep away from, so nothing is said either.
+                if (c.Moon.Up is null) {
+                    notes.Add("Sentinel does not know whether the Moon is up; your Moon separation limit is not used");
+                } else if (c.Target?.MoonSeparationDeg is double separation) {
+                    if (separation < minSeparation) {
+                        reasons.Add($"the target is {N(separation, "0")}° from the Moon, closer than your {N(minSeparation, "0")}°");
+                    }
+                } else {
+                    notes.Add("target to Moon distance not known; your Moon separation limit is not used");
                 }
             }
         }

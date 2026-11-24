@@ -66,14 +66,17 @@ Both follow Sentinel's verdict, and both accept optional limits of your own. Lea
 | **FWHM rise %** | empty | Star size (FWHM) is this percentage or more above the night's median. |
 | **Max FWHM (″)** | empty | Pier-camera FWHM in arcseconds is above the number. Needs Sentinel to know the pier camera's plate scale. |
 | **Max FWHM (px)** | empty | Pier-camera FWHM in pixels is above the number. |
+| **Min Moon separation (°)** | empty | The target is closer to the Moon than this many degrees while the Moon is up. Not used while the Moon is down. Needs **Send the current sequencer target to Sentinel** on, and a site (latitude and longitude) set in Sentinel. *New in the next release.* |
 | **Require roof Open** | off | The roof does not read Open, whatever Sentinel's own roof setting. An unknown roof is not Open. |
 | **No verdict = bad** | on | See below. |
 
 A limit whose measurement Sentinel does not have yet (no stars detected, no plate scale) is skipped, not treated as bad, and the item's status line says so.
 
+**Min Moon separation** is the only way a target near the Moon pauses a sequence: Sentinel shows the distance (see [Imaging Conditions](Imaging-Conditions#your-target-and-the-moon)) but never pauses for it. Bear in mind that the pause lasts until the target moves away, the sequence moves to another target, or the Moon sets. If Sentinel has no target from NINA or does not know where the Moon is, the limit is skipped and the status line says so.
+
 **While Sentinel is learning this sky.** Every rig learns its own clear-sky star count on its own installation, so a new install starts out learning. Until it has enough clear frames, **Min star ratio** and **Max cloud %** have nothing to compare against and are skipped; the status line says, for example, "Sentinel is learning this sky (12/30 clear frames); star ratio and cloud cover not used yet". **Star drop %** and **FWHM rise %** work from the first frames, because they compare the sky with itself.
 
-**No verdict.** When Sentinel cannot give a verdict — it is not running or not reachable, it rejected the token, capture stopped so its verdict is stale, it is still gathering its first frames, imaging conditions are switched off in Sentinel, or this Sentinel is too old to have them — **No verdict = bad** decides. On (the default), the trigger pauses and the loop ends: no answer is not a yes. Off, imaging carries on. The status line always names the reason, so a pause caused by a rejected token is easy to tell from a cloudy sky.
+**No verdict.** When Sentinel cannot give a verdict — it is not running or not reachable, it rejected the token, capture stopped so its verdict is stale, imaging conditions are switched off in Sentinel, or this Sentinel is too old to have them — **No verdict = bad** decides. On (the default), the trigger pauses and the loop ends: no answer is not a yes. Off, imaging carries on. The status line always names the reason, so a pause caused by a rejected token is easy to tell from a cloudy sky. A Sentinel that answers but has not judged a frame yet ("warming up") is not a missing verdict: imaging is allowed, with a note, until Sentinel reports a problem.
 
 The trigger has a few settings of its own:
 

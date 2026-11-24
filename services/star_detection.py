@@ -1,8 +1,11 @@
 """
-Star detection and seeing estimation for astrophotography images.
+Star count and seeing estimation for astrophotography images.
 
-Uses OpenCV blob detection to count point sources (stars) and estimate
-FWHM-based seeing quality from detected star profiles.
+``analyze_stars`` counts with the shared noise-adaptive scan
+(``star_source_scan``) at the frame's own resolution and estimates
+FWHM-based seeing from the stars it found. ``detect_stars`` is the older
+fixed-threshold blob detector, kept for callers that want it; nothing
+user-visible counts with it any more.
 """
 import cv2
 import numpy as np
@@ -90,14 +93,13 @@ def estimate_fwhm(image, stars, radius=8):
     if not stars or image is None or image.size == 0:
         return 0.0
 
-    # float32, not float64: FWHM is a half-max crossing measured on a small
-    # cutout, so ~7 significant digits is already far more precision than the
-    # measurement carries, and it halves a full-frame temp (50 MB vs 101 MB on
-    # a 3552x3552 frame).
+    # Grey at the frame's own depth; each cutout is converted on its own.
+    # A float copy of the whole plane was 50 MB and ~25 ms on a 3552 px frame
+    # for a measurement that reads 17x17 pixels per star.
     if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     else:
-        gray = image.astype(np.float32)
+        gray = image
 
     h, w = gray.shape
     fwhm_values = []
@@ -110,7 +112,7 @@ def estimate_fwhm(image, stars, radius=8):
             continue
 
         # Extract cutout
-        cutout = gray[y - radius:y + radius + 1, x - radius:x + radius + 1]
+        cutout = gray[y - radius:y + radius + 1, x - radius:x + radius + 1].astype(np.float32)
 
         # Measure FWHM from radial profile
         peak = cutout[radius, radius]
@@ -156,19 +158,28 @@ def should_run_star_detection(config, metadata):
     return is_observing_window(config, metadata, feature="Star detection")
 
 
-def analyze_stars(image):
+def analyze_stars(image, sky_circle=None, circle_frame_size=None):
     """Run full star analysis: detection + FWHM + seeing label.
 
+    The count is the one star count of the app (``star_source_scan``):
+    noise-adaptive, inside the sky circle, at the frame's own resolution.
+
     Args:
-        image: numpy array (RGB or grayscale)
+        image: numpy array (RGB or grayscale, uint8 or uint16)
+        sky_circle: ``(cx, cy, r)`` the evidence scan measured for this
+            frame (``metadata['_SKY_EVIDENCE']['sky_circle']``), or None to
+            scan the whole frame.
+        circle_frame_size: ``(w, h)`` of the frame the circle was measured
+            on; the circle is scaled when ``image`` is another size.
 
     Returns:
         dict with keys 'STAR_COUNT' (int), 'FWHM' (float), 'SEEING' (str)
     """
     try:
-        stars = detect_stars(image)
+        from .star_source_scan import scan_frame
+        stars, grey = scan_frame(image, sky_circle, circle_frame_size)
         star_count = len(stars)
-        fwhm = estimate_fwhm(image, stars) if stars else 0.0
+        fwhm = estimate_fwhm(grey, stars) if stars else 0.0
         seeing = seeing_label(fwhm)
 
         return {
@@ -183,3 +194,12 @@ def analyze_stars(image):
             'FWHM': 'N/A',
             'SEEING': 'N/A',
         }
+
+
+def analyze_frame_stars(image, metadata):
+    """``analyze_stars`` with the sky circle the evidence scan left on the
+    frame's metadata — the call both pipelines make."""
+    evidence = metadata.get('_SKY_EVIDENCE')
+    if not isinstance(evidence, dict):
+        evidence = {}
+    return analyze_stars(image, evidence.get('sky_circle'), evidence.get('frame_size'))

@@ -142,6 +142,16 @@
                                 TextAlignment="Right"
                                 ToolTip="Highest pier-camera FWHM in pixels. Empty = not used." />
                         </StackPanel>
+                        <StackPanel Margin="0,2,12,2" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Text="Min Moon separation (°)" />
+                            <TextBox
+                                MinWidth="40"
+                                Margin="5,0,0,0"
+                                VerticalAlignment="Center"
+                                Text="{Binding MinMoonSeparationDeg, TargetNullValue=''}"
+                                TextAlignment="Right"
+                                ToolTip="Smallest distance between the target and the Moon, in degrees, while the Moon is up. Needs the target push and a site set in Sentinel. Empty = not used." />
+                        </StackPanel>
                         <CheckBox
                             Margin="0,2,12,2"
                             VerticalAlignment="Center"
@@ -153,7 +163,7 @@
                             VerticalAlignment="Center"
                             Content="No verdict = bad"
                             IsChecked="{Binding TreatNoVerdictAsBad}"
-                            ToolTip="When Sentinel is unreachable, rejects the token, is stale, warming up or has conditions switched off: on treats that as bad, off carries on imaging." />
+                            ToolTip="When Sentinel is unreachable, rejects the token, is stale or has conditions switched off: on treats that as bad, off carries on imaging. A Sentinel that has not judged a frame yet never counts as bad." />
                         <CheckBox
                             Margin="0,2,12,2"
                             VerticalAlignment="Center"
@@ -262,6 +272,16 @@
                                 TextAlignment="Right"
                                 ToolTip="Highest pier-camera FWHM in pixels. Empty = not used." />
                         </StackPanel>
+                        <StackPanel Margin="0,2,12,2" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Text="Min Moon separation (°)" />
+                            <TextBox
+                                MinWidth="40"
+                                Margin="5,0,0,0"
+                                VerticalAlignment="Center"
+                                Text="{Binding MinMoonSeparationDeg, TargetNullValue=''}"
+                                TextAlignment="Right"
+                                ToolTip="Smallest distance between the target and the Moon, in degrees, while the Moon is up. Needs the target push and a site set in Sentinel. Empty = not used." />
+                        </StackPanel>
                         <CheckBox
                             Margin="0,2,12,2"
                             VerticalAlignment="Center"
@@ -273,7 +293,7 @@
                             VerticalAlignment="Center"
                             Content="No verdict = bad"
                             IsChecked="{Binding TreatNoVerdictAsBad}"
-                            ToolTip="When Sentinel is unreachable, rejects the token, is stale, warming up or has conditions switched off: on treats that as bad, off carries on imaging." />
+                            ToolTip="When Sentinel is unreachable, rejects the token, is stale or has conditions switched off: on treats that as bad, off carries on imaging. A Sentinel that has not judged a frame yet never counts as bad." />
                     </WrapPanel>
                     <TextBlock
                         Margin="0,3,0,0"

@@ -22,18 +22,20 @@ CAUSE_TEXT = {
     'sky_unknown': "no sky reading",
     'stale': "no new frames",
     'restarted': "Sentinel restarted",
-    'warming_up': "checking the sky",
+    'warming_up': "no frame judged yet",
     'recovering': "waiting for steady clear frames",
 }
 
 NINA_STALE_S = 15 * 60
 
-STAR_INDEX_HELP = (
-    "Star index: how many stars Sentinel counts on the sky, measured the same "
-    "way on every frame so frames can be compared. Higher is clearer.")
+STAR_COUNT_HELP = (
+    "Stars: how many stars Sentinel counts on the sky in each frame — the same "
+    "count as the SEEING tile, the {STAR_COUNT} overlay token and the image "
+    "library. More stars means a clearer sky.")
 BASELINE_HELP = (
-    "Clear-sky baseline: the star index this camera sees on a clear night, "
-    "learned from its own frames (separately for each Moon phase).")
+    "Clear-sky baseline: the star count this camera sees on a clear night, "
+    "learned from its own clear nights (separately for each Moon phase, and for a bright Moon low or high in the sky). It "
+    "is taken from the better of those nights, so one hazy night barely moves it.")
 FWHM_HELP = (
     "FWHM: how wide a star looks, in pixels. Rising FWHM means softer, "
     "blurrier stars — haze, dew or poor seeing.")
@@ -67,8 +69,8 @@ def verdict_sentence(snapshot: dict, capturing=None, good_needed=None, events=No
     """``(sentence, tone)``. ``events`` newest first, as the history gives them."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     if not snapshot.get('enabled', False):
-        return ("Off — NINA is told not to image. Turn Imaging Conditions on in "
-                "NINA & ASCOM."), 'muted'
+        return ("Off — Sentinel is not judging the sky, so NINA gets no verdict. "
+                "Turn Imaging Conditions on in NINA & ASCOM."), 'muted'
     never = not snapshot.get('updated_at') and not snapshot.get('frames_considered')
     reasons = list(snapshot.get('reasons') or [])
     since = local_clock(snapshot.get('changed_at'))
@@ -80,13 +82,16 @@ def verdict_sentence(snapshot: dict, capturing=None, good_needed=None, events=No
         last = local_clock(snapshot.get('updated_at'))
         at = f" since {last}" if last else ""
         if capturing is False:
-            return (f"Capture stopped — no frames{at}, so NINA is told not to "
-                    "image."), 'muted'
-        return f"No new frames{at} — NINA is told to pause.", 'warn'
+            return f"Capture stopped — no frames{at}, so NINA gets no verdict.", 'muted'
+        return f"No new frames{at} — NINA gets no verdict until they resume.", 'warn'
     head = reasons[0] if reasons else ''
     if head == 'warming_up':
-        return (f"Checking the sky — {_good_needed_text(snapshot, good_needed)} "
-                "before imaging is OK."), 'info'
+        # No frame has been judged since the start: nothing has said the sky
+        # is bad, and the first good frame is enough (verdict_hysteresis).
+        if capturing is False:
+            return "Idle — start capture to judge the sky.", 'muted'
+        return ("Waiting for the first frame — nothing judged yet, so NINA is "
+                "not held back."), 'info'
     if head == 'daylight':
         sun = snapshot.get('sun_altitude_deg')
         where = f" (sun at {sun:.0f}°)" if isinstance(sun, (int, float)) else ""
@@ -150,7 +155,10 @@ def learning_progress(snapshot: dict):
     done = min(int(status.get('samples') or 0), needed) if needed else 0
     if status.get('state') == 'ready':
         base = (snapshot.get('stars') or {}).get('baseline')
-        tail = f": star index {base:.0f}" if isinstance(base, (int, float)) else ""
+        tail = f": {base:.0f} stars" if isinstance(base, (int, float)) else ""
+        nights = status.get('nights')
+        if tail and isinstance(nights, int) and nights > 0:
+            tail += f" from {nights} clear night{'' if nights == 1 else 's'}"
         return f"Clear-sky baseline learned{moon}{tail}", needed, needed
     return f"Learning your clear sky{moon} — {done} of {needed} clear frames", done, needed
 
@@ -175,7 +183,7 @@ def nina_checked_text(checkins: dict, capturing=None):
 
 def measurements_line(snapshot: dict) -> str:
     """The latest frame's numbers in one short line: ``Stars 131/315 ·
-    Cloud 58% · FWHM 2.9 px`` (star index / clear-sky baseline). Empty before the first judged frame."""
+    Cloud 58% · FWHM 2.9 px`` (star count / clear-sky baseline). Empty before the first judged frame."""
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     if not snapshot.get('enabled') or (
             not snapshot.get('updated_at') and not snapshot.get('frames_considered')):

@@ -171,6 +171,36 @@ def _library_schemas() -> dict:
                 "temp": {"type": "string", "nullable": True},
                 "camera": {"type": "string", "nullable": True},
                 "weather": {"type": "string", "nullable": True},
+                "roof": {"type": "string", "nullable": True},
+                "condition": {"type": "string", "nullable": True},
+                "clouds": {"type": "integer", "nullable": True},
+                "star_count": {"type": "integer", "nullable": True},
+                "seeing": {"type": "string", "nullable": True},
+                "fwhm": {"type": "string", "nullable": True},
+                "imaging_ok": {
+                    "type": "integer", "nullable": True, "enum": [0, 1, None],
+                    "description": "Imaging-conditions verdict when the frame was taken "
+                                   "(1 OK, 0 not OK). null = the frame was not graded."},
+                "frame_ok": {
+                    "type": "integer", "nullable": True, "enum": [0, 1, None],
+                    "description": "This frame judged alone, before hysteresis."},
+                "imaging_reasons": {
+                    "type": "string", "nullable": True,
+                    "description": "Comma-separated reason codes, as in GET /conditions "
+                                   "'reasons'. Empty when there were none."},
+                "clear_sky_ratio": {
+                    "type": "number", "nullable": True,
+                    "description": "Star count / this rig's clear-sky baseline; null "
+                                   "while the baseline was still being learned."},
+                "moon_bin": {
+                    "type": "string", "nullable": True,
+                    "description": "Moon state the baseline was read for, e.g. 'moon_down'."},
+                "moon_separation_deg": {
+                    "type": "number", "nullable": True,
+                    "description": "Degrees between the target NINA was imaging and the "
+                                   "Moon when the frame was taken; null when NINA had "
+                                   "reported no target."},
+                "created_at": {"type": "integer"},
             },
         },
         "LibraryManifest": {

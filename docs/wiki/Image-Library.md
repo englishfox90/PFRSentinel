@@ -73,7 +73,7 @@ Each card shows:
 | Status badge | **clean** (green) when nothing notable happened; **roof closed** (red) when the roof never opened all night; or the length of the longest capture gap, e.g. "1h 12m gap" (red). A gap takes priority over roof closed. |
 | Condition band | The whole night as a coloured bar (see [Condition Band](#condition-band)). |
 | Stats | Frame count, the lowest sensor temperature, the peak star count, and the best sky quality (seeing) of the night. Star and seeing figures only appear on nights where star detection ran. |
-| Percent clear | The share of the night's frames coloured green on the condition band: clear with the roof open, or clear with the roof state unknown. Shown in green. |
+| Percent clear | The share of the night's frames coloured green on the condition band: clear with the roof open, or clear with the roof state unknown. Shown in green as "sky clear N%" (version 3.8.0 and earlier show "N% clear"). It is not the same figure as "imaging OK N%" beside it, which is the share of graded frames on which [Imaging Conditions](Imaging-Conditions) told NINA it was OK to image and also counts twilight, soft stars and the good frames needed to resume after a pause. |
 
 Click a card to open that night.
 
@@ -131,9 +131,41 @@ To the right of the preview, the **CURRENT FRAME** panel shows a condition badge
 
 Fields with no data show "—".
 
+### Imaging Conditions Grade
+
+> **New in the next release** — not available in version 3.8.0 or earlier.
+
+Under the frame details, **IMAGING CONDITIONS** shows what [Imaging Conditions](Imaging-Conditions) reported to NINA when that frame was taken. Scrub to a time to see why imaging was paused then.
+
+| Line | Description |
+|------|-------------|
+| Verdict | **OK** (green) or **Not OK** followed by the main reason, e.g. "Not OK · Cloud cover high" (amber). "Not OK · Warming up" and "Not OK · Recovering" (blue) mean the sky was being checked or imaging was waiting for a run of good frames. The reasons use the same words as the IMAGING tile on Live Monitoring. |
+| Also | Any further reasons for the same frame. |
+| This frame alone | Shown when the frame's own result differed from the verdict: one bad frame does not pause imaging, and one good frame does not resume it. |
+| Stars at N% of clear sky | The frame's star count against the clear-sky baseline learned for your camera, with the Moon state that baseline was read for. Left out while the baseline was still being learned. |
+| Target N° from the Moon | How far the target NINA was imaging was from the Moon when the frame was taken. Shown only when NINA had reported a target and the Moon was up. *New in the next release.* |
+
+The grade is stored with the frame when it is captured and never recalculated, so changing the sensitivity later does not change what past frames show. A frame shows "—" when it was not graded: Imaging Conditions was off, the frame was archived in headless mode or by version 3.8.0 or earlier. A frame reprocessed after a settings change keeps the grade of the capture it came from.
+
+The block follows the frame shown however you get there: the scrubber, Previous / Next, playback, the arrow keys, an event pin or the events list. While a night is loading, and on a frame that was not graded, it shows "—" rather than the previous frame's grade.
+
+#### Imaging lane on the scrubber
+
+On a night with graded frames the [scrubber](#scrubber) gains a lane under the condition band, on the same axis as the filmstrip, so you can watch the sky get better or worse as you drag:
+
+- **Colour** per frame: green for imaging OK, amber for not OK, grey for not graded. A pause is never shown in red. They run as a solid strip along the bottom of the lane; the area behind the line is left plain, so the lane is not mistaken for a second condition band.
+- **Line**: the stars at that frame as a share of your clear-sky baseline. High means clear; a dip is cloud or haze moving in. The dotted guide is 100%, and the line breaks where the share was not known (baseline still being learned, roof closed, daylight).
+- **Marker**: the playhead runs through the lane, with a dot on the line at the frame shown.
+
+Click or drag in the lane to go to that frame, exactly as on the filmstrip. Hover it to read a frame's time, verdict and clear-sky share without moving the playhead. The legend beside the speed buttons names the colours. Nights with no graded frames have no lane.
+
+The night's header, and its card in the session list, show the share of graded frames that were OK and the most common reason for the rest, e.g. "Imaging OK on 82% of 1,400 graded frames · mostly Cloud cover high". Nights with no graded frames show nothing.
+
+The `/library` web manifest carries the same values per image: `imaging_ok` and `frame_ok` (1, 0, or null when not graded), `imaging_reasons` (comma-separated reason codes, as in `/conditions`), `clear_sky_ratio`, `moon_bin` and `moon_separation_deg` (null when NINA had reported no target).
+
 ### Events Tonight
 
-Below the frame details, **EVENTS TONIGHT** lists what happened during the night in time order:
+Below the frame details and the imaging-conditions grade, **EVENTS TONIGHT** lists what happened during the night in time order:
 
 | Event | Description |
 |-------|-------------|
@@ -164,6 +196,7 @@ Click anywhere on the scrubber, or drag along it, to move the playhead; the prev
 | Control | Description |
 |---------|-------------|
 | Previous / Next | Step back or forward one frame. |
+| Left / Right arrow keys | Step one frame once the scrubber has been clicked; Home and End jump to the first and last frame. New in the next release. |
 | **Play** / **Pause** | Play through the night from the playhead. Playback stops at the last frame. |
 | **1×**, **8×**, **30×** | Playback speed: how many frames each step advances. The selected speed is highlighted. |
 | Frame counter | Position in the night, e.g. "frame 1,204 / 3,880 · drag to scrub". |

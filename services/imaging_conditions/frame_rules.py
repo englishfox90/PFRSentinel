@@ -14,9 +14,10 @@ Reason codes (machine-readable; the NINA plugin matches on them):
 ``sky_unknown``       no star count and no usable ML sky reading
 ``cloud_cover_high``  estimated cloud cover above ``max_cloud_cover_pct``
 ``stars_low``         star count under ``min_star_ratio`` x this rig's
-                      learned baseline; with no baseline ready (cold
-                      start) only when ML reads no stars and there is no
-                      count at all — no absolute star count is ever used
+                      learned baseline; with no count at all, when ML
+                      reads no stars or the observable-sky gate withheld
+                      the count because the open-roof frame shows none —
+                      no absolute star count is ever compared here
 ``stars_dropping``    star count fell more than ``star_drop_pct`` % below
                       the median of the last ``trend_frames`` frames
 ``fwhm_high``         FWHM more than ``fwhm_rise_pct`` % above tonight's
@@ -155,7 +156,7 @@ def evaluate_frame(signals: FrameSignals, settings: ConditionsSettings, *,
                                    / night_fwhm_median, 1)
 
     if count is None and ev.cloud_cover_pct is None and signals.stars_visible is None:
-        if not signals.frame_is_static:
+        if not signals.frame_is_static and not signals.no_star_evidence:
             reasons.append(SKY_UNKNOWN)
     if ev.cloud_cover_pct is not None and ev.cloud_cover_pct > settings.max_cloud_cover_pct:
         reasons.append(CLOUD_COVER_HIGH)
@@ -172,8 +173,12 @@ def _stars_low(signals, settings, ratio) -> bool:
     if ratio is not None:
         return ratio < settings.min_star_ratio
     # Cold start: no baseline for this Moon state yet, so a count means
-    # nothing on its own. Only ML's own "no stars" verdict, with no count.
-    return signals.star_count is None and signals.stars_visible is False
+    # nothing on its own. With no count at all: ML's own "no stars" verdict,
+    # or the observable-sky gate's (it withholds star detection on an
+    # open-roof frame with no stars in it, so that frame has no STAR_COUNT).
+    if signals.star_count is not None:
+        return False
+    return signals.stars_visible is False or signals.no_star_evidence
 
 
 def is_baseline_frame(signals: FrameSignals, settings: ConditionsSettings,

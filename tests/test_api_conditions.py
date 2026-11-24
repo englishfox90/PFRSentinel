@@ -23,14 +23,15 @@ ORIGINAL_KEYS = {
     "fwhm", "sun_altitude_deg",
 }
 ADDED_KEYS = {"stale_after_s", "frame_ok", "bad_streak", "good_streak", "moon",
-              "baseline_bin", "baseline_status", "events"}
+              "baseline_bin", "baseline_status", "target", "events"}
 NESTED = {
     "roof": {"state", "confidence"},
     "sky": {"condition", "confidence", "stars_visible"},
     "stars": {"count", "baseline", "ratio", "trend", "change_pct", "window_frames"},
-    "fwhm": {"px", "arcsec", "night_median_px", "change_pct"},
-    "moon": {"up", "illumination_pct"},
-    "baseline_status": {"state", "samples", "needed", "bin"},
+    "fwhm": {"px", "arcsec", "night_median_px", "change_pct", "reference_px",
+             "reference_nights"},
+    "moon": {"up", "illumination_pct", "altitude_deg"},
+    "baseline_status": {"state", "samples", "needed", "bin", "nights"},
 }
 ORIGINAL_NESTED = {
     "roof": {"state", "confidence"},
@@ -82,7 +83,6 @@ def get(**kw):
 def published_snapshot():
     from services.imaging_conditions import ImagingConditionsFeed
     from services.imaging_conditions.star_baseline import StarBaseline
-    from services.sky_evidence import EVIDENCE_KEY
     import tempfile
     import os
     store = ConditionsStore()
@@ -91,7 +91,7 @@ def published_snapshot():
                                  sun_alt_fn=lambda c: -30.0,
                                  moon_fn=lambda: {'moon_is_up': False, 'illumination_pct': 1})
     feed.observe({'_ML_RESULTS': {'roof_status': 'Open', 'roof_confidence': 0.9},
-                  EVIDENCE_KEY: {'star_count': 10}}, {}, (100, 100))
+                  'STAR_COUNT': '10'}, {}, (100, 100))
     return store.snapshot()
 
 
@@ -211,3 +211,15 @@ def test_status_carries_the_compact_block():
     assert status["conditions"] == {"imaging_ok": False, "reasons": ["warming_up"],
                                     "changed_at": None, "stale": False}
     assert status["conditions"] == get_conditions_store().compact()
+
+
+def test_target_block_is_documented_and_null_without_a_target():
+    """Additive: the NINA target and its distance from the Moon."""
+    assert ConditionsStore().snapshot()["target"] is None
+    assert published_snapshot()["target"] is None
+    schema = dict(api_conditions.CONDITIONS_FIELDS)["target"]
+    assert schema["nullable"] is True
+    assert set(schema["properties"]) == {"name", "moon_separation_deg", "altitude_deg"}
+    names = {row[0] for row in api_conditions.field_rows()}
+    assert {"target", "target.moon_separation_deg", "target.altitude_deg",
+            "moon.altitude_deg"} <= names

@@ -20,6 +20,8 @@ from the weather service is the fallback for "clear" when the sky model is N/A.
 import re
 from datetime import datetime, timedelta
 
+from .grade_summary import summarize_grades
+
 # A frame captured before local noon belongs to the previous calendar day's
 # night (the run that started the evening before).
 NIGHT_CUTOFF_HOUR = 12
@@ -198,7 +200,9 @@ def summarize_sessions(index, since=None):
 
     Each summary dict has: ``key, start_epoch, end_epoch, frame_count,
     cover_id, min_temp_c, max_temp_c, gaps, max_gap_seconds, band, clear_pct,
-    roof_closed``.
+    roof_closed``, plus the imaging-conditions figures of
+    ``grade_summary.summarize_grades`` (``graded_count, ok_count, ok_pct,
+    top_reason, top_reason_count``).
     """
     rows = index.brief_rows(since=since)  # ascending by captured_at
     groups = {}
@@ -236,6 +240,7 @@ def summarize_sessions(index, since=None):
             "max_stars": max(star_counts) if star_counts else None,
             "best_seeing": seeing_label,
             "best_fwhm": seeing_fwhm,
+            **summarize_grades(grp),
         })
     sessions.sort(key=lambda s: s["start_epoch"], reverse=True)
     return sessions

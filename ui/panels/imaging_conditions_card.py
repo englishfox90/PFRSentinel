@@ -19,8 +19,9 @@ from services.imaging_conditions.presets import (
     CUSTOM, PRESET_KEYS, PRESET_LABELS, PRESET_ORDER, SENSITIVITY_KEY, preset_for,
     preset_values, star_floor_for)
 from ..components.cards import CollapsibleCard, FormRow, SwitchRow
-from ..components.conditions_live_text import FWHM_HELP, STAR_INDEX_HELP
+from ..components.conditions_live_text import FWHM_HELP, STAR_COUNT_HELP
 from ..components.imaging_conditions_text import secondary_text, summarize_conditions
+from ..components.target_moon_text import CLOSE_HINT, target_moon_text
 from ..components.scroll_safe_spinbox import SpinBox
 from ..theme.icons import mdi
 from ..theme.tokens import Colors, Spacing
@@ -95,6 +96,10 @@ class ImagingConditionsCard(CollapsibleCard):
         self.reasons_label.setWordWrap(True)
         self.reasons_label.hide()
         text_col.addWidget(self.reasons_label)
+        self.target_label = CaptionLabel("")
+        self.target_label.setWordWrap(True)
+        self.target_label.hide()
+        text_col.addWidget(self.target_label)
         status_row.addLayout(text_col, 1)
         self.live_button = PushButton(mdi('chart-line'), "Live view")
         self.live_button.setToolTip("Open the conditions panel on Live Monitoring")
@@ -106,7 +111,8 @@ class ImagingConditionsCard(CollapsibleCard):
 
         self.enabled_switch = SwitchRow(
             "Judge imaging conditions",
-            "Off: NINA is always told not to image (reason: disabled)")
+            "Off: NINA gets no verdict (reason: disabled). The plugin's “No verdict "
+            "= bad” setting decides whether a sequence then waits or carries on")
         self.enabled_switch.toggled.connect(self._emit_changed)
         self.add_widget(self.enabled_switch)
 
@@ -143,7 +149,7 @@ class ImagingConditionsCard(CollapsibleCard):
         self.reset_button = PushButton("Reset baseline")
         self.reset_button.clicked.connect(self.reset_baseline_requested.emit)
         self.add_row("Clear-sky baseline", self.reset_button,
-                     "Learned from this camera's own clear frames. Reset after "
+                     "Learned from this camera's own clear nights. Reset after "
                      "changing what the camera sees or its exposure.")
 
         self.load({})
@@ -155,7 +161,7 @@ class ImagingConditionsCard(CollapsibleCard):
         lay.setSpacing(Spacing.input_gap)
 
         self.cloud_spin = _spin(0, 100, " %")
-        self.cloud_spin.setToolTip(STAR_INDEX_HELP)
+        self.cloud_spin.setToolTip(STAR_COUNT_HELP)
         cloud_row = FormRow("Cloud limit", self.cloud_spin,
                             "Pause above this much cloud — read from how many of "
                             "your clear-sky stars are missing")
@@ -284,6 +290,11 @@ class ImagingConditionsCard(CollapsibleCard):
         self.verdict_label.setStyleSheet(f"color: {_TONE_COLORS.get(tone, Colors.text_primary)};")
         _set_optional(self.reasons_label,
                       secondary_text(snapshot, capturing, self.good_spin.value()))
+        target_text, close = target_moon_text(snapshot)
+        _set_optional(self.target_label, target_text)
+        self.target_label.setStyleSheet(
+            f"color: {_TONE_COLORS['warn'] if close else Colors.text_secondary};")
+        self.target_label.setToolTip(CLOSE_HINT if close else "")
 
     def _emit_changed(self, *_):
         self.changed.emit()

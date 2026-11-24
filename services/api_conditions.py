@@ -23,7 +23,7 @@ REASON_CODES = [
                        "window_frames frames."),
     ("fwhm_high", "Star FWHM is more than fwhm_rise_pct % above tonight's median."),
     ("stale", "No frame has been evaluated for longer than stale_after_s."),
-    ("warming_up", "Not enough good frames yet since start-up (or a restart after a gap)."),
+    ("warming_up", "No frame has been judged yet since start-up. Nothing has been measured, so clients should not read it as bad."),
     ("recovering", "Frames are good again; waiting for good_frames in a row."),
     ("disabled", "Imaging conditions are switched off in Sentinel's settings."),
 ]
@@ -71,12 +71,15 @@ CONDITIONS_FIELDS = [
         "stars_visible": dict(_BOOL, description="ML stars-visible verdict."),
     }, "ML sky verdict for the latest frame.")),
     ("stars", _obj({
-        "count": dict(_INT, description="Star index: star-like sources on the sky disc "
-                                         "resampled to a fixed 900 px plane, so it compares "
-                                         "between frames and with the baseline. Not the "
-                                         "full-frame count the FWHM is measured on."),
-        "baseline": dict(_NUM, description="This rig's clear-sky count for the Moon's state; "
-                                           "null until learned."),
+        "count": dict(_INT, description="Stars counted on the sky disc at the frame's own "
+                                         "resolution: the same count as the STAR_COUNT "
+                                         "token, the status strip and the library, and "
+                                         "the stars the FWHM is measured on. Null when "
+                                         "star detection did not run on the frame."),
+        "baseline": dict(_NUM, description="This rig's clear-sky count for the Moon's state: "
+                                           "the 75th percentile of its clear nights' median "
+                                           "counts (tonight included once it has enough "
+                                           "clear frames); null until learned."),
         "ratio": dict(_NUM, description="count / baseline."),
         "trend": dict(_NUM, description="Fractional change vs the median of the recent frames."),
         "change_pct": dict(_NUM, description="Signed % change vs the median of the last "
@@ -94,21 +97,53 @@ CONDITIONS_FIELDS = [
                                          "null without one."),
         "night_median_px": dict(_NUM, description="Median FWHM of tonight's good frames."),
         "change_pct": dict(_NUM, description="Signed % change vs night_median_px."),
+        "reference_px": dict(_NUM, description="This rig's sharp-night FWHM: the 25th "
+                                               "percentile of its clear nights' median "
+                                               "FWHM. Reported only; no rule reads it. "
+                                               "null before the first such night."),
+        "reference_nights": {"type": "integer",
+                             "description": "Clear nights reference_px is taken across."},
     }, "Star sharpness.")),
     ("sun_altitude_deg", dict(_NUM, description="Sun altitude at evaluation; null without a site.")),
     ("moon", _obj({
         "up": dict(_BOOL, description="Moon above the horizon; null without a site."),
         "illumination_pct": dict(_NUM, description="Illuminated fraction, 0-100."),
+        "altitude_deg": dict(_NUM, description="Moon altitude above the horizon, degrees "
+                                               "(negative when it is down); null without "
+                                               "a site."),
     }, "Moon state the baseline bin was chosen from.")),
-    ("baseline_bin", dict(_STR, description="Baseline bin in use (moon_down, moon_up_0_25, ...).")),
+    ("baseline_bin", dict(_STR, description="Baseline bin in use: moon_down, moon_up_0_25, "
+                                            "moon_up_25_50, and for a Moon at least half lit "
+                                            "moon_up_50_75_low / _high and moon_up_75_100_low "
+                                            "/ _high (low = under about 30° altitude; no "
+                                            "suffix when the altitude is unknown), or "
+                                            "moon_unknown without a site.")),
     ("baseline_status", _obj({
         "state": {"type": "string", "enum": ["learning", "ready"]},
-        "samples": {"type": "integer", "description": "Clear frames learned for this bin."},
-        "needed": {"type": "integer", "description": "Clear frames the bin needs to be ready."},
+        "samples": {"type": "integer", "description":
+                    "While learning: tonight's clear frames for this bin. Once ready: "
+                    "every clear frame behind the baseline, over all its nights."},
+        "needed": {"type": "integer", "description":
+                   "Clear frames a night needs to count; the bin is ready with one such night."},
+        "nights": {"type": "integer", "description":
+                   "Clear nights the baseline is taken across (at most 60, oldest out; "
+                   "tonight counts once it has the needed frames)."},
         "bin": dict(_STR, description="Moon bin being learned (same values as baseline_bin)."),
-    }, "The clear-sky baseline is learned on each installation from its own frames; "
+    }, "The clear-sky baseline is learned on each installation from its own clear nights; "
        "until the current Moon bin is ready, stars.baseline and stars.ratio are null "
        "and the star-ratio rule does not fire.")),
+    ("target", dict(_obj({
+        "name": {"type": "string", "description": "The target's name, as NINA sent it."},
+        "moon_separation_deg": {"type": "number", "description":
+                                "Angular distance between the target and the Moon, "
+                                "degrees (0-180). Given whether the Moon is up or "
+                                "down: read moon.up with it."},
+        "altitude_deg": dict(_NUM, description="The target's altitude above the horizon, "
+                                               "degrees; null without a site."),
+    }, "The target NINA's sequencer is imaging (POST /nina/target) and how far it is "
+       "from the Moon; null when NINA has reported none or the report went stale. "
+       "Reported only: no rule reads it and imaging_ok never depends on it."),
+        nullable=True)),
     ("events", {"type": "array", "description":
                 "Recent changes of imaging_ok, newest first (at most 10, from the last "
                 "24 h; kept across a Sentinel restart). Empty while imaging conditions "
