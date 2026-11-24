@@ -142,7 +142,7 @@ Under the frame details, **IMAGING CONDITIONS** shows what [Imaging Conditions](
 | Verdict | **OK** (green) or **Not OK** followed by the main reason, e.g. "Not OK · Cloud cover high" (amber). "Not OK · Warming up" and "Not OK · Recovering" (blue) mean the sky was being checked or imaging was waiting for a run of good frames. The reasons use the same words as the IMAGING tile on Live Monitoring. |
 | Also | Any further reasons for the same frame. |
 | This frame alone | Shown when the frame's own result differed from the verdict: one bad frame does not pause imaging, and one good frame does not resume it. |
-| Stars at N% of clear sky | The frame's star index against the clear-sky baseline learned for your camera, with the Moon state that baseline was read for. Left out while the baseline was still being learned. |
+| Stars at N% of clear sky | The frame's star count against the clear-sky baseline learned for your camera, with the Moon state that baseline was read for. Left out while the baseline was still being learned. |
 
 The grade is stored with the frame when it is captured and never recalculated, so changing the sensitivity later does not change what past frames show. A frame shows "—" when it was not graded: Imaging Conditions was off, the frame was archived in headless mode or by version 3.8.0 or earlier. A frame reprocessed after a settings change keeps the grade of the capture it came from.
 

@@ -4,6 +4,8 @@ load is silent, edits emit once and values() carries the controlled keys
 config block and refreshes the card and the status strip from the store,
 the learning line, and Reset baseline forgets the learned counts (offscreen
 Qt)."""
+import os
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -83,7 +85,7 @@ def test_learning_line():
     snap['baseline_status']['bin'] = 'moon_up_25_50'
     assert baseline_learning_text(snap).endswith("(Moon up, 25–50% lit)")
     text = detail_lines(snap)
-    assert "Star index: 210" in text and "-45%" in text and "Learning your sky" in text
+    assert "Stars: 210" in text and "-45%" in text and "Learning your sky" in text
     assert baseline_learning_text({'baseline_status': {'state': 'ready'}}) == ""
 
 
@@ -119,8 +121,10 @@ def test_controller_saves_refreshes_and_resets(card, tmp_path):
 
     baseline = get_imaging_conditions_feed().baseline
     baseline.add('moon_down', 300)
+    controller.save_learning()          # capture stop: the night in progress is written
+    assert os.path.isfile(baseline.path)
     card.reset_button.click()
-    assert baseline.sample_count('moon_down') == 0
+    assert baseline.sample_count('moon_down') == 0 and not os.path.exists(baseline.path)
 
 
 def test_status_strip_has_an_imaging_tile(qapp):
@@ -149,7 +153,9 @@ def test_change_that_rounds_to_zero_reads_plus_minus_zero():
     snap = _snap(stars={'count': 317, 'change_pct': -0.2},
                  fwhm={'px': 2.4, 'night_median_px': 2.4, 'change_pct': -0.4})
     text = detail_lines(snap)
-    assert "-0%" not in text and "+0%" not in text
+    assert "-0%" not in text and "+0%" not in text and "sharp nights" not in text
+    snap['fwhm'].update(reference_px=2.62, reference_nights=8)
+    assert "; your sharp nights 2.6 px" in detail_lines(snap)
     assert "317, ±0% vs recent frames" in text and "(±0%)" in text
 
 
@@ -191,7 +197,7 @@ def test_idle_until_capture_runs():
     assert secondary_text(warming, capturing=True).startswith("2 good frames")
 
 
-def test_learning_line_hidden_in_daylight_and_without_a_star_index():
+def test_learning_line_hidden_in_daylight_and_without_a_star_count():
     learning = {'state': 'learning', 'samples': 0, 'needed': 30, 'bin': 'moon_down'}
     day = _snap(reasons=['daylight', 'roof_not_open'], baseline_status=learning,
                 stars={'count': None})
@@ -201,10 +207,10 @@ def test_learning_line_hidden_in_daylight_and_without_a_star_index():
     assert baseline_learning_text(_snap(baseline_status=learning)) != ""
 
 
-def test_card_hides_empty_lines_and_explains_the_star_index(card):
+def test_card_hides_empty_lines_and_explains_the_star_count(card):
     card.show_conditions(_snap(imaging_ok=True, cloud_cover_pct=5.0))
     assert card.reasons_label.isHidden() and card.reasons_label.text() == ""
-    assert "Star index" in card.cloud_spin.toolTip()
+    assert "same count as the SEEING tile" in " ".join(card.cloud_spin.toolTip().split())
     card.show_conditions(_snap(reasons=['cloud_cover_high', 'stars_dropping']))
     assert not card.reasons_label.isHidden()
     assert card.reasons_label.text() == "Also: Stars dropping"

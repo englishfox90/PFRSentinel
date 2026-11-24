@@ -29,12 +29,11 @@ MOON_BIN_TEXT = {
     'moon_unknown': "Moon position unknown (no site set)",
 }
 
-STAR_INDEX_TOOLTIP = (
-    "Star index: star-like points counted on the sky disc after it is resampled "
-    "to a fixed 900 px plane, so the figure compares between frames, exposures "
-    "and frame sizes, and against this rig's learned clear-sky index.\n"
-    "It is not the SEEING tile's star count, which is measured on the full "
-    "frame for FWHM and changes with resolution and detection threshold."
+STAR_COUNT_TOOLTIP = (
+    "Stars: the stars counted on the sky disc of the latest frame, compared "
+    "with this rig's learned clear-sky count.\n"
+    "It is the same count as the SEEING tile, the {STAR_COUNT} overlay token "
+    "and the image library."
 )
 
 _HOLDING = ('warming_up', 'recovering')
@@ -153,7 +152,7 @@ def detail_lines(snapshot: dict) -> str:
         lines.append(as_of)
     stars = snapshot.get('stars') or {}
     if stars.get('count') is not None:
-        text = f"Star index: {stars['count']}"
+        text = f"Stars: {stars['count']}"
         if stars.get('baseline') is not None:
             text += f" of a clear-sky {stars['baseline']:.0f}"
         if stars.get('change_pct') is not None:
@@ -165,7 +164,7 @@ def detail_lines(snapshot: dict) -> str:
     cloud = snapshot.get('cloud_cover_pct')
     if cloud is not None:
         source = "estimated from the ML sky class" \
-            if snapshot.get('cloud_cover_source') == 'ml_class' else "from the star index"
+            if snapshot.get('cloud_cover_source') == 'ml_class' else "from the star count"
         lines.append(f"Cloud cover: {cloud:.0f}% ({source})")
     fwhm = snapshot.get('fwhm') or {}
     if fwhm.get('px') is not None:
@@ -176,6 +175,8 @@ def detail_lines(snapshot: dict) -> str:
             text += f", tonight's median {fwhm['night_median_px']:.1f} px"
         if fwhm.get('change_pct') is not None:
             text += f" ({signed_pct(fwhm['change_pct'])})"
+        if fwhm.get('reference_px') is not None:
+            text += f"; your sharp nights {fwhm['reference_px']:.1f} px"
         lines.append(text)
     roof = snapshot.get('roof') or {}
     sky = snapshot.get('sky') or {}
@@ -196,7 +197,7 @@ def baseline_learning_text(snapshot: dict) -> str:
     """"Learning your sky: 12/30 clear frames with the Moon down" while the
     current Moon bin's baseline is not ready. Empty once it is, and empty
     whenever the latest frame could not have taught it anything (sun up, or
-    no star index), where a learning count is only noise."""
+    no star count), where a learning count is only noise."""
     snapshot = snapshot or {}
     status = snapshot.get('baseline_status') or {}
     if status.get('state') != 'learning':

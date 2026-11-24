@@ -1,10 +1,13 @@
 """ImagingConditionsFeed + ConditionsStore — the per-frame feed end to end on
 an injected clock: hysteresis both ways, first good frame OK at a start, stale after a gap
 (and starts over), the local baseline learned per Moon bin (cold start
-explicit, reset on a new camera / frame size / lens), change % fields, FWHM
+explicit, reset on a new camera / frame size / lens), clear nights that
+accumulate (a closed month removes nothing, a restart mid-night keeps
+tonight's frames), the cross-night FWHM reference, change % fields, FWHM
 in arcsec only with a calibration, reprocesses and disabled configs, the
 pipeline hook never raising, and a per-frame bookkeeping budget."""
 import time
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -13,7 +16,6 @@ from services.imaging_conditions.feed import observe_imaging_conditions
 from services.imaging_conditions.plate_scale import ARCSEC_PER_RADIAN, PlateScale
 from services.imaging_conditions.star_baseline import StarBaseline
 from services.observing_window import SAME_CAPTURE_KEY
-from services.sky_evidence import EVIDENCE_KEY
 
 FRAME = (3552, 3552)
 
@@ -40,8 +42,9 @@ class FixedCalibration(PlateScale):
         return self._a1
 
 
-def make_feed(tmp_path, *, sun=-30.0, moon=None, plate=None, clock=None):
+def make_feed(tmp_path, *, sun=-30.0, moon=None, plate=None, clock=None, wall=None):
     clock = clock or Clock()
+    extra = {'wall': wall} if wall is not None else {}
     store = ConditionsStore(clock=clock)
     sun_box = {'alt': sun}
     feed = ImagingConditionsFeed(
@@ -49,16 +52,16 @@ def make_feed(tmp_path, *, sun=-30.0, moon=None, plate=None, clock=None):
         plate_scale=plate or NoCalibration(), sun_alt_fn=lambda c: sun_box['alt'],
         moon_fn=lambda: moon if moon is not None else {'moon_is_up': False,
                                                          'illumination_pct': 2.0},
-        clock=clock)
+        clock=clock, **extra)
     return feed, store, clock, sun_box
 
 
-def frame(count=300, roof='Open', sky='Clear', fwhm='3.0', detections='150', camera='ZWO ASI676MC'):
+def frame(count=300, roof='Open', sky='Clear', fwhm='3.0', camera='ZWO ASI676MC'):
     return {
         '_ML_RESULTS': {'roof_status': roof, 'roof_confidence': 0.95,
                         'sky_condition': sky, 'sky_confidence': 0.9,
                         'stars_visible': count is None or count > 0},
-        EVIDENCE_KEY: {'star_count': count}, 'FWHM': fwhm, 'STAR_COUNT': detections,
+        'FWHM': fwhm, 'STAR_COUNT': 'N/A' if count is None else str(count),
         'CAMERA': camera,
     }
 
@@ -185,7 +188,7 @@ def test_baseline_cold_start_then_ready_per_moon_bin(tmp_path):
     assert snap['stars']['baseline'] is None and snap['stars']['ratio'] is None
     assert snap['cloud_cover_source'] == 'ml_class'
     assert snap['baseline_status'] == {'state': 'learning', 'samples': 4, 'needed': 5,
-                                       'bin': 'moon_down'}
+                                       'bin': 'moon_down', 'nights': 0}
     feed_frames(feed, clock, 1, cfg=cfg, count=300)
     feed_frames(feed, clock, 1, cfg=cfg, count=150, sky='Partly Cloudy')
     snap = store.snapshot()
@@ -198,6 +201,70 @@ def test_baseline_cold_start_then_ready_per_moon_bin(tmp_path):
     snap = store.snapshot()
     assert snap['stars']['baseline'] is None and snap['baseline_bin'] == 'moon_up_75_100'
     assert snap['baseline_status']['state'] == 'learning'
+
+
+class Nights:
+    """A wall clock the test moves from night to night (local evening)."""
+
+    def __init__(self):
+        self.now = datetime(2026, 11, 1, 23, 0).astimezone()
+
+    def __call__(self):
+        return self.now
+
+    def next_night(self, days=1):
+        self.now += timedelta(days=days)
+
+
+def test_clear_nights_accumulate_and_a_closed_month_removes_nothing(tmp_path):
+    wall = Nights()
+    feed, store, clock, _ = make_feed(tmp_path, wall=wall)
+    cfg = {'imaging_conditions': {'baseline_min_samples': 5}}
+    for count in (300, 200, 320):           # the middle night is hazy but "Clear"
+        feed_frames(feed, clock, 5, cfg=cfg, count=count)
+        wall.next_night()
+        clock.t += 86400
+    feed_frames(feed, clock, 3, cfg=cfg, count=280)    # too short to be a night
+    wall.next_night(days=35)                            # a month with the roof closed
+    clock.t += 35 * 86400
+    feed_frames(feed, clock, 1, cfg=cfg, count=155)
+    snap = store.snapshot()
+    assert snap['stars']['baseline'] == 310.0           # 75th percentile of 200, 300, 320
+    assert snap['stars']['ratio'] == 0.5
+    assert snap['baseline_status'] == {'state': 'ready', 'samples': 15, 'needed': 5,
+                                       'bin': 'moon_down', 'nights': 3}
+    assert [n['median'] for n in feed.baseline.nights('moon_down')] == [300, 200, 320]
+
+
+def test_restart_mid_night_keeps_tonights_clear_frames(tmp_path):
+    wall = Nights()
+    cfg = {'imaging_conditions': {'baseline_min_samples': 5}}
+    feed, _, clock, _ = make_feed(tmp_path, wall=wall)
+    feed_frames(feed, clock, 3, cfg=cfg, count=300)
+    assert feed.flush() is True                         # capture stop / shutdown
+    feed, store, clock, _ = make_feed(tmp_path, wall=wall)
+    feed_frames(feed, clock, 2, cfg=cfg, count=300)
+    assert store.snapshot()['baseline_status']['state'] == 'ready'
+    assert feed.baseline.baseline('moon_down', 5) == 300.0
+
+
+def test_fwhm_reference_across_nights_is_reported_and_never_judged(tmp_path):
+    wall = Nights()
+    feed, store, clock, _ = make_feed(tmp_path, wall=wall)
+    cfg = {'imaging_conditions': {'baseline_min_samples': 5}}
+    feed_frames(feed, clock, 5, cfg=cfg, fwhm='2.5')
+    wall.next_night()
+    clock.t += 86400
+    feed_frames(feed, clock, 5, cfg=cfg, fwhm='3.5')
+    wall.next_night()
+    clock.t += 86400
+    feed_frames(feed, clock, 1, cfg=cfg, fwhm='6.0')    # far above the reference
+    snap = store.snapshot()
+    assert snap['fwhm']['reference_px'] == 2.75 and snap['fwhm']['reference_nights'] == 2
+    # Tonight has too few readings for its own median, and the cross-night
+    # reference is information only: the frame is not called soft.
+    assert snap['fwhm']['night_median_px'] is None and snap['fwhm']['change_pct'] is None
+    assert 'fwhm_high' not in snap['reasons'] and snap['frame_ok'] is True
 
 
 def test_cloudy_or_closed_frames_never_teach_the_baseline(tmp_path):
@@ -262,6 +329,7 @@ def test_fwhm_arcsec_only_with_a_calibration(tmp_path):
     feed, store, clock, _ = make_feed(tmp_path)
     feed_frames(feed, clock, 1, fwhm='3.0')
     assert store.snapshot()['fwhm'] == {'px': 3.0, 'arcsec': None, 'night_median_px': None,
+                                        'reference_px': None, 'reference_nights': 0,
                                         'change_pct': None}
     feed, store, clock, _ = make_feed(tmp_path, plate=FixedCalibration(1100.0))
     feed_frames(feed, clock, 1, fwhm='3.0')

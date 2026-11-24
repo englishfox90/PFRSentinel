@@ -11,7 +11,8 @@ on the frame's metadata — ML results, ``sky_evidence``'s star count, the
 
 State that spans frames lives here: the recent star counts the trend is
 taken against, the night's FWHM readings, the frame interval the automatic
-staleness is derived from, the streaks and the learned baseline. The
+staleness is derived from, the streaks and the learned baseline (a store of
+clear nights, ``star_baseline``, which also keeps the FWHM across nights). The
 process-wide feed also keeps that state across an app restart
 (``session_state``), so a restart mid-night carries on where it stopped.
 """
@@ -33,7 +34,7 @@ from .frame_signals import read_frame_signals
 from .plate_scale import PlateScale
 from .session_state import SessionState
 from .settings import auto_stale_after_s, read_settings
-from .star_baseline import StarBaseline, moon_bin
+from .star_baseline import StarBaseline, moon_bin, night_key
 from .verdict_hysteresis import VerdictHysteresis
 
 RECOVERING = 'recovering'
@@ -99,6 +100,7 @@ class ImagingConditionsFeed:
         self._fwhm = deque(maxlen=_FWHM_HISTORY_MAX)
         self._intervals = deque(maxlen=_INTERVALS_MAX)
         self._last_mono: Optional[float] = None
+        self._night: Optional[str] = None
         self._session = session_state
         self._restore_pending = session_state is not None
 
@@ -158,8 +160,14 @@ class ImagingConditionsFeed:
         sun_alt = self._sun_alt_fn(config)
         moon = self._moon_fn() or {}
         bin_name = moon_bin(moon.get('moon_is_up'), moon.get('illumination_pct'))
-        baseline = self._baseline.baseline(bin_name, settings.baseline_min_samples)
-        baseline_status = self._baseline.status(bin_name, settings.baseline_min_samples)
+        night = night_key(now)
+        if self._night is not None and night != self._night:
+            # Capture off through the day sees no daylight frame to clear
+            # these; last night's seeing is not "tonight's median".
+            self._fwhm.clear()
+        self._night = night
+        min_samples = settings.baseline_min_samples
+        baseline = self._baseline.baseline(bin_name, min_samples)
 
         night_fwhm = frame_rules.night_median(self._fwhm)
         ev = frame_rules.evaluate_frame(
@@ -168,8 +176,11 @@ class ImagingConditionsFeed:
         self._remember(signals, ev)
 
         if frame_rules.is_baseline_frame(signals, settings, sun_alt):
-            self._baseline.add(bin_name, signals.star_count)
-            baseline_status = self._baseline.status(bin_name, settings.baseline_min_samples)
+            self._baseline.add(bin_name, signals.star_count, night, min_samples)
+            if ev.fwhm_px is not None:
+                self._baseline.add_fwhm(ev.fwhm_px, night, min_samples)
+        baseline_status = self._baseline.status(bin_name, min_samples, night)
+        fwhm_reference = self._baseline.fwhm_reference(min_samples)
         self._baseline.maybe_save()
 
         was_ok = self._verdict.state()['imaging_ok']
@@ -179,6 +190,9 @@ class ImagingConditionsFeed:
         record = self._record(signals, ev, state, sun_alt, moon, bin_name, baseline,
                               night_fwhm, frame_size, settings)
         record['baseline_status'] = baseline_status
+        # Reported only: fwhm_high is still judged against tonight's median.
+        record['fwhm']['reference_px'] = _round(fwhm_reference[0], 2)
+        record['fwhm']['reference_nights'] = fwhm_reference[1]
         store.publish(record, updated_at=now, stale_after_s=stale_after)
         self.history.record(record, at=now, stale_after_s=gap_limit)
         if self._session is not None:
@@ -284,6 +298,11 @@ class ImagingConditionsFeed:
         else:
             app_logger.info(f"Imaging conditions: NOT OK ({', '.join(reasons) or STALE})")
 
+    def flush(self) -> bool:
+        """Write the learned nights now (capture stop, shutdown), so the
+        night in progress survives whatever comes next."""
+        return self._baseline.save_now()
+
     def reset(self) -> None:
         with self._lock:
             self._verdict.reset()
@@ -310,6 +329,19 @@ def reset_imaging_conditions_feed() -> None:
     global _feed
     with _feed_lock:
         _feed = None
+
+
+def flush_imaging_conditions() -> None:
+    """Save the learned nights at capture stop and shutdown. Never raises,
+    and does nothing when no frame was ever judged."""
+    with _feed_lock:
+        feed = _feed
+    if feed is None:
+        return
+    try:
+        feed.flush()
+    except Exception as e:
+        app_logger.debug(f"Imaging conditions save skipped: {e}")
 
 
 def observe_imaging_conditions(metadata: dict, config, frame_size=None) -> None:
