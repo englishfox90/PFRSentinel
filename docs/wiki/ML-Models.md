@@ -179,12 +179,15 @@ PFR Sentinel can also serve the roof status as an **ASCOM Alpaca SafetyMonitor**
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Alpaca SafetyMonitor** | Off | Serve the roof status on the network as an Alpaca device named **PFR Sentinel Roof**. Underneath, the card shows the address it listens on ("Listening on 127.0.0.1:11111 …") and how to add it in NINA. |
+| **Safe when** | Roof is open | What the device reports as safe. **Roof is open** follows the roof classifier, with the rules below. **Imaging conditions are OK** follows the [Imaging Conditions](Imaging-Conditions) grade instead: safe only while it reads OK (roof open and a sky worth imaging), unsafe while it is paused, recovering, switched off, or has had no recent frame. With this choice cloud makes NINA's safety triggers fire too, so check what your sequence does when the monitor goes unsafe (park, close the dome) before choosing it. Config key `verdict_source`: `roof` or `imaging_conditions`. |
 
 By default it listens on **this computer only**, at `127.0.0.1:11111`. In a client on the same computer, add the server by hand as `127.0.0.1:11111`.
 
 To share it with other machines, for example NINA on a separate PC, set `bind` to `0.0.0.0` (every network interface) or to one of this computer's addresses under `ml_models.alpaca_safety_monitor` in `config.json`. It then also answers Alpaca discovery (UDP port 32227) on that address, so clients on the network can find it on their own. Anyone who can reach that address can read the roof status and connect or disconnect the device, so only share it on a network you trust. The same config block sets the port, discovery and the staleness limit.
 
-It follows the same fail-safe rules as the file:
+> **New in the next release** — **Safe when** is not available in version 3.8.0 or earlier.
+
+With **Roof is open** it follows the same fail-safe rules as the file:
 
 - **Only a confident Open is safe**, at the same 70% confidence, and only after **two consecutive frames** agree. A Closed reading, a low-confidence reading, or a frame where ML is off or failed all count as unsafe.
 - **Starts unsafe.** It reports unsafe when PFR Sentinel starts and whenever it is switched back on, until two new confident Open frames arrive.
