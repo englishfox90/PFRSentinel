@@ -3,22 +3,26 @@ ASCOM Alpaca request handling for one SafetyMonitor device (pure — no sockets)
 
 Implements the Management API and ISafetyMonitorV3 as described at
 https://ascom-standards.org/api. IsSafe is fail-safe: it reads False whenever
-the device is disconnected or the verdict is stale.
+the device is disconnected or the verdict is stale. Which verdict it reports
+(roof or imaging conditions) is ``verdict_source``'s job.
 """
 import itertools
 import json
 import platform
 import threading
 import uuid
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from version import __version__
 
 from .state import SafetyState
+from .verdict_source import IMAGING_CONDITIONS, SafetyVerdict
 
 INTERFACE_VERSION = 3
 DEVICE_NAME = "PFR Sentinel Roof"
 DEVICE_DESCRIPTION = "Roof safety from PFR Sentinel's confirmed ML roof verdict"
+DEVICE_DESCRIPTION_CONDITIONS = ("Imaging conditions from PFR Sentinel: safe while the roof "
+                                 "is open and the sky is good enough to image")
 # Stable across restarts without storing anything: clients key saved profiles on it.
 UNIQUE_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"safetymonitor.pfrsentinel.{platform.node()}"))
 
@@ -28,8 +32,9 @@ Response = Tuple[int, str, bytes]
 
 
 class SafetyMonitorDevice:
-    def __init__(self, state: SafetyState):
+    def __init__(self, state: SafetyState, verdict: Optional[SafetyVerdict] = None):
         self._state = state
+        self.verdict = verdict if verdict is not None else SafetyVerdict(state)
         self._lock = threading.Lock()
         self._connected = False
         self._server_tx = itertools.count(1)
@@ -76,11 +81,11 @@ class SafetyMonitorDevice:
     def _device(self, method, member, params) -> Response:
         if method == 'GET':
             getters = {
-                'issafe': lambda: self.connected and self._state.is_safe(),
+                'issafe': self._is_safe,
                 'connected': lambda: self.connected,
                 'connecting': lambda: False,
                 'name': lambda: DEVICE_NAME,
-                'description': lambda: DEVICE_DESCRIPTION,
+                'description': self._description,
                 'driverinfo': lambda: f"PFR Sentinel {__version__} Alpaca SafetyMonitor",
                 'driverversion': lambda: __version__,
                 'interfaceversion': lambda: INTERFACE_VERSION,
@@ -110,10 +115,19 @@ class SafetyMonitorDevice:
             self._connected = value
         return self._ok(params, None)
 
+    def _is_safe(self) -> bool:
+        return self.connected and self.verdict.is_safe()
+
+    def _description(self) -> str:
+        if self.verdict.source == IMAGING_CONDITIONS:
+            return DEVICE_DESCRIPTION_CONDITIONS
+        return DEVICE_DESCRIPTION
+
     def _device_state(self):
+        safe, changed_at = self.verdict.read()
         return [
-            {"Name": "IsSafe", "Value": self.connected and self._state.is_safe()},
-            {"Name": "TimeStamp", "Value": self._state.changed_at().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]},
+            {"Name": "IsSafe", "Value": self.connected and safe},
+            {"Name": "TimeStamp", "Value": changed_at.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]},
         ]
 
     def _ok(self, params, value) -> Response:

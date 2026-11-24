@@ -30,6 +30,7 @@ class NinaAscomController(QObject):
         control.notify.connect(self._notify)
         safety = panel.safety_card
         safety.alpaca_toggled.connect(self.set_alpaca_safety)
+        safety.alpaca_source_changed.connect(self.set_alpaca_source)
         safety.safety_file_toggled.connect(self.set_safety_file)
         safety.safety_file_path_changed.connect(self.set_safety_file_path)
         for name in ('output_panel', 'processing_panel'):
@@ -95,6 +96,19 @@ class NinaAscomController(QObject):
             return
         ml, block = self._ml_block('alpaca_safety_monitor')
         block['enabled'] = bool(checked)
+        self._save_ml_block(ml, 'alpaca_safety_monitor', block)
+        if self._panel is not None:
+            self._panel.safety_card.show_alpaca_info(block)
+
+    def set_alpaca_source(self, source: str) -> None:
+        if self.config is None:
+            return
+        from services.alpaca_safety import read_source
+        ml, block = self._ml_block('alpaca_safety_monitor')
+        source = read_source({'verdict_source': source})
+        if read_source(block) == source and 'verdict_source' in block:
+            return
+        block['verdict_source'] = source
         self._save_ml_block(ml, 'alpaca_safety_monitor', block)
         if self._panel is not None:
             self._panel.safety_card.show_alpaca_info(block)

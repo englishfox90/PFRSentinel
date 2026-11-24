@@ -11,6 +11,7 @@ from services.ascom_safety_fsm import RoofSafetyFSM, UNSAFE_RESULT
 from services.logger import app_logger
 
 from .state import SafetyState, safety_state, DEFAULT_STALE_AFTER_SECONDS
+from .verdict_source import ROOF, read_source
 
 CONFIG_KEY = 'alpaca_safety_monitor'
 
@@ -19,6 +20,7 @@ class AlpacaSafetyFeed:
     def __init__(self, state: SafetyState = safety_state):
         self._state = state
         self._fsm: Optional[RoofSafetyFSM] = None
+        self._source = ROOF
 
     def update(self, ml_results: Optional[Dict[str, Any]], ml_config: Dict[str, Any]) -> None:
         """ml_results is None when ML produced nothing usable this frame (fed as UNSAFE)."""
@@ -26,6 +28,7 @@ class AlpacaSafetyFeed:
         if not cfg.get('enabled', False):
             self._fsm = None
             return
+        self._source = read_source(cfg)
         try:
             if self._fsm is None:
                 # Frames went unseen while this was off, so a verdict confirmed
@@ -45,6 +48,9 @@ class AlpacaSafetyFeed:
         from services.ascom_safety import is_safe_open
         safe = is_safe_open(ml_results, fsm_config.get('min_confidence', 0.7))
         if self._state.publish(safe):
-            app_logger.info(f"Alpaca SafetyMonitor: now {'SAFE' if safe else 'UNSAFE'} "
+            # Under the imaging-conditions source this roof verdict is not what
+            # clients see, so an INFO line here would misreport the device.
+            log = app_logger.info if self._source == ROOF else app_logger.debug
+            log(f"Alpaca SafetyMonitor: now {'SAFE' if safe else 'UNSAFE'} "
                             f"(roof {ml_results.get('roof_status', 'N/A')})")
         return True

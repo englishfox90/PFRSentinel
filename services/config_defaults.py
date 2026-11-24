@@ -215,6 +215,9 @@ DEFAULT_CONFIG = {
             "discovery": True,  # Answer Alpaca discovery on UDP 32227
             "min_confidence": 0.7,
             "stale_after_seconds": 600,  # No frame for this long reads UNSAFE
+            # What IsSafe reports: "roof" (confirmed roof verdict) or
+            # "imaging_conditions" (roof open AND imaging_ok, its own staleness)
+            "verdict_source": "roof",
         },
     },
     

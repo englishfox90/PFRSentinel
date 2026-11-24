@@ -12,6 +12,7 @@ from .feed import CONFIG_KEY
 from .protocol import SafetyMonitorDevice
 from .server import AlpacaSafetyServer
 from .state import SafetyState, safety_state
+from .verdict_source import IMAGING_CONDITIONS, read_source
 
 DEFAULT_PORT = 11111
 DEFAULT_BIND = '127.0.0.1'
@@ -33,6 +34,10 @@ class AlpacaSafetyService:
         cfg = ml_config.get(CONFIG_KEY, {}) if isinstance(ml_config, dict) else {}
         wanted = (cfg.get('bind', DEFAULT_BIND), int(cfg.get('port', DEFAULT_PORT)),
                   bool(cfg.get('discovery', True)))
+        source = read_source(cfg)
+        if self._device.verdict.set_source(source) and cfg.get('enabled', False):
+            app_logger.info("Alpaca SafetyMonitor: IsSafe now follows "
+                            f"{'imaging conditions' if source == IMAGING_CONDITIONS else 'the roof'}")
         with self._lock:
             if not cfg.get('enabled', False):
                 self._stop_locked()

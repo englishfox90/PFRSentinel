@@ -431,6 +431,10 @@ def test_page_is_in_the_nav_and_the_tile_opens_the_live_panel(qapp, monkeypatch)
         _dispose(qapp, host)
 
 
+def ml_block(config):
+    return config.data['ml_models']['alpaca_safety_monitor']
+
+
 def test_moved_cards_load_and_save_the_same_keys(qapp, monkeypatch):
     import services.posthog_service as ph
     monkeypatch.setattr(ph, 'capture_event', lambda *a, **k: None)
@@ -463,6 +467,14 @@ def test_moved_cards_load_and_save_the_same_keys(qapp, monkeypatch):
         assert ml['ascom_safety_file'] == {'enabled': True, 'file_path': 'D:/roof.txt'}
         assert ml['alpaca_safety_monitor'] == {'enabled': False, 'port': 11112}
         assert ml['enabled'] is True
+
+        assert safety.alpaca_source() == 'roof'
+        assert "two confident Open frames" in safety.alpaca_safety_info.text()
+        safety.alpaca_source_combo.setCurrentIndex(1)
+        assert ml_block(config)['verdict_source'] == 'imaging_conditions'
+        assert "Imaging Conditions reads OK" in safety.alpaca_safety_info.text()
+        page.load_from_config(config)
+        assert safety.alpaca_source() == 'imaging_conditions'
     finally:
         _dispose(qapp, host)
 

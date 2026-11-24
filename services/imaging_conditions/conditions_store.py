@@ -21,7 +21,7 @@ import copy
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from services.config_defaults import DEFAULT_CONFIG
 
@@ -141,6 +141,24 @@ class ConditionsStore:
         payload.update(record)
         payload['events'] = self._events() if enabled else []
         return payload
+
+    def verdict(self) -> Tuple[bool, Optional[datetime]]:
+        """``(imaging_ok, changed_at)`` under the same off / stale rules as
+        ``snapshot()``, without copying the record or reading the history:
+        the Alpaca SafetyMonitor asks on every IsSafe poll."""
+        with self._lock:
+            if not self._enabled:
+                return False, None
+            ok = bool(self._record.get('imaging_ok'))
+            changed_at = self._record.get('changed_at')
+            updated_at = self._updated_at
+            age = None if self._last_frame is None else self._clock() - self._last_frame
+            stale_after = self._stale_after_s
+        if age is not None and age > stale_after:
+            if ok and updated_at is not None:
+                changed_at = updated_at + timedelta(seconds=stale_after)
+            ok = False
+        return ok, changed_at if isinstance(changed_at, datetime) else None
 
     def _events(self) -> list:
         try:
