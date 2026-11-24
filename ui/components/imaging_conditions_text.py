@@ -175,6 +175,8 @@ def detail_lines(snapshot: dict) -> str:
             text += f", tonight's median {fwhm['night_median_px']:.1f} px"
         if fwhm.get('change_pct') is not None:
             text += f" ({signed_pct(fwhm['change_pct'])})"
+        if fwhm.get('reference_px') is not None:
+            text += f"; your sharp nights {fwhm['reference_px']:.1f} px"
         lines.append(text)
     roof = snapshot.get('roof') or {}
     sky = snapshot.get('sky') or {}

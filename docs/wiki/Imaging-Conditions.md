@@ -70,13 +70,19 @@ Every installation sees a different number of stars on a clear night. The lens, 
 
 A frame teaches it only when it is certain the sky is clear: the roof reads Open, the sun is more than 18° below the horizon, the sky classifier reads Clear, and the frame is not just sensor noise. A bright Moon washes out many stars, so the clear-sky count is learned separately for the Moon below the horizon and for each quarter of Moon brightness.
 
-Until enough clear frames have been seen for the current Moon phase (30 by default), the conditions panel says, for example, **Learning your clear sky with the Moon up, 25–50% lit — 12 of 30 clear frames**. While it is learning:
+What it keeps is a history of **clear nights**, not of single frames. Each night with enough clear frames (30 by default) adds one entry per Moon phase: that night's typical star count. Sentinel keeps the newest 60 such nights per Moon phase. Only a newer clear night pushes an old one out, never the calendar, so a month of bad weather or a closed roof loses nothing. A night runs from local noon to the next local noon, like the nights in the image library, so it is never split at midnight.
+
+Your clear-sky figure is taken from the **better** of those nights (the 75th percentile of the nights' counts, not their average). A hazy night that the sky classifier still called Clear therefore barely moves it, and the figure gets steadier as nights add up. Tonight counts too, as soon as it has enough clear frames, so on the very first night the figure is simply tonight's typical count. Once it is ready, the conditions panel shows how many nights it rests on, for example **star count 315 from 12 clear nights**.
+
+The same clear nights also record how sharp the stars were. From them Sentinel works out the star width (FWHM) of your sharper nights, and shows it next to tonight's reading ("your sharp nights 2.6 px"). This figure is for your information only: it never pauses imaging. The **Stars soft** check still compares each frame with the rest of tonight.
+
+Until one night has enough clear frames for the current Moon phase, the conditions panel says, for example, **Learning your clear sky with the Moon up, 25–50% lit — 12 of 30 clear frames**. While it is learning:
 
 - no star-count comparison is made, so a low count alone never pauses imaging
 - the cloud cover is a rough figure taken from the ML sky class, and is marked as such: Clear reads 5 %, Partly Cloudy 60 % and Overcast 95 % (the sky model has only these three classes). So with the Balanced 50 % cloud limit, Partly Cloudy pauses imaging; with Relaxed (70 %) it does not
 - the other checks (roof, sun, sky class, a sudden drop in stars, sharpness) still apply
 
-The learned counts start over by themselves when you change the camera, the frame size or the lens (a new all-sky calibration with a noticeably different scale). Use **Reset baseline** on the card after anything else that changes how many stars the camera sees, such as a new exposure or gain regime, or moving the camera.
+The learned nights start over by themselves when you change the camera, the frame size or the lens (a new all-sky calibration with a noticeably different scale). Use **Reset baseline** on the card after anything else that changes how many stars the camera sees, such as a new exposure or gain regime, or moving the camera.
 
 ## When imaging is paused
 
@@ -137,7 +143,7 @@ The card holds the main settings (the card row for each key is given below). Eve
 | `trend_frames` | `10` | Frames the drop is measured against |
 | `fwhm_rise_pct` | `50` | **Stars softer**: rise in FWHM, in %, against tonight's median |
 | `min_stars_for_fwhm` | `10` | Fewer stars than this: no sharpness reading |
-| `baseline_min_samples` | `30` | Clear frames needed per Moon phase before the clear-sky count is used |
+| `baseline_min_samples` | `30` | Clear frames a night needs, per Moon phase, before it counts towards the clear-sky figure |
 | `stale_after_s` | `0` | Seconds without a frame before the verdict is stale; `0` picks it from the frame interval |
 
 ## Reading it from a script
@@ -148,7 +154,7 @@ The verdict is served at `GET /conditions` on the [web server](Web-Server), with
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/conditions
 ```
 
-The main fields are `imaging_ok` (true or false), `reasons` (a list of codes such as `cloud_cover_high` or `stars_dropping`), `changed_at`, `stale`, `cloud_cover_pct` with `cloud_cover_source` (`star_baseline` or `ml_class`), `stars.change_pct` (signed %, e.g. `-45.0`, over `stars.window_frames` frames), `fwhm.px`, `fwhm.change_pct` and `baseline_status` (`learning` or `ready`, with `samples` and `needed`). `fwhm.arcsec` is filled in only when an [all-sky calibration](All-Sky-Overlay) gives the plate scale. `events` lists the recent pauses and resumes, newest first: `at`, `kind` (`paused` or `resumed`), `reasons` and `duration_s` (null while it still holds). Every field, including the nested ones such as `stars.count`, is described in the `/conditions` fields table at `/docs` on the web server (shown once the control API is on).
+The main fields are `imaging_ok` (true or false), `reasons` (a list of codes such as `cloud_cover_high` or `stars_dropping`), `changed_at`, `stale`, `cloud_cover_pct` with `cloud_cover_source` (`star_baseline` or `ml_class`), `stars.change_pct` (signed %, e.g. `-45.0`, over `stars.window_frames` frames), `fwhm.px`, `fwhm.change_pct` and `baseline_status` (`learning` or `ready`, with `nights`, the clear nights behind the figure, `samples` and `needed`). `fwhm.reference_px` and `fwhm.reference_nights` give the star width of your sharper nights and how many nights it comes from; no check uses them. `fwhm.arcsec` is filled in only when an [all-sky calibration](All-Sky-Overlay) gives the plate scale. `events` lists the recent pauses and resumes, newest first: `at`, `kind` (`paused` or `resumed`), `reasons` and `duration_s` (null while it still holds). Every field, including the nested ones such as `stars.count`, is described in the `/conditions` fields table at `/docs` on the web server (shown once the control API is on).
 
 `/status` carries a short `conditions` block (`imaging_ok`, `reasons`, `changed_at`, `stale`) without a token.
 

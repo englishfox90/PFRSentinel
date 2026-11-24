@@ -28,9 +28,10 @@ NESTED = {
     "roof": {"state", "confidence"},
     "sky": {"condition", "confidence", "stars_visible"},
     "stars": {"count", "baseline", "ratio", "trend", "change_pct", "window_frames"},
-    "fwhm": {"px", "arcsec", "night_median_px", "change_pct"},
+    "fwhm": {"px", "arcsec", "night_median_px", "change_pct", "reference_px",
+             "reference_nights"},
     "moon": {"up", "illumination_pct"},
-    "baseline_status": {"state", "samples", "needed", "bin"},
+    "baseline_status": {"state", "samples", "needed", "bin", "nights"},
 }
 ORIGINAL_NESTED = {
     "roof": {"state", "confidence"},

@@ -190,7 +190,7 @@ def _library_schemas() -> dict:
                                    "'reasons'. Empty when there were none."},
                 "clear_sky_ratio": {
                     "type": "number", "nullable": True,
-                    "description": "Star index / this rig's clear-sky baseline; null "
+                    "description": "Star count / this rig's clear-sky baseline; null "
                                    "while the baseline was still being learned."},
                 "moon_bin": {
                     "type": "string", "nullable": True,
