@@ -33,7 +33,8 @@ STAR_INDEX_HELP = (
     "way on every frame so frames can be compared. Higher is clearer.")
 BASELINE_HELP = (
     "Clear-sky baseline: the star index this camera sees on a clear night, "
-    "learned from its own frames (separately for each Moon phase).")
+    "learned from its own clear nights (separately for each Moon phase). It "
+    "is taken from the better of those nights, so one hazy night barely moves it.")
 FWHM_HELP = (
     "FWHM: how wide a star looks, in pixels. Rising FWHM means softer, "
     "blurrier stars — haze, dew or poor seeing.")
@@ -151,6 +152,9 @@ def learning_progress(snapshot: dict):
     if status.get('state') == 'ready':
         base = (snapshot.get('stars') or {}).get('baseline')
         tail = f": star index {base:.0f}" if isinstance(base, (int, float)) else ""
+        nights = status.get('nights')
+        if tail and isinstance(nights, int) and nights > 0:
+            tail += f" from {nights} clear night{'' if nights == 1 else 's'}"
         return f"Clear-sky baseline learned{moon}{tail}", needed, needed
     return f"Learning your clear sky{moon} — {done} of {needed} clear frames", done, needed
 

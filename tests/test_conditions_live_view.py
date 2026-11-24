@@ -87,6 +87,13 @@ def test_learning_and_measurements():
         "Learning your clear sky with the Moon up, 25–50% lit — 12 of 30 clear frames", 12, 30)
     assert learning_progress(snap())[0] == \
         "Clear-sky baseline learned with the Moon down: star index 315"
+    nights = snap(baseline_status={'state': 'ready', 'samples': 900, 'needed': 30,
+                                   'bin': 'moon_down', 'nights': 12})
+    assert learning_progress(nights) == (
+        "Clear-sky baseline learned with the Moon down: star index 315 from 12 clear nights",
+        30, 30)
+    nights['baseline_status']['nights'] = 1
+    assert learning_progress(nights)[0].endswith("from 1 clear night")
     assert learning_progress({'enabled': True, 'frames_considered': 0}) is None
     assert measurements_line(snap()) == "Stars 131/315 · Cloud 58% · FWHM 2.9 px"
     assert measurements_line({'enabled': True}) == ""

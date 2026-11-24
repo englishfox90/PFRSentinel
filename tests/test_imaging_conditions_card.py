@@ -4,6 +4,8 @@ load is silent, edits emit once and values() carries the controlled keys
 config block and refreshes the card and the status strip from the store,
 the learning line, and Reset baseline forgets the learned counts (offscreen
 Qt)."""
+import os
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -119,8 +121,10 @@ def test_controller_saves_refreshes_and_resets(card, tmp_path):
 
     baseline = get_imaging_conditions_feed().baseline
     baseline.add('moon_down', 300)
+    controller.save_learning()          # capture stop: the night in progress is written
+    assert os.path.isfile(baseline.path)
     card.reset_button.click()
-    assert baseline.sample_count('moon_down') == 0
+    assert baseline.sample_count('moon_down') == 0 and not os.path.exists(baseline.path)
 
 
 def test_status_strip_has_an_imaging_tile(qapp):
@@ -149,7 +153,9 @@ def test_change_that_rounds_to_zero_reads_plus_minus_zero():
     snap = _snap(stars={'count': 317, 'change_pct': -0.2},
                  fwhm={'px': 2.4, 'night_median_px': 2.4, 'change_pct': -0.4})
     text = detail_lines(snap)
-    assert "-0%" not in text and "+0%" not in text
+    assert "-0%" not in text and "+0%" not in text and "sharp nights" not in text
+    snap['fwhm'].update(reference_px=2.62, reference_nights=8)
+    assert "; your sharp nights 2.6 px" in detail_lines(snap)
     assert "317, ±0% vs recent frames" in text and "(±0%)" in text
 
 

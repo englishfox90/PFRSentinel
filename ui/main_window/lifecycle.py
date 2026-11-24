@@ -258,6 +258,9 @@ class _MainWindowLifecycleMixin:
             except Exception:
                 pass
 
+        from services.imaging_conditions import flush_imaging_conditions
+        flush_imaging_conditions()
+
         self.save_config()
 
         app_logger.info("Application closing")

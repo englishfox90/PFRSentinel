@@ -64,6 +64,9 @@ class ImagingConditionsController(QObject):
             signal = getattr(self._main_window, name, None)
             if hasattr(signal, 'connect'):
                 signal.connect(self.refresh)
+        stopped = getattr(self._main_window, 'capture_stopped', None)
+        if hasattr(stopped, 'connect'):
+            stopped.connect(self.save_learning)
         self.refresh()
         self._timer.start()
 
@@ -93,9 +96,15 @@ class ImagingConditionsController(QObject):
         except Exception as e:
             app_logger.debug(f"Imaging conditions live view refresh failed: {e}")
 
+    def save_learning(self) -> None:
+        """Write the learned clear nights now (capture stop, shutdown) so the
+        night in progress is not left to the ten-minute save."""
+        from services.imaging_conditions import flush_imaging_conditions
+        flush_imaging_conditions()
+
     def reset_baseline(self) -> None:
-        """Forget the learned clear-sky star counts; learning starts again
-        from this rig's next clear frames."""
+        """Forget the learned clear nights (star counts and FWHM); learning
+        starts again from this rig's next clear frames."""
         from services.imaging_conditions import get_imaging_conditions_feed
         get_imaging_conditions_feed().baseline.reset()
         app_logger.info("Imaging conditions: clear-sky star baseline reset")
