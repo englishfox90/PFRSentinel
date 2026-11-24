@@ -35,7 +35,7 @@ The status strip at the top of the window has an **IMAGING** tile with the same 
 | Tile reads | Meaning |
 |---|---|
 | **Idle** | Capture is stopped and no frame has been judged yet |
-| **Warming up** | Capture is running, but not enough good frames in a row have been seen yet |
+| **Warming up** | Capture is running, but no frame has been judged yet. NINA is not held back by this |
 | **OK · 12% cloud** | Imaging is OK. The cloud figure is left out when there is none |
 | **Paused · Cloud cover high** (or another reason) | Imaging is not OK; the first reason is named. See [When imaging is paused](#when-imaging-is-paused) |
 | **Recovering** | The sky looks good again, and Sentinel is counting good frames before it says OK |
@@ -91,9 +91,9 @@ A frame counts as **bad** when any of these is true:
 | Stars dropping | The star count fell by more than 40 % (Balanced) against the last 10 frames |
 | Stars soft (FWHM) | Stars are more than 50 % wider (Balanced) than tonight's median. FWHM is how wide a star looks in pixels: haze, dew or poor seeing make it grow |
 
-One bad frame does not pause imaging. With Balanced it takes **3 bad frames in a row** to pause, and **3 good frames in a row** to resume, so a single passing cloud or a single clear gap does not stop and restart a sequence. When PFR Sentinel starts, imaging stays paused ("warming up") until it has seen 3 good frames.
+One bad frame does not pause imaging. With Balanced it takes **3 bad frames in a row** to pause, and **3 good frames in a row** to resume, so a single passing cloud or a single clear gap does not stop and restart a sequence. A start is the exception: when PFR Sentinel starts, the **first good frame** is enough, because nothing has said the sky is bad. If the first frames are bad (roof closed, cloud), the usual 3 good frames in a row are needed. A restart in the middle of a night carries on from where it stopped, as long as the last frame is no older than the stale limit below.
 
-If frames stop arriving, for example because the camera disconnected, the verdict goes **stale** and reads as not OK: the tile shows **Paused · No recent frames**, or **Paused · Capture stopped** if you stopped capture yourself, and the conditions panel says since when no frames have arrived. By default this happens after three frame intervals, and never sooner than 2 minutes. When frames resume, the 3 good frames are needed again.
+If frames stop arriving, for example because the camera disconnected, the verdict goes **stale** and reads as not OK: the tile shows **Paused · No recent frames**, or **Paused · Capture stopped** if you stopped capture yourself, and the conditions panel says since when no frames have arrived. By default this happens after three frame intervals, and never sooner than 2 minutes. When frames resume, it starts over as it does at a start: the first good frame is enough.
 
 ## Sensitivity
 

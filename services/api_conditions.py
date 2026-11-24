@@ -23,7 +23,7 @@ REASON_CODES = [
                        "window_frames frames."),
     ("fwhm_high", "Star FWHM is more than fwhm_rise_pct % above tonight's median."),
     ("stale", "No frame has been evaluated for longer than stale_after_s."),
-    ("warming_up", "Not enough good frames yet since start-up (or a restart after a gap)."),
+    ("warming_up", "No frame has been judged yet since start-up. Nothing has been measured, so clients should not read it as bad."),
     ("recovering", "Frames are good again; waiting for good_frames in a row."),
     ("disabled", "Imaging conditions are switched off in Sentinel's settings."),
 ]

@@ -29,7 +29,7 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                 SentinelConditionReasons.FrameStatic => "the pier camera frame is only noise",
                 SentinelConditionReasons.SkyUnknown => "the sky could not be classified",
                 SentinelConditionReasons.Stale => "Sentinel has not judged a frame recently (capture stalled or stopped)",
-                SentinelConditionReasons.WarmingUp => "Sentinel is still gathering its first good frames",
+                SentinelConditionReasons.WarmingUp => "Sentinel has not judged a frame yet",
                 SentinelConditionReasons.Recovering => "the sky looks good again; Sentinel is waiting for a few good frames in a row",
                 SentinelConditionReasons.Disabled => "imaging conditions are switched off in Sentinel",
                 _ => code.Replace('_', ' '),

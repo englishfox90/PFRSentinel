@@ -1,5 +1,5 @@
 """ImagingConditionsFeed + ConditionsStore — the per-frame feed end to end on
-an injected clock: hysteresis both ways, starts not-OK, stale after a gap
+an injected clock: hysteresis both ways, first good frame OK at a start, stale after a gap
 (and starts over), the local baseline learned per Moon bin (cold start
 explicit, reset on a new camera / frame size / lens), change % fields, FWHM
 in arcsec only with a calibration, reprocesses and disabled configs, the
@@ -72,19 +72,28 @@ def feed_frames(feed, clock, n, *, step=30.0, cfg=CFG, size=FRAME, **kw):
         feed.observe(frame(**kw), cfg, size)
 
 
-def test_starts_not_ok_and_warms_up(tmp_path):
+def test_first_good_frame_is_enough_at_a_start(tmp_path):
     feed, store, clock, _ = make_feed(tmp_path)
     snap = store.snapshot()
     assert snap['imaging_ok'] is False and snap['reasons'] == ['warming_up']
     assert snap['updated_at'] is None and snap['changed_at'] is None
-    feed_frames(feed, clock, 2)
-    snap = store.snapshot()
-    assert snap['imaging_ok'] is False and snap['reasons'] == ['warming_up']
-    assert snap['frame_ok'] is True and snap['good_streak'] == 2
     feed_frames(feed, clock, 1)
     snap = store.snapshot()
     assert snap['imaging_ok'] is True and snap['reasons'] == []
-    assert snap['changed_at'] is not None and snap['frames_considered'] == 3
+    assert snap['changed_at'] is not None and snap['frames_considered'] == 1
+
+
+def test_start_under_a_bad_sky_still_needs_the_full_good_run(tmp_path):
+    feed, store, clock, _ = make_feed(tmp_path)
+    feed_frames(feed, clock, 1, roof='Closed')
+    snap = store.snapshot()
+    assert snap['imaging_ok'] is False and snap['reasons'] == ['roof_not_open']
+    feed_frames(feed, clock, 2)
+    snap = store.snapshot()
+    assert snap['imaging_ok'] is False and snap['reasons'] == ['recovering']
+    assert snap['good_streak'] == 2
+    feed_frames(feed, clock, 1)
+    assert store.snapshot()['imaging_ok'] is True
 
 
 def test_hysteresis_rides_out_bad_frames_then_pauses_then_recovers(tmp_path):
@@ -129,8 +138,8 @@ def test_goes_stale_after_auto_limit_and_starts_over(tmp_path):
                                'changed_at': snap['changed_at'], 'stale': True}
     feed_frames(feed, clock, 1, step=0.0)
     snap = store.snapshot()
-    assert snap['stale'] is False and snap['imaging_ok'] is False
-    assert snap['reasons'] == ['warming_up'] and snap['frames_considered'] == 1
+    assert snap['stale'] is False and snap['imaging_ok'] is True
+    assert snap['reasons'] == [] and snap['frames_considered'] == 1
 
 
 def test_configured_stale_limit(tmp_path):

@@ -153,7 +153,7 @@
                             VerticalAlignment="Center"
                             Content="No verdict = bad"
                             IsChecked="{Binding TreatNoVerdictAsBad}"
-                            ToolTip="When Sentinel is unreachable, rejects the token, is stale, warming up or has conditions switched off: on treats that as bad, off carries on imaging." />
+                            ToolTip="When Sentinel is unreachable, rejects the token, is stale or has conditions switched off: on treats that as bad, off carries on imaging. A Sentinel that has not judged a frame yet never counts as bad." />
                         <CheckBox
                             Margin="0,2,12,2"
                             VerticalAlignment="Center"
@@ -273,7 +273,7 @@
                             VerticalAlignment="Center"
                             Content="No verdict = bad"
                             IsChecked="{Binding TreatNoVerdictAsBad}"
-                            ToolTip="When Sentinel is unreachable, rejects the token, is stale, warming up or has conditions switched off: on treats that as bad, off carries on imaging." />
+                            ToolTip="When Sentinel is unreachable, rejects the token, is stale or has conditions switched off: on treats that as bad, off carries on imaging. A Sentinel that has not judged a frame yet never counts as bad." />
                     </WrapPanel>
                     <TextBlock
                         Margin="0,3,0,0"

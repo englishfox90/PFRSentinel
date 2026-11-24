@@ -84,7 +84,7 @@ def _imaging_conditions_isolated(tmp_path_factory, monkeypatch):
     test that processes a frame feeds the process-wide singleton."""
     from services.imaging_conditions import (
         conditions_history, reset_conditions_store, reset_imaging_conditions_feed,
-        star_baseline)
+        session_state, star_baseline)
     from services.imaging_conditions.nina_checkin import reset_nina_checkins
     holder = []
     events_dir = []
@@ -101,6 +101,9 @@ def _imaging_conditions_isolated(tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(star_baseline, "default_baseline_path", _path)
     monkeypatch.setattr(conditions_history, "default_events_path", _events_path)
+    monkeypatch.setattr(session_state, "default_state_path",
+                        lambda: os.path.join(os.path.dirname(_events_path()),
+                                             "session_state.json"))
     reset_imaging_conditions_feed()
     reset_conditions_store()
     conditions_history.reset_conditions_history()

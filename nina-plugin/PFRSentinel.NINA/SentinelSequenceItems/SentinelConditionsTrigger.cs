@@ -129,8 +129,9 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         }
 
         /// <summary>
-        /// Pause when Sentinel gives no verdict (unreachable, token rejected, stale, warming up,
-        /// switched off). On by default: no answer is not a yes.
+        /// Pause when Sentinel gives no verdict (unreachable, token rejected, stale, switched
+        /// off). On by default: no answer is not a yes. A Sentinel that answers but has not
+        /// judged a frame yet is not this case; the evaluator allows it.
         /// </summary>
         [JsonProperty]
         public bool TreatNoVerdictAsBad {

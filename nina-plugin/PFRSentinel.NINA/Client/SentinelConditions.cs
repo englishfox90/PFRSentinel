@@ -57,8 +57,10 @@ public static class SentinelConditionReasons
     /// Whether a code means "Sentinel has no verdict" rather than "the sky is bad".
     /// </summary>
     /// <remarks>
-    /// These are the states the operator's "treat no verdict as bad" setting governs,
-    /// the same as an unreachable Sentinel: nothing about the sky has been measured.
+    /// Nothing about the sky has been measured. <see cref="Stale"/> and
+    /// <see cref="Disabled"/> are governed by the operator's "treat no verdict as bad"
+    /// setting, the same as an unreachable Sentinel; <see cref="WarmingUp"/> alone is
+    /// allowed by the evaluator, because Sentinel has not yet said anything is wrong.
     /// <see cref="Recovering"/> is deliberately not one of them: the sky has been
     /// measured, and it is Sentinel's own hysteresis still saying "not yet".
     /// </remarks>

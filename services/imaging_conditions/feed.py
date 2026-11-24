@@ -11,7 +11,9 @@ on the frame's metadata — ML results, ``sky_evidence``'s star count, the
 
 State that spans frames lives here: the recent star counts the trend is
 taken against, the night's FWHM readings, the frame interval the automatic
-staleness is derived from, the streaks and the learned baseline.
+staleness is derived from, the streaks and the learned baseline. The
+process-wide feed also keeps that state across an app restart
+(``session_state``), so a restart mid-night carries on where it stopped.
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ from .conditions_history import ConditionsHistory, get_conditions_history
 from .conditions_store import ConditionsStore, STALE, WARMING_UP, get_conditions_store
 from .frame_signals import read_frame_signals
 from .plate_scale import PlateScale
+from .session_state import SessionState
 from .settings import auto_stale_after_s, read_settings
 from .star_baseline import StarBaseline, moon_bin
 from .verdict_hysteresis import VerdictHysteresis
@@ -77,6 +80,7 @@ class ImagingConditionsFeed:
                  baseline: Optional[StarBaseline] = None,
                  plate_scale: Optional[PlateScale] = None,
                  history: Optional[ConditionsHistory] = None,
+                 session_state: Optional[SessionState] = None,
                  sun_alt_fn: Callable = _default_sun_alt,
                  moon_fn: Optional[Callable[[], dict]] = None,
                  clock: Callable[[], float] = time.monotonic,
@@ -95,6 +99,8 @@ class ImagingConditionsFeed:
         self._fwhm = deque(maxlen=_FWHM_HISTORY_MAX)
         self._intervals = deque(maxlen=_INTERVALS_MAX)
         self._last_mono: Optional[float] = None
+        self._session = session_state
+        self._restore_pending = session_state is not None
 
     @property
     def store(self) -> ConditionsStore:
@@ -131,6 +137,8 @@ class ImagingConditionsFeed:
     def _observe_locked(self, metadata, config, settings, frame_size, store):
         now_mono = self._clock()
         now = self._wall()
+        if self._restore_pending:
+            self._restore_locked(now, settings)
         stale_after = self.stale_after_s(settings)
         gap_limit = stale_after
         if self._last_mono is not None:
@@ -173,12 +181,37 @@ class ImagingConditionsFeed:
         record['baseline_status'] = baseline_status
         store.publish(record, updated_at=now, stale_after_s=stale_after)
         self.history.record(record, at=now, stale_after_s=gap_limit)
+        if self._session is not None:
+            self._session.save(at=now, verdict=self._verdict.export(),
+                               counts=self._counts, intervals=self._intervals,
+                               fwhm=[round(v, 2) for v in self._fwhm], force=changed)
         if changed:
             self._log_transition(state['imaging_ok'], ev.reasons)
         elif was_ok and not ev.ok:
             app_logger.debug(f"Imaging conditions: bad frame {state['bad_streak']}/"
                              f"{settings.bad_frames} ({', '.join(ev.reasons)})")
         return record
+
+    def _restore_locked(self, now, settings) -> None:
+        """Adopt the state a previous run saved, if it is younger than the
+        gap after which this run would have started over anyway."""
+        self._restore_pending = False
+        saved = self._session.load(now=now, counts_max=_HISTORY_MAX,
+                                   fwhm_max=_FWHM_HISTORY_MAX,
+                                   intervals_max=_INTERVALS_MAX)
+        if saved is None:
+            return
+        limit = settings.stale_after_s
+        if limit <= 0:
+            intervals = saved['intervals']
+            limit = auto_stale_after_s(statistics.median(intervals) if intervals else None)
+        if saved['age_s'] > limit or not self._verdict.restore(saved['verdict']):
+            return
+        self._counts.extend(saved['counts'])
+        self._fwhm.extend(saved['fwhm'])
+        self._intervals.extend(saved['intervals'])
+        app_logger.info(f"Imaging conditions: carrying on from the state saved "
+                        f"{saved['age_s']:.0f} s ago")
 
     def _check_stamp(self, metadata, frame_size) -> None:
         """Start the baseline over on another camera, frame size or lens."""
@@ -210,7 +243,7 @@ class ImagingConditionsFeed:
         if state['imaging_ok'] or ev.reasons:
             reasons = list(ev.reasons)
         else:
-            reasons = [RECOVERING if state['ever_ok'] else WARMING_UP]
+            reasons = [RECOVERING if state['ever_ok'] or state['bad_seen'] else WARMING_UP]
         arcsec = None
         if ev.fwhm_px is not None and frame_size:
             scale = self._plate_scale.arcsec_per_px(frame_size[0], frame_size[1])
@@ -268,7 +301,7 @@ def get_imaging_conditions_feed() -> ImagingConditionsFeed:
     global _feed
     with _feed_lock:
         if _feed is None:
-            _feed = ImagingConditionsFeed()
+            _feed = ImagingConditionsFeed(session_state=SessionState())
         return _feed
 
 

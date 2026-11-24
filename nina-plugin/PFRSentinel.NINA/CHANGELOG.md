@@ -20,14 +20,16 @@
   still apply. A limit whose measurement is missing is skipped, never treated as
   crossed.
 - **No verdict = bad** (on by default): an unreachable Sentinel, a rejected token,
-  a stale verdict, warming up, conditions switched off or a Sentinel without
+  a stale verdict, conditions switched off or a Sentinel without
   `/conditions` pauses the trigger and ends the loop. The item's status line names
   the reason; NINA validation reports settings problems only, because NINA fails a
   trigger on any validation issue.
 - The verdict is Sentinel's `imaging_ok`, after its own bad/good-frame hysteresis,
   never "reasons is empty": during Sentinel's grace frames a bad latest frame is
   shown as a note while imaging continues. `recovering` (good frames, not enough in
-  a row yet) counts as not OK; `warming_up`, `stale` and `disabled` are no verdict.
+  a row yet) counts as not OK; `stale` and `disabled` are no verdict. `warming_up`
+  (Sentinel has not judged a frame yet) is allowed, with a note, whatever the
+  no-verdict setting: a new installation must not read "bad" for want of frames.
 - One shared, throttled read of `/conditions` serves every item and the panel: at
   most one request in flight, an answer reused for 5 s.
 - Imaging-tab panel: a **Conditions** column with the verdict, reasons in plain

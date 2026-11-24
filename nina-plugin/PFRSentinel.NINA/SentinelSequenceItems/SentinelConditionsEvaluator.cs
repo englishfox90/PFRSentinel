@@ -58,8 +58,8 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
         Bad,
 
         /// <summary>
-        /// Nothing is known: Sentinel unreachable, rejected the request, stale, warming
-        /// up or switched off. The item's "treat no verdict as bad" setting decides.
+        /// Nothing is known: Sentinel unreachable, rejected the request, stale or
+        /// switched off. The item's "treat no verdict as bad" setting decides.
         /// </summary>
         NoVerdict,
     }
@@ -108,7 +108,8 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
     /// Pure, NINA-free and clock-injected, so the whole decision can be unit-tested. Rules:
     /// <list type="number">
     /// <item><description>No reading, a failed read, or one older than <see cref="MaxReadingAge"/> is NoVerdict.</description></item>
-    /// <item><description>Sentinel off, stale, or "not OK" only for warming_up / stale / disabled is NoVerdict.</description></item>
+    /// <item><description>Sentinel off or stale is NoVerdict.</description></item>
+    /// <item><description>Sentinel "not OK" only for warming_up - it has not judged a frame yet, so nothing has said the sky is bad - is OK with a note; the operator's limits still apply.</description></item>
     /// <item><description>Sentinel "not OK" for any measured reason is Bad, <c>recovering</c> included.</description></item>
     /// <item><description>Sentinel "OK" is decided by <c>imaging_ok</c>, never by <c>reasons</c>: during Sentinel's grace frames <c>reasons</c> lists a bad frame's codes while <c>imaging_ok</c> is still true; those become a note.</description></item>
     /// <item><description>Each limit set and crossed adds a Bad reason; a limit whose measurement is null is skipped with a note, never treated as crossed - except Require roof Open, where an Unknown roof is not Open.</description></item>
@@ -150,7 +151,16 @@ namespace PFRSentinel.NINA.SentinelSequenceItems {
                     return NoVerdict(SentinelConditionsText.Reason(SentinelConditionReasons.Stale, c));
                 }
 
-                return new SentinelConditionsVerdict(SentinelConditionsState.NoVerdict, Phrases(c), None);
+                // warming_up alone: Sentinel has not judged a frame yet. Good unless
+                // stated otherwise - a first night must not read "bad" for want of frames.
+                var early = new List<string>();
+                var earlyNotes = new List<string> {
+                    "PFR Sentinel has not judged a frame yet; imaging is allowed until it reports a problem",
+                };
+                ApplyLimits(c, thresholds, early, earlyNotes);
+                return new SentinelConditionsVerdict(
+                    early.Count > 0 ? SentinelConditionsState.Bad : SentinelConditionsState.Ok,
+                    early, earlyNotes);
             }
 
             var reasons = new List<string>();
