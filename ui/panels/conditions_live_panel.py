@@ -101,9 +101,11 @@ class ConditionsLivePanel(StaticCard):
             expanded_tip="Hide the conditions panel (the verdict stays on the rail)",
             collapsed_tip="Show the imaging conditions panel")
         # The title sits where the preview card's does: card_padding from the
-        # card's top and left edges.
+        # card's top and left edges. Right and bottom mirror left and top so
+        # the focus ring and hover fill wrap the content evenly.
         self.header.layout().setContentsMargins(
-            Spacing.card_padding, Spacing.card_padding - 2, Spacing.md, Spacing.sm)
+            Spacing.card_padding, Spacing.card_padding - 2,
+            Spacing.card_padding, Spacing.card_padding - 2)
         self.header.clicked.connect(self.collapse_requested.emit)
         self.collapse_button = self.header
         body_lay.addWidget(self.header)
