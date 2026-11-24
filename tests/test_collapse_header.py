@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QEnterEvent
+from PySide6.QtGui import QEnterEvent, QFocusEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
@@ -115,6 +115,9 @@ def test_header_shows_hover_and_focus_feedback(qapp):
     header.setDown(False)
     assert pressed != rest
     header.setFocus(Qt.TabFocusReason)
+    if not header._keyboard_focus:
+        # A window that never became active (macOS offscreen) gets no focus event.
+        QApplication.sendEvent(header, QFocusEvent(QEvent.FocusIn, Qt.TabFocusReason))
     qapp.processEvents()
     ring = pixel(4)
     assert ring != rest

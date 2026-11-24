@@ -127,7 +127,7 @@ class CollapseHeader(QAbstractButton):
             painter.setPen(Qt.NoPen)
             painter.setBrush(fill)
             painter.drawRoundedRect(rect, Layout.radius_sm, Layout.radius_sm)
-        if self.hasFocus() and self._keyboard_focus:
+        if self._keyboard_focus:
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(QColor(Colors.border_focus), 1.5))
             painter.drawRoundedRect(rect, Layout.radius_sm, Layout.radius_sm)
