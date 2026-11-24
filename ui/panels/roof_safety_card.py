@@ -116,7 +116,7 @@ class RoofSafetyCard(CollapsibleCard):
                   "SafetyMonitor in NINA. ")
         if read_source(alpaca_config) == IMAGING_CONDITIONS:
             self.alpaca_safety_info.setText(
-                prefix + "Safe only while Imaging Conditions reads OK (below); unsafe "
+                prefix + "Safe only while Imaging Conditions reads OK (card above); unsafe "
                 "when it pauses, is switched off, or has had no recent frame.")
             return
         minutes = int(alpaca_config.get('stale_after_seconds', 600) or 600) // 60
